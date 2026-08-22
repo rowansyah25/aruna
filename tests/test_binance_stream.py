@@ -22,6 +22,7 @@ import pytest
 from aruna.data.crypto.stream import (
     PING_INTERVAL_SEC,
     PING_TIMEOUT_SEC,
+    RECONNECT_MAX_SEC,
     RECONNECT_MIN_SEC,
     SILENT_TIMEOUT_SEC,
     BinanceSpotStream,
@@ -232,6 +233,47 @@ class TestPutusDanSambungUlang:
             RECONNECT_MIN_SEC * 2,
             RECONNECT_MIN_SEC * 4,
         ], sleeps
+        await stream.stop()
+
+    async def test_pustaka_hilang_bukan_gangguan_jaringan(
+        self, monkeypatch
+    ) -> None:
+        """**Bug VPS, 2026-08-23.** `websockets` tidak dideklarasikan di
+        `pyproject.toml`; ia hanya hadir di mesin pengembang sebagai dependensi
+        transitif `yfinance`. Instalasi bersih menghasilkan
+        `ModuleNotFoundError`, yang tertangkap `except Exception` dan tercatat
+        sebagai `stream.disconnected` tiap belasan detik.
+
+        Bentuk kegagalannya persis seperti ISP yang memblokir Binance - dan itu
+        memang pernah terjadi di mesin ini, jadi diagnosis salahnya sangat
+        mungkin. Modul yang hilang tidak pulih dengan menunggu.
+        """
+        from aruna.data.crypto import stream as modul
+
+        dicatat: list[tuple[str, dict]] = []
+        monkeypatch.setattr(
+            modul.log, "error", lambda nama, **kw: dicatat.append((nama, kw))
+        )
+        monkeypatch.setattr(
+            modul.log, "warning", lambda nama, **kw: dicatat.append((nama, kw))
+        )
+
+        connector = _Connector([
+            ModuleNotFoundError("No module named 'websockets'"),
+            _Socket([book()], hang=True),
+        ])
+        sleeps: list[float] = []
+        stream = _stream(connector, sleeps)
+        await stream.start()
+        await _settle()
+
+        nama = [n for n, _ in dicatat]
+        assert "stream.dependensi_hilang" in nama
+        assert "stream.disconnected" not in nama
+        # Langsung ke mundur maksimum: menghajar tiap beberapa detik untuk
+        # sesuatu yang tidak akan berubah sampai ada yang memasangnya cuma
+        # membanjiri log yang seharusnya dibaca.
+        assert sleeps[0] == RECONNECT_MAX_SEC, sleeps
         await stream.stop()
 
     async def test_gagal_menyambung_tidak_mematikan_loop(self) -> None:

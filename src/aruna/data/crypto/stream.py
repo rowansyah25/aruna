@@ -286,6 +286,28 @@ class BinanceSpotStream:
                 delay = RECONNECT_MIN_SEC
             except asyncio.CancelledError:
                 raise
+            except ModuleNotFoundError as exc:
+                # **Bukan gangguan jaringan, dan menunggu tidak menyembuhkannya.**
+                # Terjadi di VPS 2026-08-23: `websockets` tidak dideklarasikan
+                # di `pyproject.toml` dan hanya hadir di mesin pengembang sebagai
+                # dependensi transitif `yfinance`. Tertangkap `except Exception`
+                # di bawah, gejalanya menjadi `stream.disconnected` tiap belasan
+                # detik - terbaca persis seperti ISP yang memblokir Binance,
+                # yang memang pernah terjadi di sini.
+                #
+                # Umpan tanpa penjaga tetap tidak boleh mati, jadi ia tidak
+                # dilempar. Yang berubah: levelnya ERROR, namanya menyebut
+                # sebabnya, dan mundurnya langsung ke maksimum alih-alih
+                # menghajar setiap beberapa detik untuk sesuatu yang tidak akan
+                # berubah sampai ada yang memasangnya.
+                self._last_error = f"{type(exc).__name__}: {exc}"[:200]
+                log.error(
+                    "stream.dependensi_hilang",
+                    source=SOURCE,
+                    error=self._last_error,
+                    perbaikan="pip install -e . (websockets ada di dependencies)",
+                )
+                delay = RECONNECT_MAX_SEC
             except Exception as exc:  # noqa: BLE001 - an unattended feed must not die
                 self._last_error = f"{type(exc).__name__}: {exc}"[:200]
                 log.warning("stream.disconnected", source=SOURCE, error=self._last_error)
