@@ -223,6 +223,31 @@ class TestPenilaianBelakangan:
         assert hasil.value in db.sql[0][1]
 
     @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("bendera", "tersimpan"), [(True, 1), (False, 0), (None, None)]
+    )
+    async def test_syarat_batal_ikut_tersimpan(self, bendera, tersimpan) -> None:
+        """**Bug produksi, 2026-08-23.** Bagian 16.19 menuntut skenario yang
+        salah SESUDAH memperingatkan lewat invalidasinya dinilai terpisah dari
+        yang salah tanpa peringatan. `Putusan` sudah membawa bendera itu; yang
+        hilang adalah tempat menyimpannya, jadi `catat_hasil` menuliskan `hasil`
+        lalu membuangnya. 928 baris SALAH tersimpan tanpa satu pun bisa
+        dipisahkan.
+
+        `None` disimpan apa adanya - "tidak bisa diperiksa" bukan "tidak
+        terpicu", dan memaksanya jadi 0 mengubahnya menjadi "lulus
+        pemeriksaan".
+        """
+        db = _DbPalsu()
+        await ScenarioRepository(db).catat_hasil(
+            "s-1", HasilSkenario.SALAH, pada=NOW, diinvalidasi=bendera
+        )
+        sql, args = db.sql[0]
+
+        assert "diinvalidasi" in sql
+        assert tersimpan in args
+
+    @pytest.mark.asyncio
     async def test_hanya_menimpa_yang_masih_null(self) -> None:
         """Penilaian yang menimpa penilaian lama membuat akurasi berubah tanpa
         ada yang tahu baris mana yang berpindah."""

@@ -189,7 +189,12 @@ class ScenarioRepository:
         return baris
 
     async def catat_hasil(
-        self, scenario_id: str, hasil: HasilSkenario, *, pada: Any
+        self,
+        scenario_id: str,
+        hasil: HasilSkenario,
+        *,
+        pada: Any,
+        diinvalidasi: bool | None = None,
     ) -> bool:
         """Isi hasil evaluasi satu skenario.
 
@@ -197,14 +202,25 @@ class ScenarioRepository:
         menuliskannya akan mengeluarkan baris itu dari :meth:`belum_dinilai`
         selamanya - skenario yang belum bisa dinilai berubah menjadi skenario
         yang tidak akan pernah dinilai.
+
+        ``diinvalidasi`` **wajib ikut**, dan bukan pelengkap. Bagian 16.19
+        menuntut skenario yang salah SESUDAH memperingatkan lewat invalidasinya
+        dinilai terpisah dari yang salah tanpa peringatan. Sebelum kolomnya ada,
+        bendera itu dihitung `Putusan` lalu dibuang di sini - jadi 928 baris
+        SALAH tersimpan tanpa satu pun bisa dipisahkan.
+
+        ``None`` disimpan apa adanya: ia berarti syarat batalnya tidak bisa
+        diperiksa dari jejak harga, bukan berarti tidak terpicu.
         """
         if hasil is HasilSkenario.BELUM:
             return False
 
         n = await self._db.execute(
-            "UPDATE scenario_evidence SET hasil = %s, dinilai_pada = %s "
+            "UPDATE scenario_evidence "
+            "SET hasil = %s, diinvalidasi = %s, dinilai_pada = %s "
             "WHERE scenario_id = %s AND hasil IS NULL",
             hasil.value,
+            None if diinvalidasi is None else int(diinvalidasi),
             to_mysql_datetime(pada),
             scenario_id,
         )
@@ -250,6 +266,33 @@ class ScenarioRepository:
             "    FROM scenario_evidence WHERE hasil IS NOT NULL "
             "  ) r GROUP BY versi_simulasi, asset, dibuat_pada "
             ") s GROUP BY versi_simulasi"
+        )
+
+    async def ringkas_peringatan(self) -> list[dict[str, Any]]:
+        """Dari yang SALAH, berapa yang sempat memperingatkan (bagian 16.19).
+
+        **Ini pertanyaan yang berbeda dari akurasi, dan sengaja dijawab
+        terpisah.** Skenario yang salah SESUDAH syarat batalnya terpicu adalah
+        mesin yang bekerja: ia menyebutkan syarat batalnya, syarat itu terjadi,
+        dan pembacanya sudah diperingatkan. Skenario yang salah tanpa satu pun
+        syarat batalnya terpicu adalah mesin yang meleset SEKALIGUS invalidasi
+        yang tidak berguna.
+
+        Menjumlahkan keduanya menjadi satu angka "salah" menghasilkan ukuran
+        yang MEMBAIK ketika skenario berhenti menyebutkan syarat batalnya.
+
+        ``tak_terperiksa`` berdiri sendiri di penyebutnya: baris yang keluarganya
+        tidak bisa diperiksa dari jejak harga - dan baris lama, yang dinilai oleh
+        kode yang memang belum memeriksanya sama sekali.
+        """
+        return await self._db.fetch(
+            "SELECT versi_simulasi, "
+            "  COUNT(*) AS salah, "
+            "  SUM(diinvalidasi = 1) AS memperingatkan, "
+            "  SUM(diinvalidasi = 0) AS diam, "
+            "  SUM(diinvalidasi IS NULL) AS tak_terperiksa "
+            "FROM scenario_evidence WHERE hasil = 'SALAH' "
+            "GROUP BY versi_simulasi"
         )
 
     async def ringkas_akurasi(

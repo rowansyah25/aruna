@@ -157,18 +157,42 @@ class _Repo:
         self.baris = baris or []
         self.gagal_tulis = gagal_tulis
         self.dicatat: list[tuple[str, HasilSkenario]] = []
+        #: Bendera syarat-batal per skenario, terpisah dari `dicatat` supaya
+        #: test lama tetap membaca bentuk yang sama.
+        self.batal: list[bool | None] = []
         self.diminta = 0
+        self.diringkas = 0
+        self.peringatan_diminta = 0
+        self.ringkasan: list[dict] = []
+        self.peringatan: list[dict] = []
 
     async def belum_dinilai(self, *, sampai, limit):
         self.diminta += 1
         self.sampai = sampai
         return list(self.baris)
 
-    async def catat_hasil(self, scenario_id, hasil, *, pada):
+    async def catat_hasil(self, scenario_id, hasil, *, pada, diinvalidasi=None):
+        # Tanda tangannya HARUS sama dengan `ScenarioRepository.catat_hasil`.
+        # Double yang bidangnya berbeda dari objek asli membuat suite hijau di
+        # atas bug produksi - dan `diinvalidasi` yang hilang di sini akan
+        # menyembunyikan persis sambungan yang sedang diuji.
         if self.gagal_tulis:
             raise RuntimeError("database jatuh")
         self.dicatat.append((scenario_id, hasil))
+        self.batal.append(diinvalidasi)
         return True
+
+    # Kedua metode di bawah ADA di `ScenarioRepository`, dan tanpanya jalur
+    # pelaporan menabrak AttributeError yang ditelan `log.exception` - hijau di
+    # test, diam di produksi. Double yang bidangnya kurang dari objek aslinya
+    # tidak menguji apa pun tentang jalur yang memakainya.
+    async def ringkas_per_simulasi(self):
+        self.diringkas += 1
+        return list(self.ringkasan)
+
+    async def ringkas_peringatan(self):
+        self.peringatan_diminta += 1
+        return list(self.peringatan)
 
 
 class _Universe:
@@ -240,6 +264,72 @@ class TestSapuanMenulisHasil:
 
         assert hasil["dinilai"] == 1
         assert repo.dicatat == [("s-1", HasilSkenario.BENAR)]
+
+    async def test_syarat_batal_sampai_ke_repositori(self) -> None:
+        """**Sambungan yang paling sering putus di repo ini.** Bagian 16.19
+        menuntut dua kegagalan dinilai terpisah, dan sebelum 2026-08-23
+        `nilai_dari_pasar` menuliskan `diinvalidasi=False` di keenam jalurnya
+        sementara `catat_hasil` tidak menerimanya sama sekali. Jadi pembedaannya
+        benar di `evaluasi.py`, benar di skema, dan tidak pernah bertemu.
+
+        Jejaknya menembus naik lalu jatuh dan BERTAHAN di bawah garis lahir -
+        persis syarat batal `Bullish Continuation`.
+        """
+        repo = _Repo([_baris("Bullish Continuation")])
+        await _penilai(repo, [0.8, -0.4, -0.8, -1.2]).nilai(now=NOW)
+
+        assert repo.dicatat == [("s-1", HasilSkenario.SALAH)]
+        assert repo.batal == [True]
+
+    async def test_peringatan_dilaporkan_bukan_berhenti_di_basis_data(
+        self,
+    ) -> None:
+        """Bagian 16.19 menutup dengan "Gunakan untuk evaluasi", dan angka yang
+        tidak sampai ke siapa pun tidak dipakai siapa pun. `ringkas_akurasi`
+        sudah ada sejak awal dan tidak pernah punya satu pun pemanggil - cacat
+        yang persis sama."""
+        repo = _Repo([_baris("Bullish Continuation")])
+        repo.peringatan = [{
+            "versi_simulasi": "internal-2",
+            "salah": 10,
+            "memperingatkan": 6,
+            "diam": 2,
+            "tak_terperiksa": 2,
+        }]
+        await _penilai(repo, [0.8, -0.4, -0.8, -1.2]).nilai(now=NOW)
+
+        assert repo.peringatan_diminta == 1
+
+    async def test_semua_tak_terperiksa_tidak_membagi_nol(self) -> None:
+        """**Bug produksi, 2026-08-23, satu menit sesudah kolomnya dipasang.**
+        Seluruh 928 baris SALAH yang sudah ada dinilai oleh kode yang belum
+        memeriksa syarat batalnya, jadi semuanya NULL dan yang bisa diperiksa
+        berjumlah nol. `ZeroDivisionError` menjatuhkan seluruh sapuan penilaian.
+
+        Penyebut nol di sini bukan kesalahan pemanggil - ia keadaan yang sah
+        yang berarti "belum ada yang bisa diperiksa".
+        """
+        repo = _Repo([_baris("Bullish Continuation")])
+        repo.peringatan = [{
+            "versi_simulasi": "internal-2",
+            "salah": 928,
+            "memperingatkan": 0,
+            "diam": 0,
+            "tak_terperiksa": 928,
+        }]
+
+        hasil = await _penilai(repo, [0.8, -0.4, -0.8, -1.2]).nilai(now=NOW)
+
+        assert hasil["gagal"] == 0
+        assert repo.peringatan_diminta == 1
+
+    async def test_yang_tak_bisa_diperiksa_tersimpan_sebagai_none(self) -> None:
+        """`News-Driven Reversal` batal kalau "berita terbantah" - dan itu tidak
+        ada di jejak harga. `None`, bukan `False`."""
+        repo = _Repo([_baris("News-Driven Reversal")])
+        await _penilai(repo, [0.5, 1.0, 1.5, 2.0]).nilai(now=NOW)
+
+        assert repo.batal == [None]
 
     async def test_skenario_salah_juga_dicatat(self) -> None:
         """Yang salah **harus** tercatat. Menilai hanya yang benar menghasilkan

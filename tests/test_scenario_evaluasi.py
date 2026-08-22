@@ -20,9 +20,11 @@ import pytest
 from aruna.scenario.evaluasi import (
     MINIMUM_DINILAI,
     Putusan,
+    nilai_dari_pasar,
     nilai_satu,
     ringkas,
 )
+from aruna.scenario.kerumunan import AMBANG_ARAH, invalidasi_terpicu
 from aruna.scenario.models import HasilSkenario, Invalidasi, Skenario
 
 NOW = datetime(2026, 8, 22, tzinfo=UTC)
@@ -58,6 +60,121 @@ def _putusan(hasil: HasilSkenario, *, diinvalidasi=False, n=1) -> tuple[Putusan,
         )
         for i in range(n)
     )
+
+
+def _dengan_nama(nama: str) -> Skenario:
+    from dataclasses import replace
+
+    return replace(_skenario(), nama=nama)
+
+
+class TestInvalidasiDiperiksaDariJejak:
+    """**Bug produksi, 2026-08-23.** `nilai_dari_pasar` - satu-satunya penilai
+    yang dipanggil produksi - menuliskan ``diinvalidasi=False`` di keenam
+    jalurnya. Jadi `Putusan.gagal_jujur` selalu False dan `Akurasi.diinvalidasi`
+    selalu nol, sementara bagian 16.19 menuntut dua kegagalan itu dinilai
+    terpisah.
+
+    Pembedaannya hidup di `nilai_satu()`, yang menerima syarat terpicu sebagai
+    parameter - teruji, tapi bukan yang dipanggil produksi. Bentuk cacat yang
+    sama seperti sebelumnya, cuma lebih halus: fungsinya DIPANGGIL, masukan
+    pembedanya yang tidak pernah diberikan.
+    """
+
+    def test_kembali_di_bawah_garis_lahir_membatalkan_bullish(self) -> None:
+        """"harga kembali di bawah area tembusan dan bertahan satu bar penuh"."""
+        assert invalidasi_terpicu("Bullish Continuation", (0.8, -0.1, -0.2, 0.9))
+
+    def test_menyentuh_sekali_belum_membatalkan(self) -> None:
+        """Kalimatnya berbunyi "bertahan satu bar penuh", bukan "menyentuh".
+        Tanpa lantai ini, tiap lintasan yang sekali menyeberang nol terhitung
+        memperingatkan - dan angkanya berhenti membedakan apa pun."""
+        assert not invalidasi_terpicu("Bullish Continuation", (0.8, -0.1, 0.9, 1.2))
+
+    def test_bertahan_di_atas_membatalkan_bearish(self) -> None:
+        assert invalidasi_terpicu("Bearish Reversal", (-0.8, 0.1, 0.2, -0.9))
+
+    def test_sideways_dibatalkan_rentang_yang_melebar(self) -> None:
+        assert invalidasi_terpicu("Sideways", (0.0, 1.5, -1.5, 0.0))
+
+    def test_sideways_yang_benar_benar_sepi_tidak_dibatalkan(self) -> None:
+        assert not invalidasi_terpicu("Sideways", (0.0, 0.05, -0.05, 0.0))
+
+    def test_berita_tidak_bisa_diperiksa_dari_jejak(self) -> None:
+        """``None``, bukan ``False``. "berita terbantah atau kehilangan
+        dominansi" tidak ada di jejak harga, dan memulangkan False untuknya
+        berarti melaporkan pemeriksaan yang tidak pernah dilakukan."""
+        assert invalidasi_terpicu("News-Driven Reversal", (0.1, 0.2, 0.3)) is None
+
+    def test_jejak_kosong_tak_terperiksa(self) -> None:
+        assert invalidasi_terpicu("Bullish Continuation", ()) is None
+
+    def test_ambangnya_dipinjam_bukan_dibuat_baru(self) -> None:
+        """Syarat batal yang memakai garis berbeda dari garis yang
+        mendefinisikan keluarganya menjawab pertanyaan yang lain. `False
+        Breakout` batal ketika harga bertahan DI LUAR RENTANG - dan "di luar
+        rentang" harus berarti `AMBANG_ARAH`, sama seperti di
+        `klasifikasi_jejak`."""
+        tepat_di_bawah = (AMBANG_ARAH - 0.01,) * 6
+        tepat_di_atas = (AMBANG_ARAH + 0.01,) * 6
+
+        assert not invalidasi_terpicu("False Breakout", tepat_di_bawah)
+        assert invalidasi_terpicu("False Breakout", tepat_di_atas)
+
+    def test_putusan_produksi_membawa_hasilnya(self) -> None:
+        """Sambungannya: `nilai_dari_pasar` harus benar-benar memanggil
+        pemeriksanya, bukan menuliskan konstanta."""
+        p = nilai_dari_pasar(
+            _dengan_nama("Bullish Continuation"),
+            jejak=(0.8, -0.4, -0.5, -0.9, -1.2),
+        )
+
+        assert p.hasil is HasilSkenario.SALAH
+        assert p.diinvalidasi is True
+        assert p.gagal_jujur
+
+    def test_salah_tanpa_peringatan_dibedakan(self) -> None:
+        """Ujung yang sebenarnya dijaga. Skenario ini salah DAN syarat batalnya
+        tidak pernah terpicu - mesinnya meleset sekaligus invalidasinya tidak
+        berguna. Itu kegagalan yang berbeda dari yang di atas.
+
+        Kasusnya sempit dengan sendirinya, dan itu kabar baik: harga menembus
+        naik lalu luruh persis ke garis lahir. Pasar mendarat di `False
+        Breakout`, arahnya tidak lagi naik sehingga bukan SEBAGIAN, tapi ia
+        tidak pernah BERTAHAN di bawah garis - cuma menyentuhnya sekali di
+        ujung.
+        """
+        p = nilai_dari_pasar(
+            _dengan_nama("Bullish Continuation"), jejak=(0.8, 0.5, 0.3, 0.0)
+        )
+
+        assert p.hasil is HasilSkenario.SALAH
+        assert p.diinvalidasi is False
+        assert not p.gagal_jujur
+
+    def test_tak_terperiksa_tidak_terhitung_jujur(self) -> None:
+        """``None`` bukan lulus pemeriksaan."""
+        p = Putusan(
+            scenario_id="s-1",
+            hasil=HasilSkenario.SALAH,
+            diinvalidasi=None,
+            alasan="uji",
+        )
+
+        assert not p.gagal_jujur
+
+    def test_ringkas_memisahkan_tak_terperiksa(self) -> None:
+        """Penyebut yang memuat skenario yang tidak diperiksa membuat "berapa
+        persen yang memperingatkan" terlihat kecil karena alasan yang salah."""
+        a = ringkas(
+            _putusan(HasilSkenario.SALAH, diinvalidasi=True, n=3)
+            + _putusan(HasilSkenario.SALAH, diinvalidasi=False, n=5)
+            + _putusan(HasilSkenario.SALAH, diinvalidasi=None, n=2)
+        )
+
+        assert a.diinvalidasi == 3
+        assert a.tak_terperiksa == 2
+        assert a.salah == 10
 
 
 class TestTigaPutusan:

@@ -515,6 +515,40 @@ class TestNolDicatat:
         assert hasil.dipertimbangkan == 2
         assert hasil.menyala == 0
 
+    @pytest.mark.parametrize(
+        ("hasil_pindai", "diharap"),
+        [
+            (("BTCUSDT", "ETHUSDT", "SOLUSDT"), 1),
+            (("BTCUSDT", "ETHUSDT"), None),
+        ],
+    )
+    async def test_arah_kohort_ikut_dicatat(
+        self, monkeypatch, hasil_pindai, diharap
+    ) -> None:
+        """Prinsip yang sama, diterapkan pada `KONFLIK_LINTAS_PASAR`.
+
+        Terukur 2026-08-23: pemicu itu nol dari 3.048 baris tersimpan, dan tanpa
+        angka ini "pasarnya tidak pernah berkonflik" tidak bisa dibedakan dari
+        "sambungannya putus". Yang pertama normal, yang kedua bug, dan keduanya
+        terlihat sama dari luar.
+
+        Yang diuji **bidangnya dioper**, bukan bahwa suatu string muncul di teks
+        log - format log berubah tanpa memberi tahu siapa pun.
+        """
+        from aruna.upkeep import skenario as modul
+
+        dicatat: list[dict] = []
+        monkeypatch.setattr(
+            modul.log, "info", lambda nama, **kw: dicatat.append(kw)
+        )
+
+        await PenyimulasiSkenario().jalankan(
+            [_tembusan(s, severity=1.2) for s in hasil_pindai], now=NOW
+        )
+
+        assert dicatat
+        assert dicatat[-1]["arah_kohort"] == diharap
+
 
 class TestStatsMembedakanNolDariMati:
     """Kelas terpisah karena keduanya sinkron: `@pytest.mark.asyncio` pada

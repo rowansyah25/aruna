@@ -68,7 +68,12 @@ class Putusan:
     #: ``True`` kalau syarat invalidasinya benar-benar terjadi. Dibedakan dari
     #: ``hasil`` karena keduanya menjawab pertanyaan yang berbeda: yang ini
     #: "apakah skenarionya jujur", yang itu "apakah ia benar".
-    diinvalidasi: bool
+    #:
+    #: ``None`` berarti **tidak bisa diperiksa**, bukan "tidak terpicu". Syarat
+    #: batal yang berbunyi "berita terbantah" tidak bisa dijawab jejak harga,
+    #: dan memulangkan ``False`` untuknya akan mengarang pengukuran - lihat
+    #: :func:`~aruna.scenario.kerumunan.invalidasi_terpicu`.
+    diinvalidasi: bool | None
     alasan: str
 
     @property
@@ -78,8 +83,11 @@ class Putusan:
         Ini bukan penghalusan. Skenario yang salah dan memperingatkan, dan
         skenario yang salah tanpa peringatan, menuntut tindakan berbeda: yang
         pertama mesinnya bekerja, yang kedua mesinnya meleset.
+
+        ``None`` tidak dihitung jujur. Yang tidak diperiksa tidak boleh dibaca
+        sebagai yang lulus pemeriksaan.
         """
-        return self.diinvalidasi and self.hasil is HasilSkenario.SALAH
+        return self.diinvalidasi is True and self.hasil is HasilSkenario.SALAH
 
 
 @dataclass(frozen=True, slots=True)
@@ -92,6 +100,12 @@ class Akurasi:
     sebagian: int
     #: Berapa yang salah **setelah** memperingatkan lewat invalidasinya.
     diinvalidasi: int
+    #: Berapa yang syarat batalnya tidak bisa diperiksa dari jejak harga.
+    #:
+    #: Dilaporkan berdampingan, bukan dilipat ke :attr:`diinvalidasi`: penyebut
+    #: yang memuat skenario yang tidak diperiksa membuat "berapa persen yang
+    #: memperingatkan" terlihat kecil karena alasan yang salah.
+    tak_terperiksa: int = 0
     versi: str = "UNKNOWN"
 
     @property
@@ -131,6 +145,7 @@ class Akurasi:
             "salah": self.salah,
             "sebagian": self.sebagian,
             "diinvalidasi": self.diinvalidasi,
+            "tak_terperiksa": self.tak_terperiksa,
             "cukup_sampel": self.cukup_sampel,
             "minimum": MINIMUM_DINILAI,
             "akurasi": self.akurasi,
@@ -263,7 +278,7 @@ def nilai_dari_pasar(
       mengklaim arah; sisanya mengklaim bentuk, dan bentuk terjadi atau tidak.
     * **SALAH** - selain itu.
     """
-    from aruna.scenario.kerumunan import klasifikasi_jejak
+    from aruna.scenario.kerumunan import invalidasi_terpicu, klasifikasi_jejak
 
     if not horizon_selesai:
         return Putusan(
@@ -284,11 +299,17 @@ def nilai_dari_pasar(
     nyata = klasifikasi_jejak(jejak)
     akhir = jejak[-1]
 
+    # Diperiksa untuk SETIAP putusan, bukan cuma yang SALAH. Skenario yang
+    # benar sementara syarat batalnya juga terpicu adalah skenario yang
+    # invalidasinya terlalu longgar - dan itu hanya terlihat kalau angkanya ada
+    # pada yang BENAR juga.
+    batal = invalidasi_terpicu(skenario.nama, jejak)
+
     if nyata == skenario.nama:
         return Putusan(
             scenario_id=skenario.scenario_id,
             hasil=HasilSkenario.BENAR,
-            diinvalidasi=False,
+            diinvalidasi=batal,
             alasan=f"pasar mendarat di {nyata}",
         )
 
@@ -297,15 +318,22 @@ def nilai_dari_pasar(
         return Putusan(
             scenario_id=skenario.scenario_id,
             hasil=HasilSkenario.SEBAGIAN,
-            diinvalidasi=False,
+            diinvalidasi=batal,
             alasan=f"arahnya benar tapi bentuknya {nyata}, bukan {skenario.nama}",
         )
 
+    peringatan = (
+        "syarat batalnya terpicu"
+        if batal
+        else "tanpa satu pun syarat batalnya terpicu"
+        if batal is False
+        else "syarat batalnya tidak bisa diperiksa dari jejak"
+    )
     return Putusan(
         scenario_id=skenario.scenario_id,
         hasil=HasilSkenario.SALAH,
-        diinvalidasi=False,
-        alasan=f"pasar mendarat di {nyata}, bukan {skenario.nama}",
+        diinvalidasi=batal,
+        alasan=f"pasar mendarat di {nyata}, bukan {skenario.nama}; {peringatan}",
     )
 
 
@@ -323,6 +351,7 @@ def ringkas(putusan: tuple[Putusan, ...], *, versi: str = "UNKNOWN") -> Akurasi:
         benar=sum(1 for p in final if p.hasil is HasilSkenario.BENAR),
         salah=sum(1 for p in final if p.hasil is HasilSkenario.SALAH),
         sebagian=sum(1 for p in final if p.hasil is HasilSkenario.SEBAGIAN),
-        diinvalidasi=sum(1 for p in final if p.diinvalidasi),
+        diinvalidasi=sum(1 for p in final if p.diinvalidasi is True),
+        tak_terperiksa=sum(1 for p in final if p.diinvalidasi is None),
         versi=versi,
     )

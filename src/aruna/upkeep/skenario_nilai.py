@@ -117,7 +117,10 @@ class PenilaiSkenario:
 
             try:
                 ditulis = await self._repo.catat_hasil(
-                    r["scenario_id"], putusan.hasil, pada=now
+                    r["scenario_id"],
+                    putusan.hasil,
+                    pada=now,
+                    diinvalidasi=putusan.diinvalidasi,
                 )
             except Exception:
                 log.exception("skenario.tulis_gagal", scenario_id=r["scenario_id"])
@@ -172,6 +175,39 @@ class PenilaiSkenario:
                 teratas=_bagian(r["teratas"], n, cukup),
                 minimum=MINIMUM_DINILAI,
                 cukup_sampel=cukup,
+            )
+
+        await self._laporkan_peringatan()
+
+    async def _laporkan_peringatan(self) -> None:
+        """Dari yang SALAH, berapa yang sempat memperingatkan (bagian 16.19).
+
+        Dilaporkan **terpisah** dari akurasi, bukan dilipat ke dalamnya. Satu
+        angka yang menjumlahkan "salah dan memperingatkan" dengan "salah dan
+        diam" akan membaik ketika skenario berhenti menyebutkan syarat batalnya
+        - persis arah yang salah.
+        """
+        try:
+            baris = await self._repo.ringkas_peringatan()
+        except Exception:
+            log.exception("skenario.peringatan_gagal")
+            return
+
+        for r in baris:
+            salah = int(r["salah"] or 0)
+            if not salah:
+                continue
+            diperiksa = salah - int(r["tak_terperiksa"] or 0)
+            log.info(
+                "upkeep.skenario_peringatan",
+                versi=r["versi_simulasi"],
+                salah=salah,
+                # Salah, TAPI syarat batalnya terpicu: mesinnya bekerja.
+                memperingatkan=_bagian(r["memperingatkan"], diperiksa, True),
+                # Salah TANPA peringatan: meleset, dan invalidasinya sia-sia.
+                diam=_bagian(r["diam"], diperiksa, True),
+                # Baris lama, dinilai kode yang belum memeriksanya sama sekali.
+                tak_terperiksa=int(r["tak_terperiksa"] or 0),
             )
 
 
@@ -267,8 +303,17 @@ def _bagian(nilai: Any, total: int, cukup: bool) -> str:
 
     Pecahannya selalu ditulis supaya "7/17" tidak pernah terbaca sebagai "41%"
     oleh mata yang buru-buru.
+
+    **Penyebut nol adalah keadaan yang sah di sini, bukan kesalahan pemanggil.**
+    Terjadi di produksi 2026-08-23, satu menit sesudah kolom `diinvalidasi`
+    dipasang: seluruh 928 baris SALAH yang sudah ada dinilai oleh kode yang
+    belum memeriksanya, jadi semuanya NULL dan yang bisa diperiksa berjumlah
+    nol. Dijaga di sini, bukan di pemanggilnya - penjaga yang menempel pada satu
+    pemanggil membiarkan pemanggil berikutnya menulis ulang bug yang sama.
     """
     n = int(nilai or 0)
+    if total <= 0:
+        return f"{n}/0 (belum ada)"
     if not cukup:
         return f"{n}/{total} (ditahan)"
     return f"{n}/{total} = {n / total:.1%}"

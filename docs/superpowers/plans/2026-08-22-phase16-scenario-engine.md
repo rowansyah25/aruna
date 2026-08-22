@@ -321,24 +321,149 @@ MERAH.
 
 **Files:** buat `src/aruna/scenario/evaluasi.py`, `tests/test_scenario_evaluasi.py`
 
-- [ ] Bandingkan skenario dengan hasil pasar → `BENAR` / `SALAH` / `SEBAGIAN`
-- [ ] Skenario yang **invalidasinya terpicu** dinilai terpisah dari yang
+- [x] Bandingkan skenario dengan hasil pasar → `BENAR` / `SALAH` / `SEBAGIAN`
+- [x] Skenario yang **invalidasinya terpicu** dinilai terpisah dari yang
       arahnya salah — keduanya kegagalan yang berbeda
-- [ ] Ambang sampel sebelum ada angka yang dilaporkan; satu kegagalan simulasi
+- [x] Ambang sampel sebelum ada angka yang dilaporkan; satu kegagalan simulasi
       **tidak** mengubah apa pun (§16.19)
 
 **Cabut-uji:** buang ambang sampel → MERAH.
+
+### Butir kedua sempat lulus di atas konstanta (2026-08-23)
+
+Pembedaannya ada di `evaluasi.py` sejak awal — `Putusan.diinvalidasi`,
+`Putusan.gagal_jujur`, `Akurasi.diinvalidasi` — lengkap dengan testnya. Tapi
+`nilai_dari_pasar`, **satu-satunya penilai yang dipanggil produksi**, menuliskan
+`diinvalidasi=False` di keenam jalurnya, dan `catat_hasil` tidak punya kolom
+untuk menyimpannya. Jadi `gagal_jujur` selalu `False`, `Akurasi.diinvalidasi`
+selalu nol, dan 928 baris `SALAH` tersimpan tanpa satu pun bisa dipisahkan.
+
+Yang membedakannya dari tiga kejadian sebelumnya di proyek ini: fungsinya
+**dipanggil**. Yang tidak pernah diberikan adalah masukan pembedanya. Test
+unitnya hijau karena ia menguji `nilai_satu()` — jalur yang menerima syarat
+terpicu sebagai parameter, dan yang produksi tidak pakai.
+
+Ditutup dengan urutan yang benar — hitung dulu, baru simpan:
+
+1. `kerumunan.invalidasi_terpicu(nama, jejak)`, memakai `AMBANG_ARAH` dan
+   `AMBANG_SEPI` yang sama dengan `klasifikasi_jejak`. Syarat batal yang
+   memakai garis berbeda dari garis yang mendefinisikan keluarganya menjawab
+   pertanyaan yang lain.
+2. `bool | None` — `None` berarti **tidak bisa diperiksa** (syarat yang
+   menyebut volume, order book, atau berita), bukan "tidak terpicu".
+3. Migrasi 0040, `diinvalidasi TINYINT NULL`; baris lama tetap NULL karena
+   mereka memang dinilai kode yang tidak pernah memeriksanya.
+4. `ringkas_peringatan()` + `upkeep.skenario_peringatan`, dilaporkan
+   **terpisah** dari akurasi: satu angka yang menjumlahkan "salah dan
+   memperingatkan" dengan "salah dan diam" akan MEMBAIK ketika skenario
+   berhenti menyebutkan syarat batalnya.
+
+Terukur sebelum deploy: keenam keluarga yang benar-benar muncul di 2.899 baris
+tersimpan **semuanya bisa diperiksa** — `News-Driven Reversal` dan
+`High Volatility` tidak pernah dihasilkan, jadi kolomnya akan terisi penuh.
+
+**Cabut-uji:** `diinvalidasi = False` di `nilai_dari_pasar` → MERAH ·
+`diinvalidasi=None` di penilai → MERAH · `_laporkan_peringatan` dicabut → MERAH.
 
 ---
 
 ## Task 12: Ruff, suite penuh, restart, ukur
 
-- [ ] `ruff check src tests`
-- [ ] Suite penuh, sendirian
-- [ ] `aruna migrate`, lalu restart, verifikasi lewat **StartTime**
-- [ ] Ukur: berapa pemicu menyala, berapa simulasi jalan, berapa skenario
+- [x] `ruff check src tests`
+- [x] Suite penuh, sendirian
+- [x] `aruna migrate` (0037–0040), lalu restart, verifikasi lewat **StartTime**
+- [x] Ukur: berapa pemicu menyala, berapa simulasi jalan, berapa skenario
       tersimpan, ukuran basis data, `level=error` harus 0
-- [ ] Laporkan apa adanya, termasuk kalau pemicunya tidak pernah menyala
+- [x] Laporkan apa adanya, termasuk kalau pemicunya tidak pernah menyala
+
+### Terukur 2026-08-23 01:20
+
+**Skenario tersimpan: 3.048 baris**, seluruhnya `INTERNAL`. `internal-2` 2.559,
+`internal-1` 489 (mesin lama, berhenti 2026-08-21 21:37).
+
+**Penilaian diri (§16.19).** 1.480 dinilai: SALAH 68,0%, BENAR 20,0%,
+SEBAGIAN 12,0%.
+
+Angka 68% itu **tidak boleh dibaca sendirian**, dan itu justru gunanya kolom
+`diinvalidasi` yang baru:
+
+| versi | salah | memperingatkan | tak terperiksa |
+|---|---|---|---|
+| internal-2 | 680 | **40/51 (78%)** | 629 |
+| internal-1 | 326 | belum ada | 326 |
+
+Dari skenario salah yang syarat batalnya bisa diperiksa, 78% **memperingatkan
+lebih dulu** - mesin menyebutkan syarat batalnya dan syarat itu terjadi. Itu
+simulasi yang bekerja, bukan yang meleset. Sampelnya masih 51; 629 sisanya NULL
+karena dinilai kode yang belum memeriksanya sama sekali.
+
+### internal-2 melewati ambang sampel — dan pembobotannya di bawah acak
+
+Terukur 2026-08-23 01:43, saat `simulasi` melewati `MINIMUM_DINILAI`=200 dan
+angkanya dilepas untuk pertama kali:
+
+| versi | simulasi | skenario/simulasi | cakupan | teratas | acak |
+|---|---|---|---|---|---|
+| internal-1 | 163 | 3,00 | 112/163 (ditahan) | **0/163** | 33,3% |
+| internal-2 | 222 | 4,82 | **202/222 = 91,0%** | **27/222 = 12,2%** | 20,7% |
+
+**Cakupan 91% dan teratas 12,2% menunjuk ke satu kesimpulan: kosakata mesinnya
+benar, urutannya yang salah.** Keluarga yang benar-benar terjadi ADA di antara
+skenario yang dihasilkan pada 202 dari 222 simulasi - mesinnya tahu
+kemungkinannya. Tapi skenario berbobot tertinggi hanya benar 27 kali, sementara
+menebak acak di antara 4,82 skenario akan benar sekitar 46 kali.
+
+Selisihnya bukan derau: simpangan bakunya sekitar 6,1, jadi 27 berada kira-kira
+**3,1 simpangan baku DI BAWAH** tebakan acak. Pembobotannya tidak sekadar tidak
+membantu - ia sistematis menaruh keluarga yang benar di peringkat bawah.
+
+Ini **produk pertama bagian 16.19**, dan persis gunanya ia ada. Rencana ini
+menyatakan sejak awal bahwa bobot tidak terkalibrasi (§16.6) dan yang dinilai
+cuma urutannya - sekarang urutannya sudah dinilai. Memperbaiki pembobotannya
+adalah pekerjaan berikutnya, bukan bagian dari Phase 16.
+
+**Pemicu: 8 dari 13 pernah menyala.**
+
+```
+PERUBAHAN_REGIME         999    BREAKOUT_BESAR          921
+SELISIH_PENDAPAT_TAJAM   861    EFEK_ORDE_DUA           795
+VOLATILITAS_ABNORMAL     473    KETIDAKPASTIAN_TINGGI   357
+VOLUME_EKSTREM           343    ANOMALI_OPEN_INTEREST     5
+```
+
+`ANOMALI_OPEN_INTEREST` menyala sesudah `futures_metrics` punya siklus kedua -
+anomali OI adalah PERUBAHAN, dan perubahan butuh dua titik.
+
+Yang belum pernah menyala, dan sebabnya masing-masing berbeda:
+
+* `BERITA_BESAR`, `BREAKDOWN_BESAR`, `ANOMALI_FUNDING` - tersambung, kondisinya
+  belum terjadi.
+* `LONJAKAN_LIKUIDASI` - buntu, dan diuji sebagai mati.
+* `KONFLIK_LINTAS_PASAR` - tersambung 2026-08-22 dan masih nol. **Sebabnya
+  belum bisa dibedakan**, jadi `arah_kohort` ditambahkan ke log tiap siklus:
+  selalu `None` berarti lantainya yang salah; berarah tapi pemicunya diam
+  berarti memang tidak ada aset yang melawan.
+
+**Selektivitas.** Diadu terkendali atas 660 titik aset-bar yang identik:
+aturan lama 21,8% (4,4 dari 20 per bar), aturan baru 15,9% (3,2) - **27% lebih
+sedikit**, konsisten di kedelapan jam. Perbandingan sebelum/sesudah restart
+(10,2 → 5,1 dari 20) **tidak dipakai**: garis dasarnya jatuh di jam paling
+bergolak dalam data dan pembandingnya di periode tenang.
+
+**Basis data: 415 MB.** `market_snapshots` 146,8 MB (35%, 420.550 baris) masih
+yang terbesar - tabel yang sama yang jadi pelajaran Phase 15.1.
+`scenario_evidence` tidak masuk delapan besar.
+
+**`level=error` bukan nol, dan itu dicatat.** Dua sebab, keduanya di luar
+kendali fase skenario:
+
+* `daily.silence_failed` - tiap malam 00:00 WIB, query laporan harian melewati
+  `max_statement_time`. Berulang 21 dan 22 Agustus. Ditandai sebagai tugas
+  terpisah.
+* `upkeep.skenario_nilai_failed` - `ZeroDivisionError`, satu menit sesudah
+  kolom `diinvalidasi` dipasang: seluruh 928 baris SALAH yang ada NULL, jadi
+  penyebut "yang bisa diperiksa" nol. Diperbaiki di `_bagian`, bukan di
+  pemanggilnya.
 
 ---
 

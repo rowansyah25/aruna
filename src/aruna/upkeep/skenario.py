@@ -258,6 +258,17 @@ class PenyimulasiSkenario:
             sudah_disimulasikan=keluar.sudah_disimulasikan,
             ditunda=keluar.ditunda,
             disimpan=keluar.disimpan,
+            # Prinsip yang sama, diterapkan pada `KONFLIK_LINTAS_PASAR`.
+            # Terukur 2026-08-23: pemicu itu nol dari 3.048 baris, dan tanpa
+            # angka ini "pasarnya tidak pernah berkonflik" tidak bisa dibedakan
+            # dari "sambungannya putus". Keduanya terlihat sama dari luar, dan
+            # yang pertama normal sementara yang kedua bug.
+            #
+            # `None` berarti kohortnya tidak punya arah - kurang dari
+            # `MINIMUM_KOHORT` aset berarah, atau seri. Kalau angka ini SELALU
+            # None, yang perlu diperiksa lantainya; kalau ia berarah dan
+            # pemicunya tetap diam, tidak ada aset yang melawan.
+            arah_kohort=kohort,
         )
         return keluar
 

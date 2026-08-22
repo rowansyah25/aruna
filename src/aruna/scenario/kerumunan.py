@@ -23,6 +23,7 @@ kalimat. Alasannya di docstring modul itu.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import pairwise
 
 from aruna.scenario.kohort import (
     AMBANG_LIKUIDASI,
@@ -41,6 +42,7 @@ __all__ = [
     "RONDE",
     "Lintasan",
     "guncangan_dari",
+    "invalidasi_terpicu",
     "jalankan",
     "klasifikasi",
     "klasifikasi_jejak",
@@ -380,6 +382,96 @@ def klasifikasi_jejak(jejak: tuple[float, ...], *, kaskade: bool = False) -> str
     # tenang untuk disebut sepi. Disebut apa adanya alih-alih dipaksa ke salah
     # satu tetangganya.
     return "Sideways"
+
+
+#: Berapa titik berturut-turut yang berarti "bertahan satu bar penuh".
+#:
+#: Dua. Satu titik di bawah garis lahir adalah sentuhan; dua berturut-turut
+#: adalah harga yang tinggal di sana - dan kalimat invalidasinya memang berbunyi
+#: "bertahan satu bar penuh", bukan "menyentuh".
+_BERTAHAN = 2
+
+#: Berapa bar di luar rentang sebelum `False Breakout` terbantah.
+#:
+#: Empat, karena kalimatnya berbunyi "lebih dari tiga bar".
+_DI_LUAR_LEBIH_DARI = 4
+
+
+def _beruntun(jejak: tuple[float, ...], uji, berapa: int) -> bool:
+    """Apakah ada ``berapa`` titik berturut-turut yang lolos ``uji``."""
+    berjalan = 0
+    for x in jejak:
+        berjalan = berjalan + 1 if uji(x) else 0
+        if berjalan >= berapa:
+            return True
+    return False
+
+
+def invalidasi_terpicu(nama: str, jejak: tuple[float, ...]) -> bool | None:
+    """Apakah syarat batal skenario ``nama`` benar-benar terjadi.
+
+    **Ini yang membuat bagian 16.19 punya dua kegagalan, bukan satu.** Skenario
+    yang salah SESUDAH memperingatkan lewat invalidasinya adalah mesin yang
+    bekerja: ia menyebutkan syarat batalnya, syarat itu terjadi, dan pembacanya
+    sudah diperingatkan. Skenario yang salah TANPA satu pun syarat batalnya
+    terpicu adalah mesin yang meleset dan invalidasinya tidak berguna. Menyatukan
+    keduanya menghasilkan satu angka yang membaik ketika skenario berhenti
+    menyebutkan syarat batalnya.
+
+    **``None`` berarti tidak bisa diperiksa dari jejak, bukan "tidak terpicu".**
+    Tiap keluarga menyebut dua syarat di :func:`~aruna.scenario.mesin._invalidasi`
+    dan hanya yang pertama yang berbicara tentang harga; yang kedua menyebut
+    volume, kedalaman order book, atau berita - data yang tidak ada di jejak.
+    Dua keluarga bahkan syarat pertamanya pun bukan tentang bentuk harga.
+    Memulangkan ``False`` untuk keduanya akan mengarang pengukuran.
+
+    Ambangnya dipinjam dari :func:`klasifikasi_jejak`, bukan dibuat baru: syarat
+    batal yang memakai garis berbeda dari garis yang mendefinisikan keluarganya
+    akan menjawab pertanyaan yang lain.
+    """
+    if not jejak:
+        return None
+
+    akhir = jejak[-1]
+    puncak, palung = max(jejak), min(jejak)
+
+    match nama:
+        # "harga kembali di bawah area tembusan dan bertahan satu bar penuh"
+        case "Bullish Continuation":
+            return _beruntun(jejak, lambda x: x <= 0, _BERTAHAN)
+        # "harga bertahan di atas area tembusan"
+        case "Bearish Reversal":
+            return _beruntun(jejak, lambda x: x >= 0, _BERTAHAN)
+        # "harga bertahan di luar rentang lebih dari tiga bar"
+        case "False Breakout":
+            return _beruntun(
+                jejak, lambda x: abs(x) >= AMBANG_ARAH, _DI_LUAR_LEBIH_DARI
+            )
+        # "rentang bar menyempit kembali ke ATR normal"
+        case "High Volatility":
+            langkah = tuple(abs(b - a) for a, b in pairwise(jejak))
+            return bool(langkah) and _beruntun(
+                langkah, lambda x: x <= AMBANG_SEPI, _BERTAHAN
+            )
+        # "rentang melebar melewati batas atas atau bawahnya"
+        case "Sideways":
+            return (puncak - palung) > AMBANG_SEPI
+        # "harga berbalik sebelum menyentuh kelompok likuidasi berikutnya"
+        case "Liquidation Cascade":
+            return palung <= -AMBANG_ARAH and akhir >= palung + AMBANG_ARAH
+        # "harga pada periode berikutnya tetap searah reaksi pertama" - efek
+        # orde-dua justru TIDAK terjadi kalau arahnya tidak berubah.
+        case "Second-Order Effect":
+            awal = jejak[0]
+            return (
+                abs(awal) > 0
+                and abs(akhir) >= AMBANG_ARAH
+                and (akhir > 0) == (awal > 0)
+            )
+
+    # "News-Driven Reversal" jatuh ke sini: syarat batalnya berbunyi "berita
+    # terbantah atau kehilangan dominansi", dan jejak harga tidak memuatnya.
+    return None
 
 
 def simulasikan_kerumunan(
