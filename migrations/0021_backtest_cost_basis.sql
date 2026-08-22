@@ -1,0 +1,172 @@
+-- =====================================================================
+-- ARUNA AI - riwayat backtest era-IDR dibuang, dan penanda rezim dipasang
+--
+-- Migrasi 0020 membersihkan `correlations` dengan alasan yang ditulis
+-- terang di dalamnya: tabel itu menyimpan simbol sebagai string TANPA
+-- foreign key, jadi barisnya selamat dari penghapusan aset dan akan
+-- bercampur dengan baris USDT di setiap pembacaan yang cuma memfilter
+-- market_code='CRYPTO'.
+--
+-- Alasan yang SAMA PERSIS berlaku untuk `backtest_runs` - juga tanpa FK ke
+-- assets, juga dibaca per market_code - tetapi tabel itu tidak pernah
+-- disentuh. File ini menutup celah yang tertinggal.
+--
+-- MIGRASI INI MENGHAPUS DATA DAN TIDAK BISA DIBATALKAN.
+-- Cadangan penuh sudah diambil: backup/aruna_sebelum_binance_2026-08-17.sql.
+-- Operator memutuskan riwayat crypto era-IDR dihapus seluruhnya, sadar,
+-- sesudah konsekuensinya dijelaskan. Yang ditulis di bawah adalah catatan
+-- APA yang dihapus dan APA akibatnya, supaya keputusan itu bisa diaudit -
+-- bukan permintaan izin ulang.
+--
+-- ---------------------------------------------------------------------
+-- BAGIAN 1 - ini bukan baris mati, ini baris yang sedang menyetir
+-- ---------------------------------------------------------------------
+-- backtest_runs punya PEMBACA HIDUP. BacktestRepository.recent_runs
+-- menjalankan "SELECT ... FROM backtest_runs ORDER BY ran_at DESC LIMIT 5"
+-- dan GovernanceService.research memanggilnya untuk melahirkan research
+-- question (SPEC 31). Sebelum migrasi ini SELECT itu tidak punya filter
+-- apa pun.
+--
+-- Terukur sebelum migrasi ini dijalankan:
+--
+--   * 11 baris backtest_runs. SELURUHNYA market_code='CRYPTO', dan
+--     SELURUHNYA memuat pair IDR di kolom per_asset / walk_forward.
+--   * Karena 11 baris itu satu-satunya isi tabel, kelima "run terbaru"
+--     yang dibaca governance selamanya adalah run era-IDR.
+--   * 4 baris research_questions berstatus OPEN lahir dari sana. Semuanya
+--     source='BACKTEST', dan itu adalah SELURUH isi research_questions.
+--
+-- Angkanya bukan sekadar tua. Ia salah unit dan salah rezim sekaligus:
+--
+--   * PnL-nya rupiah - net_pnl -2.953.814,17 pada satu run - sementara
+--     teks pertanyaannya tidak menyebut mata uang apa pun. Di dunia yang
+--     notional-nya 1.000 USDT, angka itu terbaca sebagai USDT.
+--   * cost_ratio-nya dihitung pada skedul biaya 0,30% per sisi milik venue
+--     yang sudah dicabut. Crypto sekarang 0,10% per sisi.
+--
+-- Jadi pertanyaan "apakah biaya melampaui edge" yang lahir dari tarif
+-- 0,30% sedang menuntun proposal model di dunia 0,10%. Itu bukan data
+-- basi; itu sebab yang tidak lagi berlaku dipakai untuk menyimpulkan
+-- (SPEC 49), persis yang PASAL 34 tutup di tempat lain.
+--
+-- Tidak ada penjaga yang terbentur di sini, dan itu diperiksa bukan
+-- diasumsikan: backtest_runs hanya punya trigger backtest_runs_no_update.
+-- Tidak ada no_delete. Yang dijaga tabel ini adalah "sebuah run tidak
+-- boleh DIUBAH", dan jaminan itu tidak disentuh satu detik pun oleh file
+-- ini.
+--
+-- ---------------------------------------------------------------------
+-- BAGIAN 2 - research_questions, dan tautan yang akan menggantung
+-- ---------------------------------------------------------------------
+-- Empat baris yang dihapus, apa adanya, beserta severity-nya:
+--
+--     no_measurable_edge_1d      1.000  OPEN
+--     costs_exceed_edge_1h       1.000  OPEN
+--     accuracy_below_chance_1h   0.900  OPEN
+--     costs_exceed_edge_1d       0.684  OPEN
+--
+-- Menghapusnya boleh karena tabel ini memang tabel TURUNAN, bukan bukti:
+-- 0014 menulisnya sendiri - "derived from measurements, so the same
+-- question re-derives on each run". Hapus pengukurannya, dan turunannya
+-- tidak punya dasar lagi. Ia juga bukan tabel append-only: tidak ada
+-- trigger di atasnya, dan GovernanceRepository.close_absent memang
+-- meng-UPDATE statusnya.
+--
+-- YANG HARUS DISADARI DAN TIDAK BOLEH DISEMBUNYIKAN - model_proposals
+-- menyimpan question_key sebagai string TANPA foreign key, dan TIGA baris
+-- menunjuk ke no_measurable_edge_1d:
+--
+--     exit-at-target          VALIDATED, dan sudah DISETUJUI MANUSIA
+--                             (proposal_decisions: APPROVED oleh 'rowan',
+--                             2026-08-15 11:39:31)
+--     revert-exit-at-target   DRAFT
+--     stop-loss-only          VALIDATED
+--
+-- Sesudah file ini, ketiganya menyimpan question_key yang tidak menemukan
+-- baris apa pun. Tautan itu SENGAJA tidak di-NULL-kan: question_key yang
+-- masih terisi tapi tidak ketemu bisa ditelusuri ke migrasi ini, sedangkan
+-- question_key NULL tidak bisa dibedakan dari "proposal ini memang tidak
+-- lahir dari pertanyaan mana pun". Menyimpan tautan rusak yang bisa dibaca
+-- lebih jujur daripada menghapus jejaknya.
+--
+-- Proposalnya sendiri, dan terutama baris proposal_decisions milik
+-- 'rowan', TIDAK disentuh. Operator memutuskan menghapus riwayat pasar,
+-- bukan menghapus keputusan manusia. Yang hilang adalah teks pertanyaan
+-- yang melatarbelakangi persetujuan itu; validation JSON yang disalin ke
+-- proposal_decisions tetap utuh dan tetap memuat perbandingan angkanya.
+--
+-- ---------------------------------------------------------------------
+-- BAGIAN 3 - kenapa menghapus saja TIDAK cukup
+-- ---------------------------------------------------------------------
+-- Menghapus 11 baris hanya membereskan hari ini. Cacatnya struktural:
+-- recent_runs membaca "yang terbaru", dan sebuah run adalah angka yang
+-- hanya berarti bersama skedul biaya dan ukuran posisi yang menghasilkannya
+-- - dan keduanya berubah. Crypto baru saja pindah dari 0,30% ke 0,10% per
+-- sisi, dan dari notional 1.000.000 IDR ke 1.000 USDT. Kalau tarifnya
+-- berubah lagi, kejadian yang sama persis terulang tanpa satu pun test
+-- menyala, karena angka yang salah rezim tetap terlihat masuk akal.
+--
+-- Karena itu kolom `cost_basis`: sidik jari asumsi yang dipakai saat run
+-- dihitung (fee beli/jual, slippage, apakah spread ditagih, notional).
+-- BacktestRepository.record_backtest mengisinya saat menulis, dan
+-- recent_runs HANYA membaca run yang cost_basis-nya sama dengan yang
+-- berlaku sekarang. Kalau kolom ini ada tapi tidak ada yang memfilternya,
+-- ia cuma hiasan - pembacanya yang membuatnya nyata.
+--
+-- DEFAULT '' bukan kelalaian, itu arah yang aman. Baris yang ditulis
+-- sebelum kolom ini ada tidak diketahui rezimnya, dan '' tidak akan pernah
+-- sama dengan sidik jari mana pun - jadi "tidak tahu ini diukur di dunia
+-- yang mana" berakhir sebagai diam, bukan sebagai tebakan.
+--
+-- Kolomnya ditambahkan LEBIH DULU, sebelum DELETE di bawah. Urutan itu
+-- disengaja: seandainya ada run baru tercatat antara file ini ditulis dan
+-- dijalankan, run itu lolos dari predikat DELETE - tetapi tetap membawa
+-- cost_basis '' dan tetap tidak akan pernah dibaca governance.
+--
+-- ---------------------------------------------------------------------
+-- BAGIAN 4 - yang tersisa sesudahnya
+-- ---------------------------------------------------------------------
+-- Sesudah migrasi ini, backtest crypto punya NOL SAMPEL. Bukan nol karena
+-- sudah bersih - nol karena BELUM ADA. Tidak ada satu pun run, tidak ada
+-- satu pun research question dari backtest, dan tidak ada dasar untuk
+-- pernyataan apa pun tentang biaya, akurasi arah, atau edge di rezim
+-- Binance spot sampai backtest baru dijalankan di atas data USDT.
+--
+-- Laporan mana pun yang mencetak nol di sini harus dibaca begitu.
+-- =====================================================================
+
+
+-- ---------------------------------------------------------------------
+-- 1. Penanda rezim. Dipasang lebih dulu (lihat BAGIAN 3), NOT NULL dengan
+--    DEFAULT '' supaya baris lama - dan baris apa pun yang ditulis tanpa
+--    kolom ini - jatuh ke nilai yang tidak cocok dengan sidik jari mana
+--    pun, bukan ke nilai yang kebetulan cocok.
+-- ---------------------------------------------------------------------
+ALTER TABLE backtest_runs
+    ADD COLUMN cost_basis VARCHAR(64) NOT NULL DEFAULT '' AFTER known_optimism;
+
+
+-- ---------------------------------------------------------------------
+-- 2. Run era-IDR. Predikatnya sengaja menyebut jejak IDR-nya, bukan cuma
+--    market_code='CRYPTO': yang dibuang adalah run yang diukur di pasar
+--    rupiah, bukan "semua yang crypto". Terukur sebelum ini: 11 baris
+--    cocok, dan 11 adalah SELURUH isi tabel.
+-- ---------------------------------------------------------------------
+DELETE FROM backtest_runs
+WHERE market_code = 'CRYPTO'
+  AND (CAST(per_asset AS CHAR) LIKE '%/IDR%'
+       OR CAST(walk_forward AS CHAR) LIKE '%/IDR%');
+
+
+-- ---------------------------------------------------------------------
+-- 3. Pertanyaan yang lahir dari run-run itu (4 baris; lihat BAGIAN 2).
+--
+--    Dipilih lewat source='BACKTEST' karena research_questions TIDAK
+--    menyimpan run mana yang melahirkannya - tidak ada kolomnya, tidak ada
+--    FK-nya. Yang menyelamatkan predikat kasar ini dari menghapus terlalu
+--    banyak adalah fakta terukur: keempat baris BACKTEST itu satu-satunya
+--    isi tabel, dan satu-satunya sumber run yang pernah ada adalah 11 baris
+--    di langkah 2.
+-- ---------------------------------------------------------------------
+DELETE FROM research_questions
+WHERE source = 'BACKTEST';

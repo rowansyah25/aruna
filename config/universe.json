@@ -1,0 +1,261 @@
+[
+  {
+    "market": "CRYPTO",
+    "symbol": "BTC/USDT",
+    "display_name": "BTC/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "BTC",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "ETH/USDT",
+    "display_name": "ETH/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "ETH",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "SOL/USDT",
+    "display_name": "SOL/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "SOL",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "BNB/USDT",
+    "display_name": "BNB/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "BNB",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "XRP/USDT",
+    "display_name": "XRP/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "XRP",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "TRX/USDT",
+    "display_name": "TRX/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "TRX",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "SUI/USDT",
+    "display_name": "SUI/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "SUI",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "DOGE/USDT",
+    "display_name": "DOGE/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "DOGE",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "NEAR/USDT",
+    "display_name": "NEAR/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "NEAR",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "LINK/USDT",
+    "display_name": "LINK/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "LINK",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "ADA/USDT",
+    "display_name": "ADA/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "ADA",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "FIL/USDT",
+    "display_name": "FIL/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "FIL",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "AVAX/USDT",
+    "display_name": "AVAX/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "AVAX",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "LTC/USDT",
+    "display_name": "LTC/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "LTC",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "POL/USDT",
+    "display_name": "POL/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "POL",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "UNI/USDT",
+    "display_name": "UNI/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "UNI",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "DOT/USDT",
+    "display_name": "DOT/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "DOT",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "APT/USDT",
+    "display_name": "APT/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "APT",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "OP/USDT",
+    "display_name": "OP/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "OP",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "CRYPTO",
+    "symbol": "INJ/USDT",
+    "display_name": "INJ/USDT",
+    "asset_class": "CRYPTO_SPOT",
+    "base_asset": "INJ",
+    "quote_asset": "USDT"
+  },
+  {
+    "market": "IDX",
+    "symbol": "BBCA",
+    "display_name": "Bank Central Asia Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Financials",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "BBRI",
+    "display_name": "Bank Rakyat Indonesia (Persero) Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Financials",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "BMRI",
+    "display_name": "Bank Mandiri (Persero) Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Financials",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "BBNI",
+    "display_name": "Bank Negara Indonesia (Persero) Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Financials",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "TLKM",
+    "display_name": "Telkom Indonesia (Persero) Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Infrastructures",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "ASII",
+    "display_name": "Astra International Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Industrials",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "ICBP",
+    "display_name": "Indofood CBP Sukses Makmur Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Consumer Non-Cyclicals",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "INDF",
+    "display_name": "Indofood Sukses Makmur Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Consumer Non-Cyclicals",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "ANTM",
+    "display_name": "Aneka Tambang Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Basic Materials",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "MDKA",
+    "display_name": "Merdeka Copper Gold Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Basic Materials",
+    "lot_size": 100
+  },
+  {
+    "market": "IDX",
+    "symbol": "GOTO",
+    "display_name": "GoTo Gojek Tokopedia Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Technology",
+    "lot_size": 100
+  }
+]

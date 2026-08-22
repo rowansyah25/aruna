@@ -1,0 +1,283 @@
+"""Angka untuk laporan harian, dibaca dari baris yang tersimpan (PASAL 3-9).
+
+Tidak ada satu pun angka di sini yang dihitung dari perkiraan. Setiap hitungan
+adalah ``COUNT`` atas baris yang sudah ada di database, dengan jendela waktu
+yang eksplisit - dan kategori tanpa baris menghasilkan nol, bukan ketiadaan
+yang nanti berubah jadi ``NaN`` di layar.
+
+Tiga pasar dilaporkan terpisah karena sumbernya memang terpisah:
+
+* **FUTURES / PERPETUAL** - ``futures_plans`` dan ``futures_plan_results``;
+* **SPOT** - ``signals`` pasar CRYPTO beserta ``paper_trades``-nya;
+* **SAHAM INDONESIA** - ``signals`` pasar IDX beserta ``paper_trades``-nya.
+
+Menyatukannya jadi satu kueri akan memaksa salah satunya dibengkokkan ke
+bentuk yang lain, dan yang paling mungkin dibengkokkan adalah futures - satu-
+satunya yang punya likuidasi, dan satu-satunya yang kalahnya bisa lebih buruk
+daripada stop.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+
+from aruna.db.types import to_mysql_datetime
+from aruna.notify.daily import (
+    AgentScore,
+    CouncilScore,
+    MarketBlock,
+    SelfCorrection,
+    Tally,
+)
+
+#: Bagaimana satu hasil futures dibaca sebagai menang atau kalah (PASAL 4).
+#:
+#: ``LIQUIDATED`` masuk LOSS, dan itu bukan pilihan gaya. Posisi yang ditutup
+#: paksa bursa adalah kekalahan yang lebih buruk daripada kena stop, dan
+#: menaruhnya di luar hitungan - bersama EXPIRED - akan membuang justru
+#: kekalahan terburuk dari win rate.
+FUTURES_WIN = ("TARGET_HIT",)
+FUTURES_LOSS = ("STOPPED_OUT", "LIQUIDATED")
+FUTURES_ACTIVE = ("OPEN",)
+
+
+def _int(value: Any) -> int:
+    """``COUNT`` selalu angka; ``SUM`` bisa ``NULL`` kalau tidak ada baris."""
+    return 0 if value is None else int(value)
+
+
+class DailyRepository:
+    """Membaca hitungan satu hari. Tidak menulis apa pun."""
+
+    def __init__(self, db: Any) -> None:
+        self._db = db
+
+    # -- futures ----------------------------------------------------------
+
+    async def futures(self, *, start: datetime, end: datetime) -> MarketBlock:
+        rows = await self._db.fetch(
+            """
+            SELECT p.side AS side,
+                   COALESCE(r.outcome, 'PENDING') AS outcome,
+                   count(*) AS n
+            FROM futures_plans p
+            LEFT JOIN futures_plan_results r ON r.signal_id = p.signal_id
+            WHERE p.verdict = 'PLAN'
+              AND p.created_at >= %s AND p.created_at < %s
+            GROUP BY p.side, COALESCE(r.outcome, 'PENDING')
+            """,
+            to_mysql_datetime(start),
+            to_mysql_datetime(end),
+        )
+        return _block_from_rows(
+            rows,
+            title="FUTURES / PERPETUAL",
+            icon="🔮",
+            win=FUTURES_WIN,
+            loss=FUTURES_LOSS,
+            # PENDING = plan yang belum punya baris hasil sama sekali. Itu
+            # posisi yang masih berjalan, sama seperti OPEN.
+            active=(*FUTURES_ACTIVE, "PENDING"),
+            long_values=("LONG",),
+            short_values=("SHORT",),
+        )
+
+    # -- spot dan saham ---------------------------------------------------
+
+    async def spot_or_equity(
+        self, *, market_code: str, title: str, icon: str,
+        start: datetime, end: datetime,
+    ) -> MarketBlock:
+        """Satu pasar signal, dihitung dari ``paper_trades``.
+
+        Sumbernya ``paper_trades`` dan bukan ``signals``, karena ``signals``
+        tidak menyimpan arah sama sekali - arahnya ada di snapshot yang
+        menyertainya. ``paper_trades`` memegang ketiganya sekaligus: pasar,
+        arah, dan hasil.
+
+        Konsekuensinya disebut supaya tidak disalahpahami: yang dihitung di
+        sini adalah **posisi kertas yang benar-benar dibuka**. Verdict WAIT
+        tidak pernah menghasilkan posisi, jadi tidak muncul - dan memang tidak
+        seharusnya muncul di win rate (PASAL 4). Call berarah yang sengaja
+        ditahan juga tidak: ARUNA sudah bilang di muka bahwa ia tidak berdiri
+        di belakangnya, dan menghitungnya akan menilai sistem atas klaim yang
+        tidak pernah dibuat.
+        """
+        rows = await self._db.fetch(
+            """
+            SELECT t.direction AS side, t.result AS outcome, count(*) AS n
+            FROM paper_trades t
+            WHERE t.market_code = %s
+              AND t.entry_at >= %s AND t.entry_at < %s
+            GROUP BY t.direction, t.result
+            """,
+            market_code,
+            to_mysql_datetime(start),
+            to_mysql_datetime(end),
+        )
+        return _block_from_rows(
+            rows,
+            title=title,
+            icon=icon,
+            win=("WIN",),
+            loss=("LOSS",),
+            active=("OPEN",),
+            long_values=("BUY",),
+            short_values=("SELL",),
+        )
+
+    # -- agent, council, koreksi diri -------------------------------------
+
+    async def agents(self) -> tuple[AgentScore, ...]:
+        """Keandalan agen yang **sudah terukur** saja (SPEC 30, PASAL 7, 11.2).
+
+        Agen tanpa cukup opini terskor tidak muncul. Merangking sesuatu yang
+        belum diukur adalah cara membuat papan peringkat dari kebisingan, dan
+        papan peringkat itu akan terbaca sama meyakinkannya dengan yang benar.
+
+        Dihitung langsung dari hasil yang tersimpan, bukan dibaca dari tabel
+        snapshot ``agent_reliability``. Tabel itu hanya terisi ketika seseorang
+        menjalankan ``aruna autopsy`` dengan persist - dan laporan harian
+        berjalan sendiri tiap tengah malam, tanpa ada yang menjalankan apa pun.
+        Terukur saat ditemukan: 144 opini terskor tersedia di database, dan
+        bagian AGENT PERFORMANCE tetap kosong karena snapshot-nya belum pernah
+        ditulis. Laporan yang diam karena tabel perantaranya kosong tidak bisa
+        dibedakan dari laporan yang diam karena datanya memang belum ada.
+        """
+        from aruna.db.repositories.learning import LearningRepository
+        from aruna.learning.reliability import build_reliability
+
+        laporan = build_reliability(
+            await LearningRepository(self._db).agent_outcomes()
+        )
+        return tuple(
+            AgentScore(name=record.role.value, win_rate=(record.accuracy or 0.0) * 100)
+            # `measured` sudah menyaring yang sampelnya kurang; disiplin
+            # INSUFFICIENT_SAMPLE tetap dipegang mesin keandalan, bukan
+            # ditiru ulang di sini.
+            for record in laporan.measured
+        )
+
+    async def council(self, *, start: datetime, end: datetime) -> CouncilScore:
+        row = await self._db.fetchrow(
+            """
+            SELECT sum(r.direction_correct = 1) AS benar,
+                   sum(r.direction_correct = 0) AS salah
+            FROM paper_results r
+            JOIN signals s ON s.signal_id = r.signal_id
+            WHERE r.original_direction IN ('BUY', 'SELL')
+              AND s.published = TRUE
+              AND r.resolved_at >= %s AND r.resolved_at < %s
+            """,
+            to_mysql_datetime(start),
+            to_mysql_datetime(end),
+        )
+        row = row or {}
+        return CouncilScore(correct=_int(row.get("benar")), incorrect=_int(row.get("salah")))
+
+    async def correction(
+        self, *, start: datetime, end: datetime, model_version: str
+    ) -> SelfCorrection:
+        """Jejak PASAL 8, dihitung dari tabelnya masing-masing.
+
+        ``correction_applied`` dibaca dari proposal yang berstatus aktif, bukan
+        dari yang disetujui: persetujuan adalah izin, penerapan adalah
+        perubahan, dan melaporkan keduanya sebagai satu angka akan membuat
+        model terlihat sudah berubah padahal belum.
+        """
+        async def satu(sql: str) -> int:
+            row = await self._db.fetchrow(
+                sql, to_mysql_datetime(start), to_mysql_datetime(end)
+            )
+            return _int((row or {}).get("n"))
+
+        return SelfCorrection(
+            loss_analyzed=await satu(
+                "SELECT count(*) AS n FROM loss_autopsies "
+                "WHERE performed_at >= %s AND performed_at < %s"
+            ),
+            pattern_detected=await satu(
+                "SELECT count(*) AS n FROM research_questions "
+                "WHERE raised_at >= %s AND raised_at < %s"
+            ),
+            correction_proposed=await satu(
+                "SELECT count(*) AS n FROM model_proposals "
+                "WHERE raised_at >= %s AND raised_at < %s"
+            ),
+            correction_approved=await satu(
+                "SELECT count(*) AS n FROM proposal_decisions "
+                "WHERE decision = 'APPROVED' AND decided_at >= %s AND decided_at < %s"
+            ),
+            correction_applied=await satu(
+                # Tidak ada kolom "activated_at"; yang ada `status` dan
+                # `updated_at`. Sebuah proposal yang berstatus ACTIVE dan
+                # berubah hari ini adalah proposal yang diterapkan hari ini.
+                "SELECT count(*) AS n FROM model_proposals "
+                "WHERE status = 'ACTIVE' AND updated_at >= %s AND updated_at < %s"
+            ),
+            model_version=model_version,
+        )
+
+
+def _block_from_rows(
+    rows: list[dict[str, Any]],
+    *,
+    title: str,
+    icon: str,
+    win: tuple[str, ...],
+    loss: tuple[str, ...],
+    active: tuple[str, ...],
+    long_values: tuple[str, ...],
+    short_values: tuple[str, ...],
+) -> MarketBlock:
+    """Susun satu blok pasar dari baris ``(side, outcome, n)``.
+
+    Hasil yang tidak dikenali sengaja **tidak** dijatuhkan ke salah satu sisi.
+    Ia tetap masuk ``total`` dan tidak masuk mana pun dari win/loss/active,
+    sehingga muncul sebagai selisih yang bisa dilihat. Menebak-nebak tempatnya
+    akan menyembunyikan status baru yang belum pernah dipikirkan siapa pun.
+    """
+    def kosong() -> dict[str, int]:
+        return {"total": 0, "win": 0, "loss": 0, "active": 0}
+
+    semua, panjang, pendek = kosong(), kosong(), kosong()
+    ada_pendek = False
+
+    for row in rows:
+        side = str(row["side"])
+        outcome = str(row["outcome"])
+        n = _int(row["n"])
+        if side in short_values:
+            ada_pendek = True
+            sisi = pendek
+        elif side in long_values:
+            sisi = panjang
+        else:  # pragma: no cover - dijaga CHECK di skema
+            sisi = kosong()
+
+        for bucket in (semua, sisi):
+            bucket["total"] += n
+            if outcome in win:
+                bucket["win"] += n
+            elif outcome in loss:
+                bucket["loss"] += n
+            elif outcome in active:
+                bucket["active"] += n
+
+    return MarketBlock(
+        title=title,
+        icon=icon,
+        tally=Tally(**semua),
+        long=Tally(**panjang),
+        # Blok SHORT hanya ada kalau pasar ini memang menghasilkan call turun.
+        short=Tally(**pendek) if ada_pendek else None,
+    )
+
+
+__all__ = [
+    "FUTURES_ACTIVE",
+    "FUTURES_LOSS",
+    "FUTURES_WIN",
+    "DailyRepository",
+]

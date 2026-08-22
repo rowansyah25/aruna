@@ -1,0 +1,217 @@
+Metadata-Version: 2.4
+Name: aruna
+Version: 0.1.0
+Summary: ARUNA AI - Market Research & Paper Trading Intelligence System (Crypto + IDX)
+License: Proprietary
+Requires-Python: >=3.12
+Description-Content-Type: text/markdown
+Requires-Dist: pydantic>=2.9
+Requires-Dist: pydantic-settings>=2.6
+Requires-Dist: asyncmy>=0.2.9
+Requires-Dist: redis>=5.2
+Requires-Dist: structlog>=24.4
+Requires-Dist: python-telegram-bot>=21.9
+Requires-Dist: tzdata>=2024.2
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.24; extra == "dev"
+Requires-Dist: pytest-cov>=6.0; extra == "dev"
+Requires-Dist: ruff>=0.8; extra == "dev"
+
+# ARUNA AI
+
+Market Research & Paper Trading Intelligence System.
+
+Two markets: **CRYPTO** and **IDX** (Indonesian equities). Forex is not part of
+this system.
+
+**Build stage: PHASE 1 — infrastructure only.**
+There is no market data, no analysis, no council, and no signals in this build.
+Commands and subsystems that belong to later phases say so explicitly rather
+than returning empty or placeholder output. See
+[docs/PHASE_1_REPORT.md](docs/PHASE_1_REPORT.md) for exactly what is and is not
+built.
+
+**Paper trading only.** Real order execution does not exist in this codebase,
+and `ARUNA_REAL_TRADING_ENABLED=true` is rejected at startup.
+
+---
+
+## Requirements
+
+| | |
+|---|---|
+| Python | 3.12 or newer |
+| PostgreSQL | 14+ (developed against 18.4) |
+| Redis | optional — ARUNA runs without it |
+| OS | Windows (developed on Windows 11); no Windows-only APIs are used |
+
+## Setup
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1 -Dev
+```
+
+That creates `.venv`, installs dependencies, and copies `.env.example` to
+`.env`. Then edit `.env` — at minimum `ARUNA_DB_PASSWORD`.
+
+Manual equivalent:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pip install -e .
+copy .env.example .env
+```
+
+## First run
+
+```powershell
+.\.venv\Scripts\python.exe -m aruna doctor
+```
+
+`doctor` checks every prerequisite — Python version, timezone data,
+configuration, migration files, PostgreSQL, Redis — and reports all problems at
+once instead of stopping at the first.
+
+Then:
+
+```powershell
+.\.venv\Scripts\python.exe -m aruna createdb
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m aruna migrate
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m aruna seed
+```
+
+```powershell
+.\.venv\Scripts\python.exe -m aruna run
+```
+
+`run` blocks until Ctrl+C, then shuts down cleanly.
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `aruna version` | version and environment |
+| `aruna config` | effective configuration, secrets redacted |
+| `aruna doctor` | check every prerequisite and report what to fix |
+| `aruna createdb` | create the database if missing |
+| `aruna migrate` | apply pending migrations (`--status`, `--dry-run`) |
+| `aruna seed` | load the tradable universe (`--file`) |
+| `aruna health` | one health sweep, printed as JSON |
+| `aruna run` | start ARUNA |
+
+## Telegram
+
+Optional. Without `ARUNA_TELEGRAM_BOT_TOKEN` ARUNA runs headless and the health
+monitor reports Telegram as `DISABLED` — not as a fault.
+
+With a token set, `ARUNA_TELEGRAM_CHAT_ID` is also required: **the allowlist
+fails closed**, so a bot with no configured chat refuses every command rather
+than obeying whoever finds it. Every command attempt, accepted or refused,
+lands in `audit_logs`.
+
+Available now: `/start`, `/help`, `/status`, `/health`, `/kill`, `/resume`.
+
+Every other command from the specification is registered and answers with the
+phase it is waiting for. `/help` shows the full map.
+
+`/kill` engages a durable kill switch — it is written to `app_state`, so it
+survives a restart. `/resume` releases it.
+
+## Tests
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest
+```
+
+Integration tests need PostgreSQL. They create and drop a separate
+`<ARUNA_DB_NAME>_test` database, so your working database is never touched, and
+they skip cleanly when no database is reachable.
+
+Unit tests only:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest -m "not integration"
+```
+
+Lint:
+
+```powershell
+.\.venv\Scripts\python.exe -m ruff check src tests
+```
+
+## Configuring the universe
+
+The MVP universe (5 crypto pairs, 11 IDX stocks) lives in
+`src/aruna/seed/universe.py`. To change it without touching code, create
+`config/universe.json`:
+
+```json
+[
+  {
+    "market": "IDX",
+    "symbol": "UNVR",
+    "display_name": "Unilever Indonesia Tbk",
+    "asset_class": "IDX_EQUITY",
+    "quote_asset": "IDR",
+    "sector": "Consumer Non-Cyclicals",
+    "lot_size": 100
+  }
+]
+```
+
+Then `aruna seed`. Re-seeding never re-enables an asset you disabled.
+
+## Layout
+
+```
+aruna/
+  core/       config, enums, clock, logging, redaction, kill switch
+  db/         asyncpg pool, migration runner, repositories
+  cache/      Redis client (optional, degrades quietly)
+  health/     probes, aggregation, periodic monitor
+  notify/     Telegram bot and command registry
+  seed/       tradable universe
+  app.py      lifecycle orchestration
+  cli.py      command line
+migrations/   forward-only SQL, checksum-guarded
+docs/         schema roadmap, phase report
+```
+
+## Design decisions worth knowing
+
+**Raw SQL, no ORM.** Later phases store immutable evidence and run analytical
+queries over it; hand-written SQL keeps those queries auditable.
+
+**Migrations are forward-only and checksum-guarded.** Editing an applied
+migration stops the system from starting. A schema that silently disagrees with
+the code reading it is the failure this prevents.
+
+**PostgreSQL is fatal, Redis is not.** Postgres is the store of record. Redis
+holds cached health snapshots and rate-limit counters; when it is down, reads
+return `None`, writes are dropped, and the health monitor says so.
+
+**Secrets are scrubbed twice** — by field name and by value — across ARUNA's own
+logs *and* stdlib records from asyncpg, redis, and python-telegram-bot.
+
+**`audit_logs` is append-only at the database level.** An `UPDATE` or `DELETE`
+raises. The same trigger will guard `signal_snapshots` in PHASE 7, where SPEC 20
+requires a locked prediction to be immutable.
+
+**Horizons disambiguate minutes from months.** The specification writes `1M` for
+both one minute (crypto) and one month (IDX investment); ARUNA stores `1m` and
+`1mo` so outcome records are never ambiguous.
+
+## Documentation
+
+- [docs/PHASE_1_REPORT.md](docs/PHASE_1_REPORT.md) — what is built, what is not,
+  test results, limitations
+- [docs/SCHEMA_ROADMAP.md](docs/SCHEMA_ROADMAP.md) — every SPEC 42 table mapped
+  to the phase that creates it
