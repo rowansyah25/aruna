@@ -14,9 +14,11 @@ sementara yang kedua bug.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from typing import Any
 
+from aruna.agents.risk import RiskLevel as AgentRiskLevel
 from aruna.core.enums import Regime
 from aruna.router.kecocokan import NETRAL, Kecocokan
 from aruna.router.rezim import BOBOT_INTERVAL, PetaRezim
@@ -26,6 +28,8 @@ __all__ = [
     "AMBANG_LAYAK",
     "AlasanKosong",
     "PutusanRouter",
+    "VonisTingkat",
+    "lolos_gerbang",
     "pilih",
 ]
 
@@ -51,6 +55,13 @@ class AlasanKosong(StrEnum):
     KEYAKINAN_KURANG = "KEYAKINAN_KURANG"
     #: Rezimnya jelas; tidak ada strategi yang cukup cocok dengannya.
     TAK_ADA_YANG_COCOK = "TAK_ADA_YANG_COCOK"
+    #: Ada champion, lalu gerbang risiko menahannya (:func:`lolos_gerbang`).
+    #:
+    #: Berbeda dari potongan risiko di :func:`~aruna.router.kecocokan.nilai`,
+    #: dan bedanya bukan kehalusan: yang di sana sejarah DRAWDOWN strateginya,
+    #: yang ini keadaan pasar SEKARANG. Sebuah strategi yang sejarahnya bersih
+    #: tetap bisa gugur di sini, dan sebaliknya.
+    RISIKO_MENAHAN = "RISIKO_MENAHAN"
 
 
 #: Keyakinan rezim minimum sebelum strategi apa pun dipilih (bagian 17.30).
@@ -180,3 +191,113 @@ def pilih(
         regime=peta.primary,
         alasan=layak[0].alasan,
     )
+
+
+#: Ditulis ke ``alasan`` ketika gerbang risiko tidak pernah berjalan.
+#:
+#: **Bentuk kegagalan yang paling sulit ditemukan kalau tidak dicatat.**
+#: Champion yang lolos karena gerbangnya berjalan dan champion yang lolos
+#: karena gerbangnya tidak pernah berjalan terlihat sama persis dari luar - dan
+#: yang kedua berarti seluruh gerbang ini dekoratif.
+_TAK_DINILAI = "gerbang risiko tidak dijalankan - risiko belum dinilai"
+
+
+@dataclass(frozen=True, slots=True)
+class VonisTingkat:
+    """Vonis dari TINGKAT risiko yang sudah tersimpan, bukan dari penilaian baru.
+
+    **Kenapa ini ada, dan bukan :func:`~aruna.risk.gate.evaluate`.** Gerbang itu
+    menuntut :class:`~aruna.risk.score.Penilaian` yang lengkap - ia membaca
+    ``vetoed``, ``usable``, ``coverage``, ``level``, dan ``score``. Fase router
+    berjalan atas hasil pemindaian dan **tidak punya satu pun dari itu**;
+    mengarangnya berarti gerbang yang memutuskan dari angka yang dibuat-buat.
+
+    Yang benar-benar ARUNA punya adalah ``signal_snapshots.risk_level``:
+    tingkat yang jalur keputusan sendiri catat terakhir kali untuk aset itu.
+    Kelas ini menyatakan persis sebanyak itu, tidak lebih.
+
+    **Kosakatanya `aruna.agents.risk.RiskLevel`, bukan `aruna.risk.score`.**
+    Ada DUA enum bernama ``RiskLevel`` di kode ini, dan keduanya punya ``HIGH``
+    dan ``LOW`` - jadi salah impor tidak akan meledak, ia akan diam. Yang
+    tersimpan terukur 2026-08-23::
+
+        MODERATE  12.125     HIGH  3.103     EXTREME  673
+
+    Tangganya sengaja sejajar dengan ekor :func:`~aruna.risk.gate.evaluate`, dan
+    `test_router_gerbang` yang menjaga keduanya tetap sepakat. Sejajar karena
+    pertanyaannya memang sama; terpisah karena buktinya tidak.
+    """
+
+    tingkat: AgentRiskLevel
+    #: Dari mana tingkat itu dibaca, supaya barisnya bisa dibantah.
+    sumber: str = "signal_snapshots.risk_level"
+
+    @classmethod
+    def dari_tersimpan(cls, nilai: Any) -> VonisTingkat | None:
+        """``None`` berarti **tidak bisa dinilai**, bukan aman.
+
+        Nilai yang tidak dikenal dipulangkan ``None`` alih-alih ditebak. Sebuah
+        tingkat baru yang ditambahkan ke enum dan lupa diurus di sini akan
+        terbaca "belum dinilai" - dan itu terlihat di baris `router_pilihan`,
+        bukan lolos sebagai aman.
+        """
+        try:
+            return cls(AgentRiskLevel(str(nilai).strip().upper()))
+        except ValueError:
+            return None
+
+    @property
+    def boleh_kirim(self) -> bool:
+        return self.tingkat is not AgentRiskLevel.EXTREME
+
+    @property
+    def perlu_peringatan(self) -> bool:
+        return self.tingkat is AgentRiskLevel.HIGH
+
+    @property
+    def alasan(self) -> str:
+        return f"risiko tercatat {self.tingkat.value} ({self.sumber})"
+
+
+def lolos_gerbang(putusan: PutusanRouter, *, vonis: Any) -> PutusanRouter:
+    """Gerbang risiko sesudah scenario, sebelum keputusan akhir.
+
+    **Kedua kalinya risiko masuk di Phase 17, dan alasannya berbeda dari yang
+    pertama.** Di :func:`~aruna.router.kecocokan.nilai` risiko menahan strategi
+    berisiko ekstrem NAIK ke champion; di sini ia menahan rencana berisiko
+    ekstrem TERBIT walau strateginya wajar. Yang pertama tentang pilihan, yang
+    kedua tentang keadaan sekarang.
+
+    **Champion yang gugur tidak diganti challenger.** Challenger dipilih karena
+    kecocokannya, bukan karena ia lebih aman - dan menaikkannya diam-diam
+    ketika champion gugur berarti menerbitkan rencana yang tidak pernah dinilai
+    gerbang ini.
+
+    Yang menentukan :attr:`~aruna.risk.gate.Vonis.boleh_kirim`, bukan daftar
+    keputusan yang ditulis ulang di sini. Dua tempat yang memutuskan hal yang
+    sama harus tetap sepakat selamanya, dan yang kedua akan diam pada nilai
+    baru yang ditambahkan ke enumnya.
+    """
+    if putusan.champion is None:
+        return putusan
+
+    boleh = getattr(vonis, "boleh_kirim", None)
+    if not isinstance(boleh, bool):
+        return replace(putusan, alasan=(*putusan.alasan, _TAK_DINILAI))
+
+    sebab = str(getattr(vonis, "alasan", "") or "tidak disebutkan")
+    if not boleh:
+        return PutusanRouter(
+            champion=None,
+            challenger=None,
+            alasan_kosong=f"gerbang risiko menahan: {sebab}",
+            kode_kosong=AlasanKosong.RISIKO_MENAHAN,
+            regime=putusan.regime,
+            alasan=putusan.alasan,
+        )
+
+    if getattr(vonis, "perlu_peringatan", False):
+        return replace(
+            putusan, alasan=(*putusan.alasan, f"gerbang risiko memperingatkan: {sebab}")
+        )
+    return putusan

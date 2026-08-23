@@ -140,6 +140,9 @@ class TestSeluruhRantaiTask1SampaiTask7Terpakai:
             "simpan": "Task 7 - penyimpanan",
             "peta_rezim": "Task 8 - pembacaan sumber",
             "riwayat_15m": "Task 8 - riwayat untuk stabilitas",
+            "lolos_gerbang": "Task 9 - gerbang risiko sesudah peringkat",
+            "risiko_terakhir": "Task 9 - tingkat risiko yang tersimpan",
+            "dari_tersimpan": "Task 9 - terjemahan kosakata risiko, satu tempat",
         }
         hilang = {k: v for k, v in wajib.items() if k not in dipanggil}
 

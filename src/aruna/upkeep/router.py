@@ -40,7 +40,13 @@ from aruna.governance.proposal import MIN_VALIDATION_SAMPLE
 from aruna.router.kecocokan import Kecocokan, nilai
 from aruna.router.label import performa_rezim
 from aruna.router.peringkat import kandidat_layak
-from aruna.router.putusan import AlasanKosong, PutusanRouter, pilih
+from aruna.router.putusan import (
+    AlasanKosong,
+    PutusanRouter,
+    VonisTingkat,
+    lolos_gerbang,
+    pilih,
+)
 from aruna.router.rezim import BacaanRezim, PetaRezim, stabilitas, susun_peta
 
 log = get_logger(__name__)
@@ -118,6 +124,7 @@ class FaseRouter:
 
         peta_semua = await self._repo.peta_rezim(sekarang=now)
         riwayat = await self._repo.riwayat_15m(sekarang=now)
+        risiko = await self._repo.risiko_terakhir(sekarang=now)
         baris_performa = await self._baris_performa()
         strategi = kandidat_layak(_katalog(self._katalog))
 
@@ -128,6 +135,13 @@ class FaseRouter:
             keluar.dipertimbangkan += 1
             putusan, peta, stabil = self._putuskan(
                 bacaan, riwayat.get(simbol, ()), strategi, baris_performa
+            )
+            # Gerbang risiko, sesudah peringkat dan sebelum penyimpanan
+            # (diagram operator 2026-08-23). Kedua kalinya risiko masuk, dan
+            # pertanyaannya berbeda dari yang di `kecocokan.nilai`: yang itu
+            # sejarah drawdown strateginya, yang ini keadaan pasar sekarang.
+            putusan = lolos_gerbang(
+                putusan, vonis=VonisTingkat.dari_tersimpan(risiko.get(simbol))
             )
             if putusan.champion is None:
                 keluar.catat_tolak(putusan.kode_kosong)

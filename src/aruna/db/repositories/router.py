@@ -200,6 +200,29 @@ class RouterRepository:
                 daftar.append(regime)
         return {s: tuple(v) for s, v in keluar.items()}
 
+    async def risiko_terakhir(self, *, sekarang: datetime) -> dict[str, str]:
+        """Tingkat risiko terakhir per simbol, apa adanya dari penyimpanan.
+
+        **Tidak diterjemahkan di sini.** Kolomnya menyimpan kosakata
+        :class:`aruna.agents.risk.RiskLevel` - ``LOW``/``MODERATE``/``HIGH``/
+        ``EXTREME`` - dan penerjemahannya milik
+        :meth:`~aruna.router.putusan.VonisTingkat.dari_tersimpan`, satu tempat.
+
+        Jendelanya sama dengan bacaan 15m: sebuah tingkat risiko dari kemarin
+        bukan risiko sekarang, dan memakainya berarti menahan champion atas
+        keadaan yang sudah lewat.
+        """
+        rows = await self._db.fetch(
+            "SELECT symbol, risk_level, locked_at FROM signal_snapshots "
+            "WHERE locked_at >= %s AND risk_level IS NOT NULL "
+            "ORDER BY symbol, locked_at DESC",
+            to_mysql_datetime(sekarang - umur_maksimum(_INTERVAL_STABILITAS)),
+        )
+        keluar: dict[str, str] = {}
+        for r in rows:
+            keluar.setdefault(str(r["symbol"]), str(r["risk_level"]))
+        return keluar
+
     async def simpan(
         self,
         putusan: PutusanRouter,

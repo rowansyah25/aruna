@@ -37,9 +37,16 @@ class _RepoPalsu:
         self,
         peta: dict[str, tuple[Any, ...]] | None = None,
         riwayat: dict[str, tuple[str, ...]] | None = None,
+        risiko: dict[str, str] | None = None,
     ) -> None:
         self._peta = peta or {}
         self._riwayat = riwayat or {}
+        #: Bawaannya MODERATE, tingkat yang paling sering tersimpan - terukur
+        #: 12.125 dari 15.901 baris dalam tujuh hari. Bawaan yang lolos gerbang
+        #: dipilih supaya test yang TIDAK sedang menguji risiko tidak diam-diam
+        #: menguji gerbangnya.
+        self._risiko = risiko or {}
+
         self.disimpan: list[Any] = []
 
     async def peta_rezim(self, *, sekarang: datetime) -> dict[str, tuple[Any, ...]]:
@@ -47,6 +54,9 @@ class _RepoPalsu:
 
     async def riwayat_15m(self, *, sekarang: datetime) -> dict[str, tuple[str, ...]]:
         return self._riwayat
+
+    async def risiko_terakhir(self, *, sekarang: datetime) -> dict[str, str]:
+        return {s: self._risiko.get(s, "MODERATE") for s in self._peta}
 
     async def simpan(self, putusan: Any, **kw: Any) -> int:
         self.disimpan.append((putusan, kw))
@@ -221,6 +231,41 @@ class TestKegagalanTidakMenjatuhkan:
 
         assert hasil.dipertimbangkan == 2
         assert hasil.disimpan == 1
+
+
+class TestGerbangRisikoSampaiKeSini:
+    """Task 9. Gerbang yang berhenti di test unitnya sendiri dekoratif."""
+
+    @pytest.mark.asyncio
+    async def test_risiko_ekstrem_membatalkan_champion(self) -> None:
+        """Champion yang lolos peringkat masih bisa gugur di gerbang. Terukur
+        2026-08-23: 673 dari 15.901 baris tujuh hari terakhir tercatat
+        EXTREME - 4,2%, jadi ini bukan jalur yang tak pernah dilalui."""
+        repo = _RepoPalsu({"BTC/USDT": _sepakat()}, risiko={"BTC/USDT": "EXTREME"})
+        hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+
+        assert hasil.terpilih == 0
+        assert hasil.ditolak == {AlasanKosong.RISIKO_MENAHAN: 1}
+
+    @pytest.mark.asyncio
+    async def test_risiko_tinggi_lolos_dengan_peringatan_tercatat(self) -> None:
+        repo = _RepoPalsu({"BTC/USDT": _sepakat()}, risiko={"BTC/USDT": "HIGH"})
+        hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+        putusan, _ = repo.disimpan[0]
+
+        assert hasil.terpilih == 1
+        assert any("memperingatkan" in a for a in putusan.alasan)
+
+    @pytest.mark.asyncio
+    async def test_tanpa_catatan_risiko_dicatat_belum_dinilai(self) -> None:
+        """Champion yang lolos karena gerbangnya berjalan dan champion yang
+        lolos karena gerbangnya tidak punya bahan terlihat sama dari luar."""
+        repo = _RepoPalsu({"BTC/USDT": _sepakat()}, risiko={"BTC/USDT": "?"})
+        await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+        putusan, _ = repo.disimpan[0]
+
+        assert putusan.champion is not None
+        assert any("tidak dijalankan" in a for a in putusan.alasan)
 
 
 class TestStatusMenyaringSampaiKeSini:
