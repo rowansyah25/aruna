@@ -26,23 +26,34 @@ from decimal import Decimal
 import pytest
 
 from aruna.db.repositories.diam import DiamRepository
+from aruna.db.types import to_mysql_datetime
 
 NOW = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
 AWAL = NOW - timedelta(days=1)
 
 
 class _Db:
-    """Menangkap SQL dan argumennya, memulangkan baris yang disiapkan."""
+    """Menangkap SQL dan argumennya, memulangkan baris yang disiapkan.
+
+    **Barisnya keluar SEKALI**, bukan tiap panggilan. Sejak 2026-08-23
+    `DiamRepository.diam` mengirim jendelanya per potong satu jam, jadi sehari
+    penuh memanggil `fetch` dua puluh empat kali - dan double yang memulangkan
+    baris yang sama tiap kali akan melaporkan dua puluh empat kali lipat data
+    yang sebenarnya ada. Bukan cuma test yang salah: itu bentuk double yang
+    tidak menyerupai database mana pun.
+    """
 
     def __init__(self, rows: list[dict] | None = None) -> None:
         self.rows = rows or []
         self.sql = ""
         self.args: tuple = ()
+        self.panggilan = 0
 
     async def fetch(self, sql: str, *args):
         self.sql = sql
         self.args = args
-        return self.rows
+        self.panggilan += 1
+        return self.rows if self.panggilan == 1 else []
 
 
 def _baris(**kw) -> dict:
@@ -63,6 +74,73 @@ async def _jalankan(rows: list[dict]):
     db = _Db(rows)
     hasil = await DiamRepository(db).diam(start=AWAL, end=NOW, now=NOW)
     return db, hasil
+
+
+class TestDipecahPerPotong:
+    """**Bug produksi, berulang tiap malam sejak 2026-08-21.**
+
+    Laporan harian gagal pukul 00:00 WIB dengan
+    ``daily.silence_failed: Query execution was interrupted, maximum statement
+    execution time exceeded``. Terukur 2026-08-23: 4.008 keputusan ditahan
+    dalam satu hari, masing-masing menuntut MAX/MIN atas jendelanya sendiri di
+    `candles` - sekali jalan melewati batas 30 detik.
+
+    Dipecah per jam, potong terlama 8,3 detik dan sehari penuh selesai. Yang
+    diukur TIDAK berubah: intervalnya tetap tidak disaring, karena aset yang
+    tidak punya interval yang disaring akan diam-diam menjadi "tidak terukur" -
+    dan IDX memang tidak punya bar 1m.
+    """
+
+    @pytest.mark.asyncio
+    async def test_sehari_dikirim_per_jam(self) -> None:
+        db = _Db([])
+        await DiamRepository(db).diam(
+            start=NOW - timedelta(days=1), end=NOW, now=NOW
+        )
+
+        assert db.panggilan == 24
+
+    @pytest.mark.asyncio
+    async def test_jendela_pendek_tetap_satu_potong(self) -> None:
+        db = _Db([])
+        await DiamRepository(db).diam(
+            start=NOW - timedelta(minutes=20), end=NOW, now=NOW
+        )
+
+        assert db.panggilan == 1
+
+    @pytest.mark.asyncio
+    async def test_potong_gagal_tidak_menghapus_seluruh_laporan(self) -> None:
+        """Bentuk kegagalan yang paling mahal: yang hilang bukan satu baris
+        melainkan seluruh bagian "diam", tanpa ada yang tahu berapa banyak yang
+        seharusnya ada di sana."""
+
+        class _DbSetengahRusak(_Db):
+            async def fetch(self, sql: str, *args):
+                self.panggilan += 1
+                if self.panggilan % 2 == 0:
+                    raise RuntimeError("statement timeout")
+                return self.rows if self.panggilan == 1 else []
+
+        db = _DbSetengahRusak([_baris()])
+        hasil = await DiamRepository(db).diam(
+            start=NOW - timedelta(days=1), end=NOW, now=NOW
+        )
+
+        assert db.panggilan == 24
+        assert len(hasil) == 1
+
+    @pytest.mark.asyncio
+    async def test_horizon_yang_belum_lewat_tidak_ikut_dihitung(self) -> None:
+        """`now` masuk ke JOIN, bukan cuma ke pembacaan sesudahnya. Barisnya
+        tetap keluar lewat LEFT JOIN - yang hilang cuma kerjanya."""
+        db = _Db([])
+        await DiamRepository(db).diam(
+            start=NOW - timedelta(minutes=20), end=NOW, now=NOW
+        )
+
+        assert "g.resolves_at <= %s" in db.sql
+        assert db.args[0] == to_mysql_datetime(NOW)
 
 
 class TestKueriNya:

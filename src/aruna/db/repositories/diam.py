@@ -27,12 +27,34 @@ aset yang tidak punya interval itu diam-diam menghasilkan "tidak terukur".
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
+from aruna.core.logging import get_logger
 from aruna.db.types import to_mysql_datetime
 from aruna.decision.silence import Diam
+
+log = get_logger(__name__)
+
+#: Lebar satu potong jendela yang dikirim ke database sekali jalan.
+#:
+#: **Sehari penuh tidak muat.** Terukur 2026-08-23: 4.008 keputusan ditahan
+#: dalam satu hari, masing-masing menuntut MAX/MIN atas jendelanya sendiri di
+#: `candles`. Sekali jalan ia melewati ``max_statement_time`` 30 detik dan
+#: laporan hariannya gagal - berulang tiap malam pukul 00:00 WIB sejak
+#: 2026-08-21, terlihat di log sebagai ``daily.silence_failed``.
+#:
+#: Satu jam, dan angkanya dari pengukuran: potong TERLAMA 8,3 detik, jadi
+#: marginnya lebih dari tiga kali lipat. Itu penting karena mesin ini dua inti
+#: dan potongnya berbagi dengan siklus upkeep yang berjalan bersamaan.
+#:
+#: **Memecahnya, bukan mempercepatnya**, dan itu keputusan. Menyaring
+#: ``interval_code`` akan tiga kali lebih cepat - tapi lihat catatan modul di
+#: atas: aset yang tidak punya interval itu diam-diam menjadi "tidak terukur",
+#: dan IDX memang tidak punya bar 1m. Laporan yang cepat tapi diam-diam
+#: kehilangan satu pasar lebih buruk daripada laporan yang gagal keras.
+_LEBAR_POTONG = timedelta(hours=1)
 
 #: Skala persen yang dilaporkan. Dua angka di belakang koma sudah jauh lebih
 #: halus daripada ambang dua persen yang menilainya.
@@ -82,36 +104,20 @@ class DiamRepository:
         menentukan sebuah horizon sudah lewat atau belum adalah waktu yang sama
         dengan yang dipakai seluruh laporan itu, bukan waktu saat baris ini
         kebetulan dieksekusi.
+
+        **Dikirim per potong** selebar :data:`_LEBAR_POTONG`, bukan sekali
+        jalan. Alasannya di konstanta itu; ringkasnya, sehari penuh melewati
+        ``max_statement_time`` dan laporannya gagal tiap malam.
         """
-        rows = await self._db.fetch(
-            """
-            SELECT g.signal_id            AS signal_id,
-                   g.symbol               AS symbol,
-                   g.withheld_reason      AS withheld_reason,
-                   g.resolves_at          AS resolves_at,
-                   s.reference_price      AS reference_price,
-                   MAX(c.high)            AS tertinggi,
-                   MIN(c.low)             AS terendah,
-                   COUNT(c.id)            AS bar
-            FROM signals g
-            JOIN signal_snapshots s ON s.signal_id = g.signal_id
-            LEFT JOIN candles c
-                   ON c.asset_id = g.asset_id
-                  AND c.is_closed = TRUE
-                  AND c.open_time >= g.locked_at
-                  AND c.close_time <= g.resolves_at
-            WHERE g.published = FALSE
-              AND g.locked_at >= %s AND g.locked_at < %s
-            GROUP BY g.signal_id, g.symbol, g.withheld_reason,
-                     g.resolves_at, s.reference_price
-            ORDER BY g.locked_at
-            """,
-            to_mysql_datetime(start),
-            to_mysql_datetime(end),
-        )
+        rows: list[Any] = []
+        saat = start
+        while saat < end:
+            habis = min(saat + _LEBAR_POTONG, end)
+            rows.extend(await self._potong(mulai=saat, habis=habis, now=now))
+            saat = habis
 
         keluar: list[Diam] = []
-        for row in rows or ():
+        for row in rows:
             selesai = row.get("resolves_at")
             lewat = selesai is not None and _sudah_lewat(selesai, now)
             gerak = (
@@ -131,6 +137,63 @@ class DiamRepository:
                 )
             )
         return tuple(keluar)
+
+    async def _potong(
+        self, *, mulai: datetime, habis: datetime, now: datetime
+    ) -> list[Any]:
+        """Satu potong jendela. Kegagalannya berhenti di sini.
+
+        Potong yang gagal dicatat lalu dilewati, bukan menjatuhkan seluruh
+        laporan. Sebelum 2026-08-23 satu query yang timeout menghapus bagian
+        "diam" dari laporan hari itu seluruhnya - dan itu bentuk kegagalan yang
+        paling mahal: yang hilang bukan satu baris melainkan seluruh bagian,
+        tanpa ada yang tahu berapa banyak yang seharusnya ada di sana.
+        """
+        try:
+            return list(await self._ambil(mulai, habis, now) or ())
+        except Exception:
+            log.exception(
+                "diam.potong_gagal",
+                mulai=to_mysql_datetime(mulai),
+                habis=to_mysql_datetime(habis),
+            )
+            return []
+
+    async def _ambil(
+        self, mulai: datetime, habis: datetime, now: datetime
+    ) -> Any:
+        return await self._db.fetch(
+            """
+            SELECT g.signal_id            AS signal_id,
+                   g.symbol               AS symbol,
+                   g.withheld_reason      AS withheld_reason,
+                   g.resolves_at          AS resolves_at,
+                   s.reference_price      AS reference_price,
+                   MAX(c.high)            AS tertinggi,
+                   MIN(c.low)             AS terendah,
+                   COUNT(c.id)            AS bar
+            FROM signals g
+            JOIN signal_snapshots s ON s.signal_id = g.signal_id
+            LEFT JOIN candles c
+                   ON c.asset_id = g.asset_id
+                  AND c.is_closed = TRUE
+                  AND c.open_time >= g.locked_at
+                  AND c.close_time <= g.resolves_at
+                  -- Horizon yang BELUM lewat tidak perlu ekstremnya: pemanggil
+                  -- membuangnya (`gerak = ... if lewat else None`). Barisnya
+                  -- tetap keluar lewat LEFT JOIN, jadi daftarnya tidak
+                  -- menyusut - yang hilang cuma kerjanya.
+                  AND g.resolves_at <= %s
+            WHERE g.published = FALSE
+              AND g.locked_at >= %s AND g.locked_at < %s
+            GROUP BY g.signal_id, g.symbol, g.withheld_reason,
+                     g.resolves_at, s.reference_price
+            ORDER BY g.locked_at
+            """,
+            to_mysql_datetime(now),
+            to_mysql_datetime(mulai),
+            to_mysql_datetime(habis),
+        )
 
 
 def _sudah_lewat(selesai: Any, now: datetime) -> bool:
