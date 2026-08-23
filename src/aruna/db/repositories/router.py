@@ -223,6 +223,28 @@ class RouterRepository:
             keluar.setdefault(str(r["symbol"]), str(r["risk_level"]))
         return keluar
 
+    async def pilihan_terakhir(self) -> dict[str, tuple[str | None, str | None]]:
+        """Champion dan rezim yang terakhir tercatat per simbol.
+
+        Untuk :func:`~aruna.router.invalidasi.kenapa_berganti`. Satu kueri
+        untuk seluruh simbol, dan **tanpa batas waktu**: pilihan terakhir tetap
+        pilihan terakhir walau ARUNA mati semalam, dan peralihan yang melintasi
+        waktu mati justru yang paling perlu terlihat.
+        """
+        rows = await self._db.fetch(
+            "SELECT r.symbol, r.champion, r.regime_primary FROM router_pilihan r "
+            "JOIN (SELECT asset_id, MAX(dipilih_pada) t FROM router_pilihan "
+            "      GROUP BY asset_id) k "
+            "  ON r.asset_id = k.asset_id AND r.dipilih_pada = k.t"
+        )
+        return {
+            str(r["symbol"]): (
+                None if r["champion"] is None else str(r["champion"]),
+                None if r["regime_primary"] is None else str(r["regime_primary"]),
+            )
+            for r in rows
+        }
+
     async def simpan(
         self,
         putusan: PutusanRouter,

@@ -38,9 +38,11 @@ class _RepoPalsu:
         peta: dict[str, tuple[Any, ...]] | None = None,
         riwayat: dict[str, tuple[str, ...]] | None = None,
         risiko: dict[str, str] | None = None,
+        sebelumnya: dict[str, tuple[str | None, str | None]] | None = None,
     ) -> None:
         self._peta = peta or {}
         self._riwayat = riwayat or {}
+        self._sebelumnya = sebelumnya or {}
         #: Bawaannya MODERATE, tingkat yang paling sering tersimpan - terukur
         #: 12.125 dari 15.901 baris dalam tujuh hari. Bawaan yang lolos gerbang
         #: dipilih supaya test yang TIDAK sedang menguji risiko tidak diam-diam
@@ -57,6 +59,9 @@ class _RepoPalsu:
 
     async def risiko_terakhir(self, *, sekarang: datetime) -> dict[str, str]:
         return {s: self._risiko.get(s, "MODERATE") for s in self._peta}
+
+    async def pilihan_terakhir(self) -> dict[str, tuple[str | None, str | None]]:
+        return self._sebelumnya
 
     async def simpan(self, putusan: Any, **kw: Any) -> int:
         self.disimpan.append((putusan, kw))
@@ -266,6 +271,37 @@ class TestGerbangRisikoSampaiKeSini:
 
         assert putusan.champion is not None
         assert any("tidak dijalankan" in a for a in putusan.alasan)
+
+
+class TestPeralihanSampaiKeSini:
+    """Task 10. Contoh operator, lewat fase yang sungguhan."""
+
+    @pytest.mark.asyncio
+    async def test_contoh_operator_ujung_ke_ujung(self) -> None:
+        """TRENDING -> RANGING: STR-001 gugur, STR-004 naik, dan peralihannya
+        tercatat di baris yang tersimpan - bukan harus disimpulkan dengan
+        membandingkan dua baris."""
+        repo = _RepoPalsu(
+            {"BTC/USDT": _sepakat("RANGING")},
+            sebelumnya={"BTC/USDT": ("STR-001", "TRENDING")},
+        )
+        hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+        putusan, _ = repo.disimpan[0]
+
+        assert hasil.berganti == 1
+        assert putusan.champion.kode == "STR-004"
+        assert any("TRENDING -> RANGING" in a for a in putusan.alasan)
+
+    @pytest.mark.asyncio
+    async def test_champion_yang_sama_tidak_dihitung_berganti(self) -> None:
+        """Angka adaptasi yang naik tiap siklus tidak mengukur adaptasi."""
+        repo = _RepoPalsu(
+            {"BTC/USDT": _sepakat("TRENDING")},
+            sebelumnya={"BTC/USDT": ("STR-001", "TRENDING")},
+        )
+        hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+
+        assert hasil.berganti == 0
 
 
 class TestStatusMenyaringSampaiKeSini:

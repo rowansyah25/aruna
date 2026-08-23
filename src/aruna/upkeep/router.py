@@ -30,13 +30,14 @@ bukan keputusan, dan siklus yang sama juga menghasilkan keputusan sungguhan.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
 from aruna.core.enums import Market
 from aruna.core.logging import get_logger
 from aruna.governance.proposal import MIN_VALIDATION_SAMPLE
+from aruna.router.invalidasi import PilihanSebelumnya, kenapa_berganti
 from aruna.router.kecocokan import Kecocokan, nilai
 from aruna.router.label import performa_rezim
 from aruna.router.peringkat import kandidat_layak
@@ -75,6 +76,12 @@ class HasilRouter:
     #: penolakan menjadi kelompoknya sendiri, dan laporannya sama tak
     #: bergunanya dengan daftar mentah.
     ditolak: dict[str, int] = field(default_factory=dict)
+    #: Berapa aset yang championnya BERGANTI dari siklus sebelumnya.
+    #:
+    #: Ini angka adaptasi bagian 17.26. Nol terus berarti router memilih hal
+    #: yang sama selamanya - yang bisa benar (pasarnya memang diam) atau bisa
+    #: berarti pemetaannya melingkar. Tanpa angka ini keduanya tak terbedakan.
+    berganti: int = 0
     disimpan: int = 0
 
     def catat_tolak(self, kode: AlasanKosong | None) -> None:
@@ -125,8 +132,10 @@ class FaseRouter:
         peta_semua = await self._repo.peta_rezim(sekarang=now)
         riwayat = await self._repo.riwayat_15m(sekarang=now)
         risiko = await self._repo.risiko_terakhir(sekarang=now)
+        sebelumnya = await self._repo.pilihan_terakhir()
         baris_performa = await self._baris_performa()
         strategi = kandidat_layak(_katalog(self._katalog))
+        boleh_memimpin = frozenset(s.code for s in strategi.champion)
 
         for simbol, ident in sorted(terpindai.items()):
             bacaan = peta_semua.get(simbol)
@@ -143,6 +152,21 @@ class FaseRouter:
             putusan = lolos_gerbang(
                 putusan, vonis=VonisTingkat.dari_tersimpan(risiko.get(simbol))
             )
+            # Bagian 17.26: peralihannya dicatat, bukan disimpulkan. Sebuah
+            # baris dengan champion baru tidak menyebutkan siapa yang ia
+            # gantikan, apalagi kenapa - dan adaptasi yang tidak bisa dilihat
+            # tidak bisa dibuktikan terjadi.
+            lama = sebelumnya.get(simbol)
+            peralihan = kenapa_berganti(
+                None if lama is None else PilihanSebelumnya(*lama),
+                putusan=putusan,
+                peta=peta,
+                boleh_memimpin=boleh_memimpin,
+            )
+            if peralihan:
+                putusan = replace(putusan, alasan=(*putusan.alasan, *peralihan))
+                keluar.berganti += 1
+
             if putusan.champion is None:
                 keluar.catat_tolak(putusan.kode_kosong)
             else:
@@ -155,6 +179,7 @@ class FaseRouter:
             "router.selesai",
             dipertimbangkan=keluar.dipertimbangkan,
             terpilih=keluar.terpilih,
+            berganti=keluar.berganti,
             ditolak=keluar.ditolak,
         )
         return keluar
