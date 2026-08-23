@@ -15,6 +15,7 @@ sementara yang kedua bug.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 
 from aruna.core.enums import Regime
 from aruna.router.kecocokan import NETRAL, Kecocokan
@@ -23,9 +24,33 @@ from aruna.router.rezim import BOBOT_INTERVAL, PetaRezim
 __all__ = [
     "AMBANG_KEYAKINAN_REZIM",
     "AMBANG_LAYAK",
+    "AlasanKosong",
     "PutusanRouter",
     "pilih",
 ]
+
+
+class AlasanKosong(StrEnum):
+    """Kenapa tidak ada champion, dalam bentuk yang bisa DIHITUNG.
+
+    **Kalimatnya saja tidak cukup, dan itu terbukti sebelum dikomit.** Versi
+    pertama mengelompokkan penolakan dengan memotong kalimatnya, dan karena
+    kalimat itu menyebut angkanya - "keyakinan rezim 20%", "keyakinan rezim
+    32%" - tiap penolakan menjadi kelompoknya sendiri. Laporan "router menolak
+    19 aset" dengan 19 kelompok berisi satu sama tak bergunanya dengan daftar
+    mentah.
+
+    Angkanya tetap ada di :attr:`PutusanRouter.alasan_kosong` untuk dibaca
+    manusia; yang ini untuk dihitung mesin. Dua pembaca, dua bentuk - bukan
+    satu string yang dipaksa melayani keduanya.
+    """
+
+    #: Belum ada bacaan sama sekali, atau seluruhnya ``UNCERTAIN``.
+    REZIM_TAK_TERBACA = "REZIM_TAK_TERBACA"
+    #: Terbaca, tapi buktinya terlalu tipis atau terlalu terbelah.
+    KEYAKINAN_KURANG = "KEYAKINAN_KURANG"
+    #: Rezimnya jelas; tidak ada strategi yang cukup cocok dengannya.
+    TAK_ADA_YANG_COCOK = "TAK_ADA_YANG_COCOK"
 
 
 #: Keyakinan rezim minimum sebelum strategi apa pun dipilih (bagian 17.30).
@@ -90,7 +115,11 @@ class PutusanRouter:
     challenger: Kecocokan | None
     #: Kosong berarti ada champion. Terisi berarti TIDAK ada, dan **sebabnya
     #: ada di sini** - "tidak ada strategi" tanpa alasan tidak bisa dibantah.
+    #: Untuk dibaca manusia; menyebut angkanya.
     alasan_kosong: str = ""
+    #: Sebab yang sama, dalam bentuk yang bisa DIHITUNG. ``None`` berarti ada
+    #: champion. Lihat :class:`AlasanKosong` untuk kenapa keduanya ada.
+    kode_kosong: AlasanKosong | None = None
     #: Rezim yang jadi dasar keputusan, ikut apa adanya supaya laporan tidak
     #: perlu menghitung ulang - dan supaya keputusan lama tetap bisa dibaca
     #: sesudah rezimnya berganti (bagian 17.27).
@@ -98,8 +127,8 @@ class PutusanRouter:
     alasan: tuple[str, ...] = field(default_factory=tuple)
 
 
-def _kosong(sebab: str, peta: PetaRezim) -> PutusanRouter:
-    return PutusanRouter(None, None, sebab, peta.primary)
+def _kosong(sebab: str, kode: AlasanKosong, peta: PetaRezim) -> PutusanRouter:
+    return PutusanRouter(None, None, sebab, kode, peta.primary)
 
 
 def pilih(
@@ -114,13 +143,16 @@ def pilih(
     """
     if peta.primary is None or peta.primary in _TIDAK_TERBACA:
         return _kosong(
-            f"rezim belum terbaca ({peta.primary or 'tidak ada bacaan'})", peta
+            f"rezim belum terbaca ({peta.primary or 'tidak ada bacaan'})",
+            AlasanKosong.REZIM_TAK_TERBACA,
+            peta,
         )
 
     if peta.primary_confidence < AMBANG_KEYAKINAN_REZIM:
         return _kosong(
             f"keyakinan rezim {peta.primary_confidence:.0f}% di bawah ambang "
             f"{AMBANG_KEYAKINAN_REZIM:.0f}%",
+            AlasanKosong.KEYAKINAN_KURANG,
             peta,
         )
 
@@ -136,6 +168,7 @@ def pilih(
         return _kosong(
             f"skor tertinggi {tertinggi} di bawah ambang {AMBANG_LAYAK} "
             f"pada rezim {peta.primary}",
+            AlasanKosong.TAK_ADA_YANG_COCOK,
             peta,
         )
 
@@ -143,6 +176,7 @@ def pilih(
         champion=layak[0],
         challenger=layak[1] if len(layak) > 1 else None,
         alasan_kosong="",
+        kode_kosong=None,
         regime=peta.primary,
         alasan=layak[0].alasan,
     )

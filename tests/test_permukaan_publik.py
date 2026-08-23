@@ -76,42 +76,23 @@ DISENGAJA: dict[str, str] = {
     # Baris di golongan ini WAJIB hilang lagi. `test_daftar_alasan_tidak_
     # menyimpan_yang_sudah_tersambung` gagal begitu pemanggilnya ada, jadi
     # daftar ini tidak bisa menyimpannya diam-diam sesudah tugasnya selesai.
-    # **Alasan ketiga baris pertama sempat SALAH, dan dikoreksi 2026-08-23.**
-    # Semuanya menyebut "pemanggilnya lahir di Task 4". Tidak benar: Task 4
-    # (`kecocokan.nilai`) menerima hasilnya sebagai PARAMETER, ia tidak
-    # memanggil satu pun. Pemanggil sungguhannya lahir di Task 8, saat fase
-    # router disambungkan ke `UpkeepLoop` dan membaca `signal_snapshots`.
     #
-    # Bedanya penting justru untuk daftar ini: alasan yang menyebut tugas yang
-    # sudah selesai membuat barisnya terlihat siap dihapus, lalu tidak dihapus,
-    # lalu berhenti dibaca.
-    "susun_peta": (
-        "Phase 17 Task 1. Peta rezim multi-timeframe dari `signal_snapshots`; "
-        "pemanggilnya lahir di Task 8 (perangkaian ke UpkeepLoop). Hapus baris "
-        "ini begitu tersambung."
-    ),
-    "stabilitas": (
-        "Phase 17 Task 2. Stabilitas rezim dari riwayat bacaan; pemanggilnya "
-        "lahir di Task 8. Hapus baris ini begitu tersambung."
-    ),
-    "performa_rezim": (
-        "Phase 17 Task 3. Slice performa per rezim yang menolak baris "
-        "turunan; pemanggilnya lahir di Task 8. Hapus begitu tersambung."
-    ),
-    "kandidat_layak": (
-        "Phase 17 Task 5. Menyaring katalog menurut status - ACTIVE boleh "
-        "memimpin, UNDER_REVIEW/DEGRADED hanya boleh menantang. Pemanggilnya "
-        "lahir di Task 8. Hapus begitu tersambung."
-    ),
-    "pilih": (
-        "Phase 17 Task 5. Champion, challenger, dan penolakan yang menyebut "
-        "sebabnya. Pemanggilnya lahir di Task 8. Hapus begitu tersambung."
-    ),
-    "RouterRepository": (
-        "Phase 17 Task 7. Menyimpan pilihan router termasuk ketika tidak ada. "
-        "Migrasi 0041 sudah diterapkan dan SQL-nya sudah diuji bolak-balik ke "
-        "MySQL sungguhan; yang belum ada perakitnya di `app.py`, dan itu Task 8."
-    ),
+    # **Golongan ini KOSONG lagi per 2026-08-23, dan kosongnya itu buktinya
+    # bekerja.** Enam baris pernah berdiri di sini - `susun_peta`,
+    # `stabilitas`, `performa_rezim`, `kandidat_layak`, `pilih`, dan
+    # `RouterRepository`: seluruh Phase 17 Task 1 sampai 7. Task 8
+    # menyambungkan fase routernya ke `UpkeepLoop`, dan keenamnya jatuh sebagai
+    # basi dalam satu langkah.
+    #
+    # Tanpa test ini, keenamnya akan tetap lulus seluruh test unitnya sambil
+    # tidak pernah dipanggil - cacat yang di proyek ini sudah enam kali
+    # ditemukan lewat audit manual, bukan lewat suite.
+    #
+    # Satu kesalahan yang layak diingat: alasan tiga baris pertama semula
+    # menyebut "pemanggilnya lahir di Task 4". Salah - Task 4 menerima hasilnya
+    # sebagai PARAMETER dan tidak memanggil satu pun. Alasan yang menyebut
+    # tugas yang sudah selesai membuat barisnya terlihat siap dihapus, lalu
+    # tidak dihapus, lalu berhenti dibaca.
     # -- 4. Perkakas pengembangan dan kosakata -----------------------------
     "reset_logging": "Mengembalikan logging antar test. Tidak punya arti di produksi.",
     "reset_settings_cache": "Sama seperti `reset_logging`, untuk cache settings.",

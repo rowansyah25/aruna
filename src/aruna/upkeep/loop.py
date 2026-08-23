@@ -280,6 +280,18 @@ class UpkeepStats:
     skenario_nilai_failures: int = 0
     last_skenario_nilai_at: datetime | None = None
 
+    #: Fase router Phase 17 (bagian 17.19). ``last_router_at`` yang tetap
+    #: ``None`` berarti fasenya tidak pernah dipanggil - yang berbeda dari
+    #: dipanggil dan tidak memilih siapa pun.
+    #:
+    #: Bedanya bukan akademis di sini: NONE adalah keluaran yang **wajar** bagi
+    #: router ini, jadi `router_terpilih` nol tidak membuktikan apa pun sendiri.
+    #: Yang membedakan rusak dari sehat adalah `router_dipertimbangkan`.
+    router_dipertimbangkan: int = 0
+    router_terpilih: int = 0
+    router_failures: int = 0
+    last_router_at: datetime | None = None
+
     #: Prediksi yang ditinjau ulang untuk kalibrasi dan reliability (SPEC 29,
     #: 30), dan lintasan yang gagal.
     #: Berapa kali penguncian ditunda karena candle bar itu belum tiba.
@@ -529,6 +541,11 @@ class UpkeepLoop:
         #: skenario tersimpan dengan ``hasil`` NULL selamanya, yang persis
         #: keadaannya sampai baris ini ada.
         scenario_nilai: Any = None,
+        #: Fase router Phase 17 (:class:`aruna.upkeep.router.FaseRouter`,
+        #: bagian 17.19). ``None`` mematikan fasenya - dan dengan itu seluruh
+        #: paket `aruna.router` menjadi kode yang benar, diuji, diekspor, dan
+        #: tidak pernah dipanggil. Penjaganya di `tests/test_router_terpasang`.
+        router: Any = None,
         #: `LearningService` untuk kalibrasi dan reliability (SPEC 29, 30).
         #: ``None`` mematikan fasenya - dan dengan itu keduanya berhenti di
         #: pengukuran terakhir yang seseorang ketik dengan tangan.
@@ -590,6 +607,7 @@ class UpkeepLoop:
         self._putaran_kunci = 0
         self._scenario = scenario
         self._scenario_nilai = scenario_nilai
+        self._router = router
         self._review = review
         self._review_council = review_council
         self._review_signals = review_signals
@@ -1382,6 +1400,37 @@ class UpkeepLoop:
             )
 
         await self._simulasi_skenario(results, moment)
+        await self._jalankan_router(results, moment)
+
+    async def _jalankan_router(self, results: list[Any], moment: datetime) -> None:
+        """Fase router Phase 17 (bagian 17.19).
+
+        Dipanggil dari :meth:`_scan` dengan ``results`` yang sama, dan bukan
+        dari :meth:`cycle`. Router hanya boleh memilih untuk aset yang
+        BENAR-BENAR dipindai siklus ini: batas umur bacaan dihitung dalam bar
+        horizonnya sendiri, jadi jendela 1d membentang delapan hari dan cukup
+        untuk menghidupkan kembali aset yang sudah lama berhenti dipindai.
+        Terukur 2026-08-23: 31 simbol punya bacaan "segar" sementara yang
+        dipindai dua puluh.
+
+        Kegagalannya tidak pernah menjatuhkan siklus - fase ini menghasilkan
+        bukti, bukan keputusan.
+        """
+        if self._router is None:
+            return
+
+        stats = self._stats
+        stats.last_router_at = moment
+        try:
+            hasil = await self._router.jalankan(results, now=moment)
+        except Exception as exc:
+            log.exception("upkeep.router_failed")
+            stats.router_failures += 1
+            stats.note_error(f"router: {type(exc).__name__}: {exc}")
+            return
+
+        stats.router_dipertimbangkan += hasil.dipertimbangkan
+        stats.router_terpilih += hasil.terpilih
 
     async def _simulasi_skenario(self, results: list[Any], moment: datetime) -> None:
         """Fase simulasi berpemicu (bagian 16.17).

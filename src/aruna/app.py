@@ -768,6 +768,13 @@ class ArunaApplication:
             # dan tiap skenario tersimpan dengan `hasil` NULL selamanya. Itu
             # keadaannya sampai baris ini ada.
             scenario_nilai=self._build_scenario_nilai(),
+            # Bagian 17.19. Tanpa baris ini seluruh paket `aruna.router` -
+            # tujuh modul, sembilan puluh test - adalah kode yang benar,
+            # diuji, diekspor, dan tidak pernah dipanggil. Cacat yang sama
+            # sudah lima kali muncul di proyek ini; penjaganya ada di
+            # `tests/test_router_terpasang.py`, berbasis AST karena komentar
+            # ini sendiri menyebut `router=`.
+            router=self._build_router(),
             # SPEC 29, 30. `learning.review()` punya tepat satu pemanggil di
             # seluruh kode - perintah `aruna learn` - dan terukur 2026-08-21
             # tidak seorang pun mengetiknya sejak 2026-08-15: tiga baris di
@@ -959,6 +966,27 @@ class ArunaApplication:
             market_data=self.market_data,
             universe=self.universe,
         )
+
+    def _build_router(self) -> Any:
+        """Fase router Phase 17, atau ``None``.
+
+        **Berjalan tanpa bukti performa, dan itu keadaan bawaan yang benar.**
+        Sesudah Task 3, seluruh slice per-rezim memulangkan ``None`` sampai
+        baris berlabel ``router-1`` cukup banyak - dan baris itu hanya lahir
+        kalau router berjalan. Menunggu bukti sebelum menyalakan berarti
+        menunggu selamanya.
+
+        Karena itu ``performa=`` sengaja tidak diisi hari ini. Ia menunggu
+        pembaca ``strategy_performance`` yang menyaring per ``model_version``,
+        dan pembaca itu tidak berguna sampai ada yang bisa dibacanya.
+        """
+        if self.db is None:
+            return None
+
+        from aruna.db.repositories.router import RouterRepository
+        from aruna.upkeep.router import FaseRouter
+
+        return FaseRouter(repo=RouterRepository(self.db))
 
     def _build_daily(self) -> Any:
         """Laporan harian pukul 00:00 WIB.
