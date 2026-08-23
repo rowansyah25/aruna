@@ -1215,7 +1215,49 @@ git commit -m "Router: strategi gugur saat rezim berganti, dan sebabnya disebut"
 
 ---
 
-## Task 11: Ruff, suite penuh, restart, ukur
+## Task 11: HASIL PENGUKURAN 2026-08-23
+
+Semua sebelas task selesai dan terkomit. Router hidup di produksi.
+
+**Yang terukur sesudah ARUNA dinyalakan:**
+
+```
+dipertimbangkan=20  terpilih=3  berganti=1
+ditolak: KEYAKINAN_KURANG 13, TAK_ADA_YANG_COCOK 3, RISIKO_MENAHAN 1
+20 baris per bar 15m  ->  1.920 baris/hari
+```
+
+Ketiga gerbang menyala. Champion yang terpilih: STR-001 dan STR-003.
+
+**Tiga cacat yang HANYA ketahuan dari pengukuran, bukan dari suite:**
+
+1. **Fase tak pernah berputar.** `_terpindai` menuntut `asset_id` dari
+   `ScanResult`, yang tidak punya bidang itu. Fase pindai jalan 410 kali, baris
+   router nol, tanpa satu pun galat. Penjaga rantai AST **lulus** — ia
+   membuktikan `susun_peta`/`pilih`/`simpan` dipanggil, dan itu benar; yang tak
+   bisa ia lihat: loopnya tak pernah punya iterasi. Yang menyembunyikannya test
+   double buatan sendiri.
+2. **60.632 baris/hari.** Stempel memakai jam sistem, bukan awal bar, jadi kunci
+   UNIQUE `(asset_id, dipilih_pada)` tak pernah bentrok — persis pelajaran
+   `market_snapshots` yang komentar migrasi 0041 sendiri sebut.
+3. **Status dari kode, bukan tabel.** Katalog menulis semua `ACTIVE`; tabel
+   mencatat STR-002 dan STR-005 `UNDER_REVIEW`. Seluruh pembedaan
+   champion/challenger mati senyap, dan dry-run sempat memimpin dengan STR-002 —
+   strategi yang sudah diukur lebih buruk dari rata-rata pada 1.043 sampel.
+
+**Dua temuan yang BUKAN bug router dan menunggu keputusan operator:**
+
+* **Ketiga horizon hampir tak pernah sepakat.** 17 dari 19 aset berkeyakinan
+  tepat 48,0 — satu-satunya nilai yang berarti "ketiganya berselisih, 1d menang
+  karena bobotnya". Konsisten dengan 23,0% kesepakatan pasangan 15m/1h yang
+  terukur atas 3.438 pasangan. Ini sifat classifier-nya, bukan router.
+* **`BREAKOUT` tanpa strategi ACTIVE.** Rezim terbanyak (2.254 dari 9.437 bacaan
+  15m), dan kedua strategi yang menutupinya diturunkan governance menjadi
+  challenger-only. Celah katalog, bukan cacat router.
+
+---
+
+## Task 11 (rencana asli): Ruff, suite penuh, restart, ukur
 
 - [ ] `.\.venv\Scripts\python.exe -m ruff check src tests`
 - [ ] Suite penuh, sendirian
