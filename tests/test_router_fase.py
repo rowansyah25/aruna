@@ -18,18 +18,29 @@ from aruna.core.enums import Market
 from aruna.learning.strategies import Strategy, StrategyStatus
 from aruna.router.label import VERSI_ROUTER
 from aruna.router.putusan import AlasanKosong
+from aruna.scanner.events import ScanResult
 from aruna.upkeep.router import FaseRouter, HasilRouter
 
 SAAT = datetime(2026, 8, 23, 10, 0, tzinfo=UTC)
 
 
-class _Pindai:
-    """Bentuknya mengikuti hasil pemindai, bukan apa yang mudah ditulis."""
+def _Pindai(symbol: str, *, scanned: bool = True) -> ScanResult:
+    """**`ScanResult` yang ASLI, dan itu koreksi 2026-08-23.**
 
-    def __init__(self, symbol: str, asset_id: int | None = 1) -> None:
-        self.symbol = symbol
-        self.asset_id = asset_id
-        self.market = Market.CRYPTO
+    Versi pertama berkas ini memakai kelas palsu dengan bidang `asset_id` dan
+    `market`. `ScanResult` tidak punya keduanya - bidangnya `symbol`, `events`,
+    `usable_bars`, `scanned`, `reason`.
+
+    Akibatnya `_terpindai` membuang SETIAP hasil pemindaian di produksi dan
+    fase router diam tanpa satu pun galat, sementara seluruh berkas test ini
+    hijau. Terbukti sesudah ARUNA dinyalakan: fase pindai berjalan 410 kali,
+    baris router nol.
+
+    Ini persis cacat yang sudah tercatat di proyek ini sebagai "palsu berbentuk
+    salah" - dan aku mengulanginya. Karena itu sekarang yang dipakai kelas
+    sungguhan, bukan tiruan yang bidangnya kupilih sendiri.
+    """
+    return ScanResult(symbol=symbol, events=(), usable_bars=50, scanned=scanned)
 
 
 class _RepoPalsu:
@@ -62,6 +73,11 @@ class _RepoPalsu:
 
     async def pilihan_terakhir(self) -> dict[str, tuple[str | None, str | None]]:
         return self._sebelumnya
+
+    async def identitas(self) -> dict[str, tuple[int, Market]]:
+        return {
+            s: (i, Market.CRYPTO) for i, s in enumerate(sorted(self._peta), start=1)
+        }
 
     async def simpan(self, putusan: Any, **kw: Any) -> int:
         self.disimpan.append((putusan, kw))
@@ -158,7 +174,7 @@ class TestMenolakDenganSebabYangTercatat:
             "ETH/USDT": (_b("1h", "RANGING"),),
         })
         hasil = await _fase(repo=repo).jalankan(
-            [_Pindai("BTC/USDT", 1), _Pindai("ETH/USDT", 2)], now=SAAT
+            [_Pindai("BTC/USDT"), _Pindai("ETH/USDT")], now=SAAT
         )
 
         assert list(hasil.ditolak) == [AlasanKosong.KEYAKINAN_KURANG]
@@ -186,16 +202,91 @@ class TestHanyaYangDipindai:
         assert [kw["symbol"] for _, kw in repo.disimpan] == ["BTC/USDT"]
 
     @pytest.mark.asyncio
-    async def test_hasil_pindai_tanpa_asset_id_dilewati(self) -> None:
+    async def test_simbol_tanpa_identitas_dilewati(self) -> None:
         """`router_pilihan` menyimpan `asset_id` sebagai kunci; menebaknya
         berarti menulis pilihan atas aset yang salah."""
-        repo = _RepoPalsu({"BTC/USDT": _sepakat()})
-        hasil = await _fase(repo=repo).jalankan(
-            [_Pindai("BTC/USDT", asset_id=None)], now=SAAT
-        )
+
+        class _TanpaIdentitas(_RepoPalsu):
+            async def identitas(self) -> dict[str, tuple[int, Market]]:
+                return {}
+
+        repo = _TanpaIdentitas({"BTC/USDT": _sepakat()})
+        hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
 
         assert hasil.dipertimbangkan == 0
         assert repo.disimpan == []
+
+    @pytest.mark.asyncio
+    async def test_aset_yang_tidak_terpindai_dilewati(self) -> None:
+        """`scanned=False` berarti buktinya tidak cukup untuk dipindai - dan
+        yang buktinya tidak cukup untuk dipindai juga tidak cukup untuk
+        dipilihkan strategi."""
+        repo = _RepoPalsu({"BTC/USDT": _sepakat()})
+        hasil = await _fase(repo=repo).jalankan(
+            [_Pindai("BTC/USDT", scanned=False)], now=SAAT
+        )
+
+        assert hasil.dipertimbangkan == 0
+
+    @pytest.mark.asyncio
+    async def test_dua_siklus_dalam_satu_bar_menulis_satu_stempel(self) -> None:
+        """**Cacat yang terukur di produksi 2026-08-23, dan komentar migrasiku
+        sendiri yang melarangnya.**
+
+        Migrasi 0041 menulis: "menyimpan tiap peringkat berarti mengulang
+        `market_snapshots`, yang menjadi 62% basis data ini dengan nol
+        pembaca", dan kolomnya diberi komentar "awal bar yang jadi dasar
+        keputusan, bukan jam sistem". Lalu `now` yang dioper.
+
+        Kunci UNIQUE `(asset_id, dipilih_pada)` karena itu tidak pernah
+        bentrok - resolusinya mikrodetik - dan `INSERT IGNORE` tidak pernah
+        menggigit. Terukur: 18 siklus dalam 8,5 menit, 360 baris, proyeksi
+        **60.632 baris per hari**. Dengan stempel bar: 20 aset x 96 bar =
+        1.920.
+
+        **Satu panggilan tidak bisa menangkap ini**, dan aturannya sudah
+        tercatat di proyek ini: fase per-siklus harus diuji DUA panggilan.
+        """
+        repo = _RepoPalsu({"BTC/USDT": _sepakat()})
+        fase = _fase(repo=repo)
+        await fase.jalankan([_Pindai("BTC/USDT")], now=SAAT + timedelta(seconds=3))
+        await fase.jalankan([_Pindai("BTC/USDT")], now=SAAT + timedelta(seconds=41))
+
+        stempel = {kw["dipilih_pada"] for _, kw in repo.disimpan}
+
+        assert len(repo.disimpan) == 2
+        assert len(stempel) == 1, (
+            "dua siklus dalam bar yang sama menulis stempel berbeda, jadi "
+            "INSERT IGNORE tidak akan pernah menggigit"
+        )
+
+    @pytest.mark.asyncio
+    async def test_bar_berikutnya_stempelnya_berbeda(self) -> None:
+        """Kebalikannya juga dijaga: stempel yang tidak pernah berubah berarti
+        pilihan kedua dan seterusnya hilang selamanya."""
+        repo = _RepoPalsu({"BTC/USDT": _sepakat()})
+        fase = _fase(repo=repo)
+        await fase.jalankan([_Pindai("BTC/USDT")], now=SAAT)
+        await fase.jalankan([_Pindai("BTC/USDT")], now=SAAT + timedelta(minutes=16))
+
+        stempel = {kw["dipilih_pada"] for _, kw in repo.disimpan}
+
+        assert len(stempel) == 2
+
+    def test_bentuk_scanresult_yang_asli_dipakai(self) -> None:
+        """**Penjaga anti-pengulangan.** Cacat yang baru saja terjadi: test
+        double dengan bidang `asset_id` dan `market` yang `ScanResult` tidak
+        punya, sehingga `_terpindai` membuang segalanya di produksi sementara
+        berkas ini hijau.
+
+        Test ini gagal kalau seseorang kembali menuntut bidang yang tidak ada.
+        """
+        import dataclasses
+
+        bidang = {f.name for f in dataclasses.fields(ScanResult)}
+
+        assert "asset_id" not in bidang
+        assert {"symbol", "scanned"} <= bidang
 
 
 class TestKegagalanTidakMenjatuhkan:
@@ -231,7 +322,7 @@ class TestKegagalanTidakMenjatuhkan:
 
         repo = _Rewel({"BTC/USDT": _sepakat(), "ETH/USDT": _sepakat()})
         hasil = await _fase(repo=repo).jalankan(
-            [_Pindai("BTC/USDT", 1), _Pindai("ETH/USDT", 2)], now=SAAT
+            [_Pindai("BTC/USDT"), _Pindai("ETH/USDT")], now=SAAT
         )
 
         assert hasil.dipertimbangkan == 2

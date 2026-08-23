@@ -34,7 +34,7 @@ from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import Any
 
-from aruna.core.enums import Market
+from aruna.core.enums import Horizon, Market
 from aruna.core.logging import get_logger
 from aruna.governance.proposal import MIN_VALIDATION_SAMPLE
 from aruna.learning.strategies import StrategyStatus
@@ -50,10 +50,21 @@ from aruna.router.putusan import (
     pilih,
 )
 from aruna.router.rezim import BacaanRezim, PetaRezim, stabilitas, susun_peta
+from aruna.upkeep.candles import bar_start
 
 log = get_logger(__name__)
 
-__all__ = ["FaseRouter", "HasilRouter"]
+__all__ = ["INTERVAL_ROUTER", "FaseRouter", "HasilRouter"]
+
+
+#: Bar yang menentukan stempel satu-pilihan-per-bar.
+#:
+#: Lima belas menit, sama dengan yang dipindai dan yang disimulasikan
+#: (:data:`~aruna.upkeep.skenario.INTERVAL_PEMICU`). Bukan pilihan estetis:
+#: fase ini dipanggil dari :meth:`~aruna.upkeep.loop.UpkeepLoop._scan`, jadi
+#: kadensnya memang kadens pemindaian, dan stempel yang lebih halus daripada
+#: itu menyimpan pilihan yang sama berulang-ulang.
+INTERVAL_ROUTER = Horizon.M15
 
 
 @dataclass(slots=True)
@@ -131,10 +142,23 @@ class FaseRouter:
         if self._repo is None:
             return keluar
 
+        # **Stempel BAR, bukan jam sistem**, dan itu perbaikan yang diukur di
+        # produksi 2026-08-23. Migrasi 0041 sudah memberi kolomnya komentar
+        # "awal bar yang jadi dasar keputusan, bukan jam sistem" dan kunci
+        # UNIQUE (asset_id, dipilih_pada) supaya siklus yang berulang di bar
+        # yang sama tidak menghasilkan dua baris - lalu `now` yang dioper.
+        #
+        # Kuncinya karena itu tidak pernah bentrok: resolusinya mikrodetik.
+        # Terukur 18 siklus dalam 8,5 menit, 360 baris, proyeksi 60.632 baris
+        # per hari - persis pelajaran `market_snapshots` yang komentar migrasi
+        # itu sendiri sebut. Dengan stempel bar: 20 aset x 96 bar = 1.920.
+        bar = bar_start(now, INTERVAL_ROUTER)
+
         terpindai = _terpindai(hasil_pindai)
         if not terpindai:
             return keluar
 
+        identitas = await self._repo.identitas()
         peta_semua = await self._repo.peta_rezim(sekarang=now)
         riwayat = await self._repo.riwayat_15m(sekarang=now)
         risiko = await self._repo.risiko_terakhir(sekarang=now)
@@ -146,9 +170,13 @@ class FaseRouter:
         strategi = kandidat_layak(katalog)
         boleh_memimpin = frozenset(s.code for s in strategi.champion)
 
-        for simbol, ident in sorted(terpindai.items()):
+        for simbol in sorted(terpindai):
             bacaan = peta_semua.get(simbol)
-            if not bacaan:
+            ident = identitas.get(simbol)
+            # Simbol tanpa identitas dilewati, bukan ditebak: `router_pilihan`
+            # menyimpan `asset_id` sebagai kunci, dan menebaknya berarti
+            # menulis pilihan atas aset yang salah.
+            if not bacaan or ident is None:
                 continue
             keluar.dipertimbangkan += 1
             putusan, peta, stabil = self._putuskan(
@@ -181,7 +209,8 @@ class FaseRouter:
             else:
                 keluar.terpilih += 1
             keluar.disimpan += await self._simpan(
-                putusan, ident=ident, peta=peta, stabil=stabil, now=now
+                putusan, ident=ident, simbol=simbol, peta=peta,
+                stabil=stabil, now=bar,
             )
 
         log.info(
@@ -254,12 +283,13 @@ class FaseRouter:
         self,
         putusan: PutusanRouter,
         *,
-        ident: tuple[int, Market, str],
+        ident: tuple[int, Market],
+        simbol: str,
         peta: PetaRezim,
         stabil: float | None,
         now: datetime,
     ) -> int:
-        asset_id, market, simbol = ident
+        asset_id, market = ident
         try:
             return await self._repo.simpan(
                 putusan,
@@ -278,25 +308,32 @@ class FaseRouter:
             return 0
 
 
-def _terpindai(hasil: list[Any]) -> dict[str, tuple[int, Market, str]]:
-    """Simbol yang benar-benar dipindai siklus ini, berikut identitasnya.
+def _terpindai(hasil: list[Any]) -> frozenset[str]:
+    """Simbol yang benar-benar dipindai siklus ini.
 
-    Yang tidak punya ``asset_id`` dilewati: baris `router_pilihan` menyimpannya
-    sebagai kunci, dan menebaknya berarti menulis pilihan atas aset yang salah.
+    **Hanya simbolnya, dan itu koreksi 2026-08-23.** Versi pertama menuntut
+    ``asset_id`` dan ``market`` dari tiap hasil - dan
+    :class:`~aruna.scanner.events.ScanResult` **tidak punya keduanya**.
+    Bidangnya ``symbol``, ``events``, ``usable_bars``, ``scanned``, ``reason``.
+
+    Akibatnya setiap hasil dibuang, fase router diam, dan tidak satu pun galat
+    muncul. Terukur sesudah ARUNA dinyalakan: fase pindai berjalan 410 kali,
+    baris `router_pilihan` nol. Yang menyembunyikannya adalah test double yang
+    bidangnya kupilih sendiri - cacat yang sudah tercatat di proyek ini sebagai
+    "palsu berbentuk salah".
+
+    Identitasnya sekarang datang dari :meth:`~aruna.db.repositories.router.
+    RouterRepository.identitas`, yang membacanya dari tabel yang memang
+    menyimpannya.
+
+    ``scanned=False`` dilewati: aset yang buktinya tidak cukup untuk dipindai
+    juga tidak cukup untuk dipilihkan strategi.
     """
-    keluar: dict[str, tuple[int, Market, str]] = {}
-    for r in hasil:
-        simbol = getattr(r, "symbol", None)
-        asset_id = getattr(r, "asset_id", None)
-        if not simbol or not asset_id:
-            continue
-        pasar = getattr(r, "market", None)
-        keluar[str(simbol)] = (
-            int(asset_id),
-            pasar if isinstance(pasar, Market) else Market.CRYPTO,
-            str(simbol),
-        )
-    return keluar
+    return frozenset(
+        str(r.symbol)
+        for r in hasil
+        if getattr(r, "symbol", None) and getattr(r, "scanned", True)
+    )
 
 
 #: Status yang dipakai ketika tabel menyebut nilai yang tidak dikenal enum.

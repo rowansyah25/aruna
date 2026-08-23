@@ -223,6 +223,29 @@ class RouterRepository:
             keluar.setdefault(str(r["symbol"]), str(r["risk_level"]))
         return keluar
 
+    async def identitas(self) -> dict[str, tuple[int, Market]]:
+        """``asset_id`` dan pasar per simbol, dari tabel ``assets``.
+
+        **Dibutuhkan karena `ScanResult` tidak membawanya.** Bidangnya
+        ``symbol``, ``events``, ``usable_bars``, ``scanned``, ``reason`` - dan
+        fase router yang menuntut ``asset_id`` dari sana membuang setiap hasil
+        pemindaian, lalu diam tanpa satu pun galat. Terukur 2026-08-23: fase
+        pindai berjalan 410 kali, baris `router_pilihan` nol.
+
+        Pasar yang tidak dikenal dilewati alih-alih ditebak ``CRYPTO``: aset
+        IDX yang salah label akan disimpan sebagai kripto, dan baris itu tidak
+        bisa dibedakan dari yang benar.
+        """
+        rows = await self._db.fetch("SELECT id, symbol, market_code FROM assets")
+        keluar: dict[str, tuple[int, Market]] = {}
+        for r in rows:
+            try:
+                pasar = Market(str(r["market_code"]))
+            except ValueError:
+                continue
+            keluar[str(r["symbol"])] = (int(r["id"]), pasar)
+        return keluar
+
     async def status(self) -> dict[str, str]:
         """Status tiap strategi menurut TABEL, bukan menurut katalog kode.
 
