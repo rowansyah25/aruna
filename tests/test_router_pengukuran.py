@@ -180,6 +180,54 @@ class TestBentuknyaMengikutiPhase12:
         assert isinstance(baris[0]["evidence"], str)
 
 
+class TestGerbangnyaBisaTerBUKA:
+    """**Penulis yang menulis terlalu sedikit sama saja dengan tidak ada.**
+
+    Ini jebakan yang hampir kumasuki: `BATAS_ATRIBUSI` semula meminjam bawaan
+    `LearningRepository.resolved` - lima ratus - yang bukan angka yang dipakai
+    siapa pun. Pemanggil sungguhannya mengoper `AppSettings.review_limit`, dan
+    komentar setelan itu menjelaskan kenapa dari pengukurannya sendiri:
+
+        "Batas yang terlalu kecil tidak membuat kalibrasi salah - ia
+        membuatnya tidak ada, lalu diam."
+    """
+
+    def test_batasnya_cukup_untuk_mencapai_ambang_sampel(self) -> None:
+        """Aritmetikanya, bukan seleranya. Dengan sepersepuluh sinyal yang bisa
+        diatribusikan, lima ratus baris memberi lima puluh atribusi - dibagi
+        beberapa pasangan (strategi, rezim), tidak satu pun akan pernah
+        mencapai seratus. Gerbangnya tidak akan pernah terbuka."""
+        from aruna.db.repositories.router import (
+            BATAS_ATRIBUSI,
+            TINGKAT_ATRIBUSI,
+        )
+        from aruna.governance.proposal import MIN_VALIDATION_SAMPLE
+
+        teratribusi = BATAS_ATRIBUSI * TINGKAT_ATRIBUSI
+
+        cukup = teratribusi >= MIN_VALIDATION_SAMPLE
+
+        assert cukup, (
+            f"{BATAS_ATRIBUSI} baris x {TINGKAT_ATRIBUSI:.0%} = "
+            f"{teratribusi:.0f} atribusi, di bawah ambang "
+            f"{MIN_VALIDATION_SAMPLE} - performa_rezim akan memulangkan None "
+            "selamanya walau penulisnya ada"
+        )
+
+    def test_tidak_meminjam_bawaan_yang_tidak_dipakai_siapa_pun(self) -> None:
+        """`review_limit` adalah angka yang benar-benar dipakai produksi;
+        bawaan repositorinya bukan. Meminjam yang salah adalah cara paling
+        halus untuk membangun sesuatu yang tidak pernah bekerja."""
+        from aruna.core.config import UpkeepSettings
+        from aruna.db.repositories.router import BATAS_ATRIBUSI
+
+        dipakai = int(UpkeepSettings.model_fields["review_limit"].default)
+
+        assert min(BATAS_ATRIBUSI, dipakai) == dipakai, (
+            f"{BATAS_ATRIBUSI} di bawah yang dipakai produksi {dipakai}"
+        )
+
+
 class TestBisaDibacaKembaliOlehTask3:
     def test_baris_yang_ditulis_lolos_performa_rezim(self) -> None:
         """**Ujung ke ujung, dan ini yang membuktikan lingkarannya tertutup.**

@@ -51,12 +51,35 @@ __all__ = [
 #: bar yang salah, atau tidak sama sekali - dan diam.
 LEBAR_BAR_MENIT = 15
 
+#: Berapa bagian sinyal tuntas yang bisa diatribusikan ke sebuah champion.
+#:
+#: **Diukur, bukan diduga.** Router memilih champion untuk sekitar dua dari dua
+#: puluh aset tiap bar - terukur 2026-08-23 - jadi hanya sekitar sepersepuluh
+#: sinyal yang terkunci di dalam bar yang punya pilihan. Sisanya jatuh pada bar
+#: yang router-nya menolak, dan penolakan bukan performa sebuah strategi.
+TINGKAT_ATRIBUSI = 0.1
+
 #: Berapa sinyal tuntas yang dibaca sekali ukur.
 #:
-#: Sama dengan bawaan `LearningRepository.resolved`, dan pertanyaannya memang
-#: sama: berapa riwayat yang cukup untuk mengukur tanpa memindai seluruh tabel
-#: tiap kali.
-BATAS_ATRIBUSI = 500
+#: **Lima ribu, dan lima ratus adalah jebakan yang hampir kumasuki.** Versi
+#: pertama meminjam bawaan ``LearningRepository.resolved`` - lima ratus - yang
+#: **bukan** angka yang dipakai siapa pun: pemanggil sungguhannya mengoper
+#: ``AppSettings.review_limit``, dan komentar setelan itu menjelaskan kenapa
+#: dari pengukuran sendiri::
+#:
+#:     Lima ribu, bukan lima ratus. Terukur 2026-08-21: pada 500 hanya 67
+#:     baris lolos saringan kalibrasi dan tiga dari empat pita kekurangan
+#:     sampel; pada 5.000, 777 lolos dan keempat pita terukur. Batas yang
+#:     terlalu kecil tidak membuat kalibrasi salah - ia membuatnya tidak ada,
+#:     lalu diam.
+#:
+#: Di sini akibatnya lebih tajam. Dengan :data:`TINGKAT_ATRIBUSI` sepersepuluh,
+#: lima ratus baris menghasilkan sekitar lima puluh atribusi - dibagi beberapa
+#: pasangan (strategi, rezim), tidak satu pun akan pernah mencapai
+#: ``MIN_VALIDATION_SAMPLE`` yang seratus. Gerbangnya **tidak akan pernah
+#: terbuka**, dan `performa_rezim` memulangkan ``None`` selamanya persis
+#: seperti sebelum penulisnya ada. `test_router_pengukuran` yang menjaganya.
+BATAS_ATRIBUSI = 5000
 
 
 #: Berapa bar sendiri sebelum sebuah bacaan rezim dianggap basi.
