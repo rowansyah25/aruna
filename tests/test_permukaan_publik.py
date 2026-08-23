@@ -107,6 +107,11 @@ DISENGAJA: dict[str, str] = {
         "Phase 17 Task 5. Champion, challenger, dan penolakan yang menyebut "
         "sebabnya. Pemanggilnya lahir di Task 8. Hapus begitu tersambung."
     ),
+    "RouterRepository": (
+        "Phase 17 Task 7. Menyimpan pilihan router termasuk ketika tidak ada. "
+        "Migrasi 0041 sudah diterapkan dan SQL-nya sudah diuji bolak-balik ke "
+        "MySQL sungguhan; yang belum ada perakitnya di `app.py`, dan itu Task 8."
+    ),
     # -- 4. Perkakas pengembangan dan kosakata -----------------------------
     "reset_logging": "Mengembalikan logging antar test. Tidak punya arti di produksi.",
     "reset_settings_cache": "Sama seperti `reset_logging`, untuk cache settings.",
