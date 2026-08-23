@@ -1245,6 +1245,31 @@ Ketiga gerbang menyala. Champion yang terpilih: STR-001 dan STR-003.
    champion/challenger mati senyap, dan dry-run sempat memimpin dengan STR-002 —
    strategi yang sudah diukur lebih buruk dari rata-rata pada 1.043 sampel.
 
+**CELAH TASK 3 SUDAH DITUTUP** (2026-08-23, sesudah audit).
+
+`performa_rezim` menyaring baris `strategy_performance` berlabel `router-1`, dan
+tidak seorang pun menulisnya — rencana ini menyerahkannya ke Phase 12. Sekarang
+`router/pengukuran.py` yang menulisnya: pilihan router yang sinyalnya sudah
+tuntas menjadi baris performa, sekali per bar.
+
+Terukur langsung sesudah menyala:
+
+```
+STR-001|regime=ALL                19 sampel
+STR-001|regime=TRENDING_BEARISH   14
+STR-001|regime=TRENDING_BULLISH    5
+```
+
+14 + 5 = 19. **`ALL` benar-benar berbeda dari tiap bagiannya, dan STR-001 muncul
+di dua rezim** — keduanya mustahil di baris `learn-12.0`, tempat `classify()`
+memetakan satu-ke-satu sehingga `regime=X` selalu identik dengan `regime=ALL`.
+Itu persis yang Task 3 janjikan.
+
+**Yang harus dikatakan terus terang:** angkanya **observasional**, bukan edge
+strategi. ARUNA menganalisis saja, dan jalur sinyal tidak membaca pilihan
+router — jadi yang terjawab adalah "ketika router merekomendasikan STR-001,
+bagaimana sinyal ARUNA di jendela itu berakhir", bukan "STR-001 menang 62%".
+
 **Dua temuan yang BUKAN bug router dan menunggu keputusan operator:**
 
 * **Ketiga horizon hampir tak pernah sepakat.** 17 dari 19 aset berkeyakinan
