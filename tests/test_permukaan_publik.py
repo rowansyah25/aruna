@@ -71,6 +71,15 @@ DISENGAJA: dict[str, str] = {
         "disediakan KEMAMPUANNYA, bukan pemakaiannya."
     ),
     "idx_tick_size": "Fraksi harga IDX. Dipakai saat menyemai universe, bukan tiap siklus.",
+    # -- 5. Sedang dibangun: sudah lahir, pemanggilnya belum -----------------
+    #
+    # Baris di golongan ini WAJIB hilang lagi. `test_daftar_alasan_tidak_
+    # menyimpan_yang_sudah_tersambung` gagal begitu pemanggilnya ada, jadi
+    # daftar ini tidak bisa menyimpannya diam-diam sesudah tugasnya selesai.
+    "susun_peta": (
+        "Phase 17 Task 1. Peta rezim multi-timeframe; pemanggilnya lahir di "
+        "Task 4 (`router.kecocokan.nilai`). Hapus baris ini begitu tersambung."
+    ),
     # -- 4. Perkakas pengembangan dan kosakata -----------------------------
     "reset_logging": "Mengembalikan logging antar test. Tidak punya arti di produksi.",
     "reset_settings_cache": "Sama seperti `reset_logging`, untuk cache settings.",
