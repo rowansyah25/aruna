@@ -31,9 +31,13 @@ SRC = Path(__file__).resolve().parent.parent / "src" / "aruna"
 DISENGAJA: dict[str, str] = {
     # -- 1. Kawat perangkap: ADA supaya tidak pernah menyala ----------------
     "RealTradingForbiddenError": (
-        "SPEC 46: MVP paper-trading. Tidak ada jalur kode menuju order sungguhan, "
-        "dan kelas ini ada supaya percobaan di masa depan gagal KERAS. Punya "
-        "pemanggil berarti ada yang mencoba - itu kabar buruk, bukan perbaikan."
+        "SPEC 46: MVP paper-trading. **Yang benar-benar menjaga BUKAN kelas ini** "
+        "melainkan `AppSettings._enforce_paper_only`, yang menolak "
+        "ARUNA_REAL_TRADING_ENABLED=true saat konfigurasi dibaca sehingga ARUNA "
+        "tidak menyala sama sekali. Ia melempar ValueError, bukan kelas ini, "
+        "karena validator pydantic menuntutnya. Kelas ini disiapkan untuk jalur "
+        "eksekusi yang belum ada; hari ini ia dokumentasi berbentuk kode. "
+        "Operator memutuskan membiarkannya 2026-08-23."
     ),
     "DataLeakageError": (
         "SPEC 24. Sinyal yang tersentuh data masa depan harus dibatalkan, bukan "
