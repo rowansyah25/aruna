@@ -18,14 +18,10 @@ di atas empat sumber yang sudah tersimpan.
 
 ## PERINGATAN YANG DICATAT, BUKAN DIDIAMKAN
 
-### 1. Spec menuntut angka yang mustahil ada di desain sekarang
+### 1. Performa per rezim yang tersimpan sekarang MELINGKAR
 
-§17.37 minta performa strategi **per rezim**, dan mencontohkan:
-
-```
-TRENDING UP:  Trend Following 87%,  Mean Reversion 54%
-RANGE:        Trend Following 54%,  Mean Reversion 74%
-```
+§17.37 minta performa strategi **per rezim**, dan operator memutuskan itu
+dipertahankan. Bisa — tapi tidak dari baris yang ada sekarang.
 
 Diperiksa langsung di `strategy_performance` 2026-08-23:
 
@@ -36,16 +32,32 @@ Diperiksa langsung di `strategy_performance` 2026-08-23:
 | STR-002 | `regime=ALL` | 546 / 1605 |
 | STR-002 | `regime=BREAKOUT` | **546 / 1605** |
 
-Identik. Sebabnya struktural, bukan bug data:
-`learning.strategies.classify()` **menurunkan strategi DARI rezim**, jadi
-sebuah strategi hanya pernah muncul pada satu rezim. "Performa Trend Following
-saat RANGE" tidak ada dan tidak bisa ada — karena saat RANGE, tidak ada
-prediksi yang pernah diberi label Trend Following.
+Identik, dan sebabnya struktural bukan bug data.
+`learning.strategies.classify()` **menurunkan strategi DARI rezim** lewat peta
+balik `_BY_REGIME` yang satu-rezim-satu-strategi. Jadi sebuah strategi hanya
+pernah dilabeli pada satu rezim, dan `regime=X` selalu memulangkan baris yang
+sama dengan `regime=ALL`.
 
-**Konsekuensinya menentukan seluruh Phase 17.** Router yang memeringkat
-memakai angka ini akan memeringkat satu kandidat melawan dirinya sendiri.
-Task 3 menangani ini, dan caranya bukan menambah kolom melainkan mengubah apa
-yang di-slice.
+**Yang mengunci bukan katalognya.** `preferred_regimes` sudah multi-nilai:
+
+```
+STR-004  ("RANGING", "LOW_VOLATILITY")
+STR-005  ("TRENDING", "BREAKOUT")
+```
+
+STR-005 boleh dipakai saat BREAKOUT — tapi `_BY_REGIME` memetakan BREAKOUT ke
+STR-002, jadi ia tidak pernah kebagian.
+
+**Jalan keluarnya justru Phase 17 itu sendiri.** Begitu ROUTER yang memilih -
+bukan turunan dari rezim - sebuah strategi bisa terpakai di beberapa rezim, dan
+pasangan (strategi, rezim) menjadi pengamatan yang sungguhan. Task 3
+membangunnya.
+
+**Harganya jujur: baris lama tidak bisa diselamatkan.** Ia dilabeli oleh
+turunan, dan tidak ada cara membedakan "STR-005 dipilih saat TRENDING" dari
+"STR-005 ADALAH nama untuk TRENDING". Karena itu Task 3 memisahkan keduanya
+lewat `model_version`, dan router menolak memakai slice per-rezim sampai baris
+baru cukup banyak - bukan mencampurnya diam-diam.
 
 ### 2. Angka nyatanya jauh dari contoh spec
 
@@ -281,92 +293,144 @@ git commit -m "Router: stabilitas rezim dari riwayat bacaan"
 
 ---
 
-## Task 3: Slice performa yang benar-benar menyaring (§17.16, §17.37)
+## Task 3: Bikin slice per-rezim BERARTI (§17.16, §17.37)
 
 **Ini task terpenting di rencana ini.** Tanpanya router memeringkat kandidat
 melawan dirinya sendiri.
 
-**Files:** ubah `src/aruna/learning/strategies.py`,
-`tests/test_router_performa.py`
+Operator memutuskan performa per rezim dipertahankan. Yang dibangun di sini
+bukan slice baru melainkan **sumber labelnya**: selama `classify()` yang
+melabeli, (strategi, rezim) melingkar; begitu ROUTER yang melabeli, ia menjadi
+pengamatan.
+
+**Files:** ubah `src/aruna/learning/strategies.py`, buat
+`src/aruna/router/label.py`, `tests/test_router_performa.py`
 
 **Interfaces:**
-- Produces: `SLICE_BERARTI: frozenset[str]` — dimensi yang benar-benar
-  memisahkan; `performa_relevan(rows, *, regime) -> dict[str, Slice]`
+- Produces:
+  - `VERSI_ROUTER: str` — penanda baris yang dilabeli router
+  - `dilabeli_router(row) -> bool`
+  - `performa_rezim(rows, *, kode, regime, minimum) -> Slice | None`
 
-- [ ] **Step 1: Tulis test yang membuktikan masalahnya ada**
+- [ ] **Step 1: Test yang membuktikan baris LAMA melingkar**
 
 ```python
-def test_slice_regime_tidak_menyaring_apa_pun() -> None:
-    """**Temuan 2026-08-23.** `classify()` menurunkan strategi DARI rezim,
-    jadi sebuah strategi hanya pernah muncul pada satu rezim - dan
-    `regime=X` selalu identik dengan `regime=ALL`.
+def test_label_lama_melingkar_dan_itu_tercatat() -> None:
+    """**Temuan 2026-08-23.** `classify()` memakai peta balik
+    satu-rezim-satu-strategi, jadi sebuah strategi hanya pernah dilabeli pada
+    satu rezim - dan `regime=X` selalu identik dengan `regime=ALL`.
 
     Terukur di produksi: STR-005 regime=ALL 188/726, regime=TRENDING
-    188/726. Router yang memeringkat memakai angka ini memeringkat satu
-    kandidat melawan dirinya sendiri.
+    188/726.
+
+    Test ini menahan siapa pun dari mengira baris lama bisa dipakai
+    memeringkat.
     """
     from aruna.learning.strategies import classify
 
-    rezim = ("TRENDING_BULLISH", "RANGING", "BREAKOUT", "REVERSAL")
+    rezim = ("TRENDING", "RANGING", "BREAKOUT", "REVERSAL", "LOW_VOLATILITY")
     per_strategi: dict[str, set[str]] = {}
     for r in rezim:
         per_strategi.setdefault(classify(r), set()).add(r)
 
     ganda = {k: v for k, v in per_strategi.items() if len(v) > 1}
     assert not ganda, (
-        "kalau sebuah strategi bisa muncul di lebih dari satu rezim, "
-        f"slice per-rezim sudah berarti dan task ini tidak perlu: {ganda}"
+        "classify() sekarang memetakan satu strategi ke beberapa rezim - "
+        f"kalau itu disengaja, task ini harus diukur ulang: {ganda}"
     )
 ```
 
 - [ ] **Step 2: Jalankan — HIJAU, dan itu yang membuktikan masalahnya**
 
-Run: `.\.venv\Scripts\python.exe -m pytest -q tests/test_router_performa.py -k tidak_menyaring`
+Run: `.\.venv\Scripts\python.exe -m pytest -q tests/test_router_performa.py -k melingkar`
 Expected: PASS — pemetaannya memang satu-ke-satu.
 
-- [ ] **Step 3: Tulis test untuk slice yang BERARTI**
+- [ ] **Step 3: Test bahwa baris router BISA memuat satu strategi di banyak rezim**
 
 ```python
-def test_slice_yang_dipakai_router_memisahkan_sesuatu() -> None:
-    """Dimensi yang berarti adalah yang bisa berbeda untuk strategi yang sama:
-    aset, timeframe, dan sesi. Rezim tidak, karena ia yang MELAHIRKAN
-    strateginya."""
-    from aruna.learning.strategies import SLICE_BERARTI
+def test_router_boleh_melabeli_satu_strategi_di_banyak_rezim() -> None:
+    """Inilah yang membuat slice per-rezim berarti. `preferred_regimes` sudah
+    multi-nilai - STR-005 menyukai TRENDING DAN BREAKOUT - yang mengunci cuma
+    peta balik di `classify`."""
+    from aruna.learning.strategies import by_code
 
-    assert "regime" not in SLICE_BERARTI
-    assert {"asset", "horizon"} <= SLICE_BERARTI
+    s = by_code("STR-005")
+
+    assert len(s.preferred_regimes) > 1
+    assert {"TRENDING", "BREAKOUT"} <= set(s.preferred_regimes)
 ```
 
-- [ ] **Step 4: Jalankan, pastikan MERAH**
-
-Expected: FAIL — `ImportError: cannot import name 'SLICE_BERARTI'`
-
-- [ ] **Step 5: Implementasi**
+- [ ] **Step 4: Test gerbang sampel — baris lama TIDAK boleh dicampur**
 
 ```python
-#: Dimensi yang benar-benar memisahkan performa satu strategi.
-#:
-#: **`regime` sengaja TIDAK ada di sini**, dan itu temuan bukan kelalaian.
-#: :func:`classify` menurunkan strategi DARI rezim, jadi tiap strategi hanya
-#: pernah muncul pada satu rezim - `regime=TRENDING` dan `regime=ALL`
-#: memulangkan baris yang sama persis. Terukur 2026-08-23: STR-005
-#: 188W/726L pada keduanya.
-#:
-#: Yang tersisa memang memisahkan: strategi yang sama dipakai pada aset
-#: berbeda, horizon berbeda, dan sesi berbeda, dan hasilnya boleh berbeda.
-SLICE_BERARTI: frozenset[str] = frozenset({"asset", "horizon", "session"})
+def test_slice_rezim_ditahan_sampai_baris_router_cukup() -> None:
+    """Mencampur baris turunan dengan baris router menghasilkan angka yang
+    bukan milik keduanya. Ditahan, bukan dicampur - dan `None` berarti
+    "belum bisa dijawab", bukan "nol"."""
+    from aruna.router.label import performa_rezim
+
+    lama = [_row(kode="STR-005", regime="TRENDING", versi="derivasi-1", n=914)]
+
+    assert performa_rezim(lama, kode="STR-005", regime="TRENDING",
+                          minimum=100) is None
 ```
 
-- [ ] **Step 6: Jalankan, pastikan HIJAU**
+- [ ] **Step 5: Jalankan, pastikan MERAH**
 
-- [ ] **Step 7: Commit**
+Expected: FAIL — `ModuleNotFoundError: No module named 'aruna.router.label'`
+
+- [ ] **Step 6: Implementasi**
+
+```python
+#: Penanda baris performa yang label rezimnya berasal dari PILIHAN router.
+#:
+#: Baris yang lebih tua dilabeli `learning.strategies.classify`, yang
+#: menurunkan strategi DARI rezim - jadi (strategi, rezim) di sana melingkar
+#: dan tidak mengukur apa pun. Keduanya tidak boleh dijumlahkan: hasilnya
+#: bukan milik salah satu.
+VERSI_ROUTER = "router-1"
+
+
+def dilabeli_router(row: Any) -> bool:
+    return str(row.get("model_version", "")).startswith(VERSI_ROUTER)
+
+
+def performa_rezim(rows, *, kode, regime, minimum):
+    """Performa satu strategi pada satu rezim, atau ``None``.
+
+    ``None`` berarti **belum bisa dijawab** - bukan nol, dan bukan buruk.
+    Pemanggil yang menyamakannya dengan nol akan membuat setiap strategi baru
+    terlihat gagal sejak hari pertama.
+    """
+    cocok = [
+        r for r in rows
+        if r.get("strategy_code") == kode
+        and (r.get("dimensions") or {}).get("regime") == regime
+        and dilabeli_router(r)
+    ]
+    n = sum(int(r.get("sample_size") or 0) for r in cocok)
+    if n < minimum:
+        return None
+    menang = sum(int(r.get("wins") or 0) for r in cocok)
+    return Slice(win_rate=menang / n, sample_size=n)
+```
+
+- [ ] **Step 7: Jalankan, pastikan HIJAU**
+
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/aruna/learning/strategies.py tests/test_router_performa.py
-git commit -m "Slice performa: regime tidak menyaring, aset/horizon/sesi menyaring"
+git add src/aruna/router/label.py tests/test_router_performa.py
+git commit -m "Slice per-rezim jadi berarti: router yang melabeli, bukan turunan"
 ```
 
-**Cabut-uji:** tambahkan `"regime"` ke `SLICE_BERARTI` → test MERAH.
+**Cabut-uji:** buang penyaring `dilabeli_router` → test gerbang sampel MERAH,
+karena baris turunan 914 sampel akan lolos.
+
+**Catatan untuk Task 9:** sampai baris `router-1` mencapai `minimum`, seluruh
+slice per-rezim memulangkan `None` dan router memeringkat tanpa performa - hanya
+kecocokan rezim, keyakinan, dan stabilitas. **Itu perilaku yang benar, dan
+harus dilaporkan apa adanya**, bukan ditutupi dengan memakai baris lama.
 
 ---
 
@@ -804,5 +868,13 @@ Task 4 · §17.27 Task 7 · §17.29–17.30 Task 5 · §17.44 Task 7 (`versi_rou
 
 **Konsistensi tipe.** `BacaanRezim` dan `PetaRezim` lahir di Task 1, dipakai
 Task 4 dan 5. `Kecocokan` lahir di Task 4, dipakai Task 5 dan 7. `stabilitas`
-lahir di Task 2, dipakai Task 4. `SLICE_BERARTI` lahir di Task 3, dipakai
-Task 4.
+lahir di Task 2, dipakai Task 4. `performa_rezim` dan `VERSI_ROUTER` lahir di
+Task 3, dipakai Task 4 dan 7.
+
+**Satu keputusan operator yang tercatat.** Performa per rezim dipertahankan
+(2026-08-23), walau baris yang ada sekarang melingkar. Konsekuensinya diterima
+sadar: router berjalan **tanpa bukti performa** sampai baris berlabel
+`router-1` mencapai ambang sampelnya, dan selama itu ia memeringkat hanya dari
+kecocokan rezim, keyakinan, dan stabilitas. Alternatifnya - memakai baris
+turunan - akan memberi angka sejak hari pertama, dan angka itu akan
+memeringkat tiap kandidat melawan dirinya sendiri.
