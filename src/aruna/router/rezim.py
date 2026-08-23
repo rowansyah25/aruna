@@ -20,11 +20,14 @@ memberitahunya.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from itertools import pairwise
 
 __all__ = [
     "BOBOT_INTERVAL",
+    "MINIMUM_RIWAYAT",
     "BacaanRezim",
     "PetaRezim",
+    "stabilitas",
     "susun_peta",
 ]
 
@@ -52,6 +55,12 @@ BOBOT_INTERVAL: dict[str, float] = {
     "4h": 2.0,
     "1d": 2.4,
 }
+
+#: Berapa bacaan minimum sebelum stabilitas bisa dihitung sama sekali.
+#:
+#: Dua, dan angkanya bukan pilihan: stabilitas mengukur berapa PASANG bacaan
+#: berurutan yang tidak berpindah, dan satu bacaan tidak punya pasangan.
+MINIMUM_RIWAYAT = 2
 
 #: Bobot untuk interval yang tidak ada di :data:`BOBOT_INTERVAL`.
 #:
@@ -131,3 +140,30 @@ def susun_peta(bacaan: tuple[BacaanRezim, ...]) -> PetaRezim:
     hilang = tuple(i for i in BOBOT_INTERVAL if i not in ada)
 
     return PetaRezim(primary, percaya, sekunder, tuple(bacaan), hilang)
+
+
+def stabilitas(riwayat: tuple[str, ...]) -> float | None:
+    """Berapa persen bacaan berurutan yang TIDAK berpindah rezim.
+
+    ``None`` berarti **belum bisa diukur**, bukan "sangat tidak stabil". Nol
+    akan terbaca sebagai rezim yang berkedip terus, dan itu kesimpulan yang
+    jauh lebih dramatis daripada "baru satu bacaan" - pemanggil yang
+    menyamakannya akan menurunkan keyakinan setiap kali sebuah aset baru mulai
+    dipantau.
+
+    **Kenapa angka ini dibutuhkan sama sekali.** Terukur pada Phase 16
+    2026-08-22: classifier 15m berpindah rezim pada 30,6% bacaan berurutan,
+    dan sebelas dari dua puluh simbol melihat tiga rezim berbeda dalam dua
+    jam. Router yang memilih strategi tanpa memeriksa ini akan memilih atas
+    rezim yang sudah berganti sebelum sinyalnya sempat terbit - dan bagian
+    17.10 menuntut keyakinan strategi diturunkan justru pada keadaan itu.
+
+    Yang dihitung PASANGAN berurutan, bukan berapa rezim berbeda yang muncul.
+    Riwayat ``A A A B B B`` berpindah sekali dan sisanya diam; menghitungnya
+    sebagai "dua rezim, jadi tidak stabil" akan menghukum tren yang berganti
+    sekali sama beratnya dengan yang berkedip lima kali.
+    """
+    if len(riwayat) < MINIMUM_RIWAYAT:
+        return None
+    tetap = sum(1 for a, b in pairwise(riwayat) if a == b)
+    return round(100.0 * tetap / (len(riwayat) - 1), 1)

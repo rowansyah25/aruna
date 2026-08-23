@@ -13,8 +13,10 @@ from __future__ import annotations
 
 from aruna.router.rezim import (
     BOBOT_INTERVAL,
+    MINIMUM_RIWAYAT,
     BacaanRezim,
     PetaRezim,
+    stabilitas,
     susun_peta,
 )
 
@@ -133,6 +135,46 @@ class TestBobotnyaKebijakan:
 
         assert urut == sorted(urut)
         assert BOBOT_INTERVAL["1d"] > BOBOT_INTERVAL["5m"]
+
+
+class TestStabilitas:
+    """Bagian 17.10."""
+
+    def test_rezim_yang_diam_stabil(self) -> None:
+        assert stabilitas(("TRENDING_BULLISH",) * 8) == 100.0
+
+    def test_rezim_yang_berkedip_tidak_stabil(self) -> None:
+        """**Terukur di Phase 16, 2026-08-22:** classifier 15m berpindah pada
+        30,6% bacaan berurutan, dan 11 dari 20 simbol melihat tiga regime
+        berbeda dalam dua jam.
+
+        Router yang tidak menghitungnya akan memilih strategi atas rezim yang
+        sudah berganti sebelum sinyalnya sempat terbit.
+        """
+        berkedip = ("TRENDING_BULLISH", "RANGING") * 4
+
+        assert stabilitas(berkedip) < 40.0
+
+    def test_setengah_berpindah_setengah_diam(self) -> None:
+        """Empat pasang berurutan, dua di antaranya berpindah."""
+        assert stabilitas(("A", "A", "B", "B", "C")) == 50.0
+
+    def test_riwayat_terlalu_pendek_tidak_terukur(self) -> None:
+        """``None`` berarti BELUM BISA DIUKUR, bukan "sangat tidak stabil".
+
+        Nol akan terbaca sebagai rezim yang berkedip terus - dan itu
+        kesimpulan yang jauh lebih dramatis daripada "baru satu bacaan".
+        Pemanggil yang menyamakannya akan menurunkan keyakinan setiap kali
+        sebuah aset baru mulai dipantau.
+        """
+        assert stabilitas(()) is None
+        assert stabilitas(("TRENDING_BULLISH",)) is None
+        assert MINIMUM_RIWAYAT == 2
+
+    def test_ambangnya_disebut_bukan_diketik_ulang(self) -> None:
+        cukup = ("A",) * MINIMUM_RIWAYAT
+
+        assert stabilitas(cukup) is not None
 
 
 class TestBentuknya:

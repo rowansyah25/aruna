@@ -80,6 +80,10 @@ DISENGAJA: dict[str, str] = {
         "Phase 17 Task 1. Peta rezim multi-timeframe; pemanggilnya lahir di "
         "Task 4 (`router.kecocokan.nilai`). Hapus baris ini begitu tersambung."
     ),
+    "stabilitas": (
+        "Phase 17 Task 2. Stabilitas rezim dari riwayat bacaan; pemanggilnya "
+        "lahir di Task 4. Hapus baris ini begitu tersambung."
+    ),
     # -- 4. Perkakas pengembangan dan kosakata -----------------------------
     "reset_logging": "Mengembalikan logging antar test. Tidak punya arti di produksi.",
     "reset_settings_cache": "Sama seperti `reset_logging`, untuk cache settings.",
