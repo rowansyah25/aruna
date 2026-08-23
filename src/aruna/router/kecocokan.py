@@ -142,6 +142,18 @@ class Kecocokan:
     sampel: int = 0
     #: ``None`` berarti drawdown-nya belum terukur, bukan bahwa ia aman.
     risiko: RiskLevel | None = None
+    #: Apakah strategi ini boleh menjadi CHAMPION, bukan cuma challenger.
+    #:
+    #: Dibawa di sini alih-alih disaring di hulu supaya penantang ikut DINILAI
+    #: dan ikut tercatat. Versi pertama menyaringnya sebelum penilaian, dan
+    #: akibatnya seluruh 680 baris produksi berkolom ``challenger`` NULL -
+    #: strategi berstatus ``UNDER_REVIEW`` tidak pernah muncul di mana pun,
+    #: padahal seluruh alasan slot challenger ada justru untuk mereka.
+    #:
+    #: Bawaannya ``True``: yang dinilai tanpa keterangan status adalah kandidat
+    #: penuh. Yang membatasinya :func:`~aruna.router.peringkat.kandidat_layak`,
+    #: satu tempat.
+    boleh_memimpin: bool = True
 
 
 def nilai(
@@ -150,6 +162,7 @@ def nilai(
     peta: PetaRezim,
     performa: SlicePerforma | None,
     stabil: float | None,
+    boleh_memimpin: bool = True,
 ) -> Kecocokan:
     """Skor kecocokan satu strategi. Tidak pernah melempar.
 
@@ -221,4 +234,5 @@ def nilai(
         alasan=tuple(alasan),
         sampel=performa.sample_size if performa is not None else 0,
         risiko=risiko,
+        boleh_memimpin=boleh_memimpin,
     )

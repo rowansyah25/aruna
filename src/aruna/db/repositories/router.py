@@ -246,6 +246,33 @@ class RouterRepository:
             keluar[str(r["symbol"])] = (int(r["id"]), pasar)
         return keluar
 
+    async def semua_slice(self) -> list[dict[str, Any]]:
+        """Baris ``strategy_performance``, seluruhnya, tanpa disaring di SQL.
+
+        **Penyaring labelnya sengaja tidak diulang di sini.**
+        :func:`~aruna.router.label.dilabeli_router` yang memutuskan baris mana
+        yang dilabeli router, dan menaruh aturan yang sama di WHERE berarti dua
+        tempat yang harus tetap sepakat selamanya - lalu yang kedua akan diam
+        saat format versinya berubah.
+
+        Murah karena tabelnya kecil: 16 baris pada 2026-08-23. Kalau slice per
+        rezim membuatnya tumbuh ke ribuan, penyaringan boleh turun ke SQL -
+        tapi dengan ambang yang diukur, bukan dengan dugaan.
+
+        **Hari ini hasilnya PASTI kosong sesudah disaring, dan itu bukan
+        kerusakan.** Tidak ada yang menulis baris berlabel ``router-1`` ke
+        ``strategy_performance``; pengisiannya milik Phase 12, dan rencana
+        Phase 17 sudah mencatatnya sebagai celah yang disebut, bukan
+        disembunyikan. Yang dibangun di sini pembacanya, supaya baris pertama
+        yang muncul langsung terpakai alih-alih menunggu seseorang ingat.
+        """
+        rows = await self._db.fetch(
+            "SELECT strategy_code, dimensions, wins, losses, sample_size, "
+            "       max_drawdown, model_version "
+            "FROM strategy_performance"
+        )
+        return [dict(r) for r in rows]
+
     async def status(self) -> dict[str, str]:
         """Status tiap strategi menurut TABEL, bukan menurut katalog kode.
 

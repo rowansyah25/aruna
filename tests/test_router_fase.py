@@ -534,6 +534,49 @@ class TestStatusDibacaDariTabelBukanDariKode:
         assert hasil.terpilih == 0
 
 
+class TestPenantangSampaiKeBarisTersimpan:
+    """**Audit 2026-08-23: seluruh 680 baris produksi berkolom `challenger`
+    NULL.** Fase hanya menilai `strategi.champion`; daftar `challenger` yang
+    `kandidat_layak` hasilkan dihitung lalu dibuang."""
+
+    @pytest.mark.asyncio
+    async def test_strategi_yang_ditimbang_mengisi_slot_challenger(self) -> None:
+        class _Katalog:
+            async def status(self) -> dict[str, str]:
+                return {"STR-005": "UNDER_REVIEW"}
+
+        repo = _RepoPalsu({"BTC/USDT": _sepakat("TRENDING")})
+        await _fase(repo=repo, status=_Katalog()).jalankan(
+            [_Pindai("BTC/USDT")], now=SAAT
+        )
+        putusan, _ = repo.disimpan[0]
+
+        assert putusan.champion.kode == "STR-001"
+        assert putusan.challenger is not None
+        assert putusan.challenger.kode == "STR-005"
+
+    @pytest.mark.asyncio
+    async def test_breakout_yang_semua_kandidatnya_ditimbang(self) -> None:
+        """Keadaan produksi apa adanya: `BREAKOUT` adalah rezim terbanyak dan
+        kedua strategi yang menutupinya berstatus UNDER_REVIEW. Yang dilaporkan
+        harus HANYA_PENANTANG, bukan TAK_ADA_YANG_COCOK - yang terakhir
+        mengirim pembacanya menulis strategi baru yang sebenarnya sudah ada."""
+
+        class _Katalog:
+            async def status(self) -> dict[str, str]:
+                return {"STR-002": "UNDER_REVIEW", "STR-005": "UNDER_REVIEW"}
+
+        repo = _RepoPalsu({"BTC/USDT": _sepakat("BREAKOUT")})
+        hasil = await _fase(repo=repo, status=_Katalog()).jalankan(
+            [_Pindai("BTC/USDT")], now=SAAT
+        )
+        putusan, _ = repo.disimpan[0]
+
+        assert hasil.ditolak == {AlasanKosong.HANYA_PENANTANG: 1}
+        assert putusan.challenger is not None
+        assert putusan.alasan
+
+
 class TestStatusMenyaringSampaiKeSini:
     @pytest.mark.asyncio
     async def test_under_review_tidak_pernah_jadi_champion(self) -> None:

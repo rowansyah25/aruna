@@ -241,8 +241,18 @@ class FaseRouter:
         peta = susun_peta(bacaan)
         stabil = stabilitas(riwayat)
 
+        # **Yang dinilai `challenger`, bukan `champion`** - ia himpunan yang
+        # lebih besar dan memuat keduanya. Versi pertama menilai `champion`
+        # saja, dan akibatnya seluruh 680 baris produksi berkolom `challenger`
+        # NULL: strategi berstatus `UNDER_REVIEW` tidak pernah muncul di mana
+        # pun, padahal seluruh alasan slot challenger ada justru untuk mereka.
+        #
+        # Yang menahan mereka memimpin sekarang `boleh_memimpin` di tiap
+        # `Kecocokan`, bukan penyaringan di hulu - jadi mereka ikut dinilai dan
+        # ikut tercatat.
+        boleh_memimpin = {s.code for s in strategi.champion}
         kandidat: list[Kecocokan] = []
-        for s in strategi.champion:
+        for s in strategi.challenger:
             performa = (
                 performa_rezim(
                     baris_performa,
@@ -253,7 +263,15 @@ class FaseRouter:
                 if baris_performa
                 else None
             )
-            kandidat.append(nilai(s, peta=peta, performa=performa, stabil=stabil))
+            kandidat.append(
+                nilai(
+                    s,
+                    peta=peta,
+                    performa=performa,
+                    stabil=stabil,
+                    boleh_memimpin=s.code in boleh_memimpin,
+                )
+            )
 
         return pilih(tuple(kandidat), peta=peta), peta, stabil
 

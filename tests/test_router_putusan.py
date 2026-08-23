@@ -29,6 +29,7 @@ from aruna.router.peringkat import kandidat_layak
 from aruna.router.putusan import (
     AMBANG_KEYAKINAN_REZIM,
     AMBANG_LAYAK,
+    AlasanKosong,
     PutusanRouter,
     pilih,
 )
@@ -39,8 +40,16 @@ def _peta(regime: str = "TRENDING", keyakinan: float = 85.0) -> PetaRezim:
     return PetaRezim(regime, keyakinan, (), (), ())
 
 
-def _k(kode: str, skor: int, *, sampel: int = 900) -> Kecocokan:
-    return Kecocokan(kode=kode, skor=skor, alasan=("uji",), sampel=sampel)
+def _k(
+    kode: str, skor: int, *, sampel: int = 900, memimpin: bool = True
+) -> Kecocokan:
+    return Kecocokan(
+        kode=kode,
+        skor=skor,
+        alasan=("uji",),
+        sampel=sampel,
+        boleh_memimpin=memimpin,
+    )
 
 
 def _s(kode: str, status: StrategyStatus) -> Strategy:
@@ -99,6 +108,19 @@ class TestMenolakDenganJujur:
         assert hasil.champion is None
         assert "55" in hasil.alasan_kosong
 
+    def test_penolakan_membawa_alasan_kandidat_terdekat(self) -> None:
+        """**Audit 2026-08-23: `alasan` NULL di tiap baris yang ditolak.**
+
+        Penolakan adalah kesimpulan, dan bagian 17.6 melarang kesimpulan tanpa
+        alasan. "Kenapa SOL/USDT tidak dapat strategi" pantas dijawab dengan
+        siapa yang paling dekat dan kenapa ia tetap kurang - bukan cuma dengan
+        angka tertinggi tanpa nama.
+        """
+        hasil = pilih((_k("STR-001", 51), _k("STR-004", 55)), peta=_peta())
+
+        assert "STR-004" in hasil.alasan_kosong
+        assert hasil.alasan
+
     def test_tanpa_kandidat_sama_sekali_tetap_menjawab(self) -> None:
         hasil = pilih((), peta=_peta())
 
@@ -152,6 +174,65 @@ class TestAmbangnyaDiturunkanBukanDipinjam:
         from aruna.router.kecocokan import NETRAL
 
         assert AMBANG_LAYAK > NETRAL
+
+
+class TestPenantangBenarBenarDipakai:
+    """**Audit 2026-08-23: seluruh 680 baris produksi berkolom `challenger`
+    NULL.** Dua sebab, dan keduanya cacat.
+
+    `kandidat_layak` menghasilkan DUA daftar - yang boleh memimpin dan yang
+    boleh menantang - dan fase router hanya memakai yang pertama. Daftar kedua
+    dihitung lalu dibuang, persis cacat `Putusan.diinvalidasi` yang sudah
+    tercatat di proyek ini.
+
+    Akibatnya `STR-002` dan `STR-005` - keduanya `UNDER_REVIEW` - tidak pernah
+    muncul di mana pun, padahal seluruh alasan slot challenger ada justru untuk
+    mereka.
+    """
+
+    def test_yang_tidak_boleh_memimpin_bisa_jadi_challenger(self) -> None:
+        hasil = pilih(
+            (_k("STR-001", 70), _k("STR-005", 88, memimpin=False)), peta=_peta()
+        )
+
+        assert hasil.champion.kode == "STR-001"
+        assert hasil.challenger.kode == "STR-005"
+
+    def test_skor_tertinggi_tidak_otomatis_memimpin(self) -> None:
+        """Penantang yang skornya lebih tinggi tetap tidak memimpin. Kalau
+        tidak, status `UNDER_REVIEW` tidak menahan apa pun."""
+        hasil = pilih(
+            (_k("STR-001", 61), _k("STR-005", 95, memimpin=False)), peta=_peta()
+        )
+
+        assert hasil.champion.kode == "STR-001"
+
+    def test_semua_kandidat_sedang_ditimbang_punya_sebab_sendiri(self) -> None:
+        """**Ini yang paling merugikan dari seluruh temuan audit.**
+
+        `BREAKOUT` adalah rezim TERBANYAK di produksi - 2.254 dari 9.437 bacaan
+        15m - dan kedua strategi yang menutupinya, `STR-002` dan `STR-005`,
+        berstatus `UNDER_REVIEW`. Router melaporkannya sebagai
+        `TAK_ADA_YANG_COCOK`, yang berarti "katalog tidak punya strategi untuk
+        rezim ini".
+
+        Itu **salah**, dan menyesatkan ke arah yang mahal: pembacanya akan
+        menulis strategi BREAKOUT baru, padahal sudah ada dua yang sedang
+        ditimbang. Yang benar-benar terjadi adalah keduanya di masa percobaan.
+        """
+        hasil = pilih((_k("STR-002", 88, memimpin=False),), peta=_peta())
+
+        assert hasil.champion is None
+        assert hasil.kode_kosong is AlasanKosong.HANYA_PENANTANG
+        assert hasil.challenger.kode == "STR-002"
+
+    def test_sebab_itu_berbeda_dari_tak_ada_yang_cocok(self) -> None:
+        """Dua keadaan yang menuntut tindakan berbeda: yang satu menunggu masa
+        percobaan selesai, yang lain menuntut strategi baru ditulis."""
+        ditimbang = pilih((_k("STR-002", 88, memimpin=False),), peta=_peta())
+        kosong = pilih((_k("STR-001", 30),), peta=_peta())
+
+        assert ditimbang.kode_kosong is not kosong.kode_kosong
 
 
 class TestChampionDanChallenger:

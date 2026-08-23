@@ -54,7 +54,20 @@ class AlasanKosong(StrEnum):
     #: Terbaca, tapi buktinya terlalu tipis atau terlalu terbelah.
     KEYAKINAN_KURANG = "KEYAKINAN_KURANG"
     #: Rezimnya jelas; tidak ada strategi yang cukup cocok dengannya.
+    #:
+    #: Artinya **katalognya yang berlubang** - tindakannya menulis strategi
+    #: baru, bukan menunggu.
     TAK_ADA_YANG_COCOK = "TAK_ADA_YANG_COCOK"
+    #: Ada yang cocok, tapi seluruhnya sedang ditimbang - hanya boleh
+    #: menantang, tidak memimpin.
+    #:
+    #: **Dibedakan dari :attr:`TAK_ADA_YANG_COCOK`, dan bedanya mahal.** Terukur
+    #: 2026-08-23: ``BREAKOUT`` adalah rezim terbanyak (2.254 dari 9.437 bacaan
+    #: 15m) dan kedua strategi yang menutupinya - ``STR-002``, ``STR-005`` -
+    #: berstatus ``UNDER_REVIEW``. Melaporkannya sebagai "tidak ada yang cocok"
+    #: mengirim pembacanya menulis strategi BREAKOUT baru, padahal sudah ada
+    #: dua yang sedang menjalani masa percobaan.
+    HANYA_PENANTANG = "HANYA_PENANTANG"
     #: Ada champion, lalu gerbang risiko menahannya (:func:`lolos_gerbang`).
     #:
     #: Berbeda dari potongan risiko di :func:`~aruna.router.kecocokan.nilai`,
@@ -138,8 +151,13 @@ class PutusanRouter:
     alasan: tuple[str, ...] = field(default_factory=tuple)
 
 
-def _kosong(sebab: str, kode: AlasanKosong, peta: PetaRezim) -> PutusanRouter:
-    return PutusanRouter(None, None, sebab, kode, peta.primary)
+def _kosong(
+    sebab: str,
+    kode: AlasanKosong,
+    peta: PetaRezim,
+    alasan: tuple[str, ...] = (),
+) -> PutusanRouter:
+    return PutusanRouter(None, None, sebab, kode, peta.primary, alasan)
 
 
 def pilih(
@@ -175,21 +193,51 @@ def pilih(
         key=lambda k: (-k.skor, k.kode),
     )
     if not layak:
-        tertinggi = max((k.skor for k in kandidat), default=0)
+        # Alasan kandidat TERBAIK ikut terbawa, bukan dibuang. Audit 2026-08-23
+        # menemukan `alasan` NULL di tiap baris yang ditolak - dan penolakan
+        # adalah kesimpulan, yang bagian 17.6 larang tanpa alasan. "Kenapa
+        # SOL/USDT tidak dapat strategi" pantas dijawab dengan siapa yang
+        # paling dekat dan kenapa ia tetap kurang.
+        terdekat = max(kandidat, key=lambda k: (k.skor, k.kode), default=None)
+        tertinggi = 0 if terdekat is None else terdekat.skor
         return _kosong(
             f"skor tertinggi {tertinggi} di bawah ambang {AMBANG_LAYAK} "
-            f"pada rezim {peta.primary}",
+            f"pada rezim {peta.primary}"
+            + ("" if terdekat is None else f" (terdekat {terdekat.kode})"),
             AlasanKosong.TAK_ADA_YANG_COCOK,
             peta,
+            () if terdekat is None else terdekat.alasan,
+        )
+
+    # Champion dari yang boleh memimpin; challenger dari sisanya, apa pun
+    # statusnya. Penantang yang skornya lebih tinggi tetap tidak memimpin -
+    # kalau tidak, status `UNDER_REVIEW` tidak menahan apa pun.
+    juara = next((k for k in layak if k.boleh_memimpin), None)
+    penantang = next((k for k in layak if k is not juara), None)
+
+    if juara is None:
+        # Ada yang cocok, tapi seluruhnya sedang ditimbang. Sebab yang BERBEDA
+        # dari "katalognya berlubang", dan tindakannya pun berbeda: menunggu
+        # masa percobaan selesai, bukan menulis strategi baru.
+        return PutusanRouter(
+            champion=None,
+            challenger=penantang or layak[0],
+            alasan_kosong=(
+                f"seluruh kandidat rezim {peta.primary} sedang ditimbang; "
+                f"tertinggi {layak[0].kode} skor {layak[0].skor}"
+            ),
+            kode_kosong=AlasanKosong.HANYA_PENANTANG,
+            regime=peta.primary,
+            alasan=layak[0].alasan,
         )
 
     return PutusanRouter(
-        champion=layak[0],
-        challenger=layak[1] if len(layak) > 1 else None,
+        champion=juara,
+        challenger=penantang,
         alasan_kosong="",
         kode_kosong=None,
         regime=peta.primary,
-        alasan=layak[0].alasan,
+        alasan=juara.alasan,
     )
 
 

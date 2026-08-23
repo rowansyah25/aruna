@@ -970,15 +970,19 @@ class ArunaApplication:
     def _build_router(self) -> Any:
         """Fase router Phase 17, atau ``None``.
 
-        **Berjalan tanpa bukti performa, dan itu keadaan bawaan yang benar.**
-        Sesudah Task 3, seluruh slice per-rezim memulangkan ``None`` sampai
-        baris berlabel ``router-1`` cukup banyak - dan baris itu hanya lahir
-        kalau router berjalan. Menunggu bukti sebelum menyalakan berarti
-        menunggu selamanya.
+        **Berjalan tanpa bukti performa hari ini, dan itu benar.** Tidak ada
+        yang menulis baris berlabel ``router-1`` ke ``strategy_performance`` -
+        pengisiannya milik Phase 12. Sampai itu ada, `performa_rezim`
+        memulangkan `None` dan router memeringkat dari kecocokan rezim,
+        keyakinan, dan stabilitas saja.
 
-        Karena itu ``performa=`` sengaja tidak diisi hari ini. Ia menunggu
-        pembaca ``strategy_performance`` yang menyaring per ``model_version``,
-        dan pembaca itu tidak berguna sampai ada yang bisa dibacanya.
+        Tapi pembacanya **tetap dirakit**, dan itu koreksi audit 2026-08-23.
+        Versi pertama tidak mengisi ``performa=`` sama sekali "sampai ada yang
+        bisa dibaca" - dan akibatnya seluruh Task 3, `Kecocokan.sampel`,
+        `Kecocokan.risiko`, gerbang `MIN_VALIDATION_SAMPLE`, dan potongan
+        risiko di `kecocokan.nilai` menjadi kode mati yang menunggu seseorang
+        ingat menyambungkannya. Dirakit sekarang, baris pertama yang muncul
+        langsung terpakai.
         """
         if self.db is None:
             return None
@@ -991,7 +995,7 @@ class ArunaApplication:
         # dari katalog KODE, yang menulis setiap strategi ACTIVE - dan seluruh
         # pembedaan champion/challenger mati senyap. Terukur 2026-08-23:
         # STR-002 dan STR-005 berstatus UNDER_REVIEW di tabel, ACTIVE di kode.
-        return FaseRouter(repo=repo, status=repo)
+        return FaseRouter(repo=repo, status=repo, performa=repo)
 
     def _build_daily(self) -> Any:
         """Laporan harian pukul 00:00 WIB.

@@ -91,6 +91,23 @@ class TestTersambungKeLoop:
 
         assert _kwarg_ke(_pohon(ArunaApplication._build_router), "FaseRouter", "status")
 
+    def test_pembaca_performa_benar_benar_dioper(self) -> None:
+        """**Audit 2026-08-23.** Tanpa `performa=`, `_baris_performa`
+        memulangkan daftar kosong, `performa_rezim` tidak pernah dipanggil, dan
+        bersamanya mati: `Kecocokan.sampel`, `Kecocokan.risiko`, gerbang
+        `MIN_VALIDATION_SAMPLE`, dan seluruh potongan risiko di
+        `kecocokan.nilai`.
+
+        Penjaga rantai AST tetap lulus atas semuanya - `performa_rezim` MUNCUL
+        di sebuah Call node, cuma di balik syarat yang selalu salah. Ini
+        lapisan yang tidak bisa ia lihat.
+        """
+        from aruna.app import ArunaApplication
+
+        assert _kwarg_ke(
+            _pohon(ArunaApplication._build_router), "FaseRouter", "performa"
+        )
+
     def test_loop_benar_benar_memanggil_fasenya(self) -> None:
         """Parameter yang diterima lalu disimpan tanpa pernah dipakai adalah
         bentuk cacat yang sama, satu lapis lebih dalam lagi."""
