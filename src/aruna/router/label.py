@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 __all__ = [
@@ -74,6 +75,15 @@ class SlicePerforma:
 
     win_rate: float
     sample_size: int
+    #: Penarikan terdalam yang pernah dialami strategi ini, dari
+    #: ``strategy_performance.max_drawdown``. Ikut karena bagian 17.21 menuntut
+    #: risiko dipertimbangkan saat memilih champion - dan tanpa bidang ini
+    #: pemanggil harus membaca ulang tabel yang sama untuk satu angka.
+    #:
+    #: ``None`` berarti belum terukur, bukan nol. Strategi yang belum pernah
+    #: rugi dan strategi yang belum pernah diukur adalah dua hal yang sangat
+    #: berbeda.
+    max_drawdown: Decimal | None = None
 
 
 def dilabeli_router(row: Any) -> bool:
@@ -123,4 +133,23 @@ def performa_rezim(
     if n < minimum:
         return None
     menang = sum(int(r.get("wins") or 0) for r in cocok)
-    return SlicePerforma(win_rate=menang / n, sample_size=n)
+
+    # Yang TERDALAM di antara potongannya, bukan rata-ratanya. Merata-ratakan
+    # drawdown menghaluskan justru kejadian yang paling perlu diketahui - satu
+    # potongan yang pernah turun 90% dan sembilan yang tenang akan terbaca
+    # sebagai strategi yang tenang.
+    dalam = [d for d in (_desimal(r.get("max_drawdown")) for r in cocok) if d]
+    return SlicePerforma(
+        win_rate=menang / n,
+        sample_size=n,
+        max_drawdown=min(dalam) if dalam else None,
+    )
+
+
+def _desimal(nilai: Any) -> Decimal | None:
+    if nilai is None:
+        return None
+    try:
+        return Decimal(str(nilai))
+    except (InvalidOperation, ValueError):
+        return None

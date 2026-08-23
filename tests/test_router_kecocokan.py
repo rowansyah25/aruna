@@ -65,6 +65,69 @@ class TestKecocokanRezim:
 
         assert bebas.skor == NETRAL
 
+    def test_tren_berarah_cocok_dengan_strategi_tren(self) -> None:
+        """**Cacat yang diukur 2026-08-23, dan ia total bukan sebagian.**
+
+        Classifier memulangkan taksonomi BERARAH sejak bagian 2 spec -
+        `TRENDING_BULLISH`, `TRENDING_BEARISH`, `BREAKDOWN` - sementara tidak
+        satu pun dari tujuh strategi di katalog menulisnya di
+        `preferred_regimes`. Seluruhnya menulis bentuk keluarganya: `TRENDING`,
+        `BREAKOUT`.
+
+        Terukur pada 9.437 bacaan 15m dalam tujuh hari::
+
+            TRENDING_BULLISH  438
+            TRENDING_BEARISH  270
+            BREAKDOWN          16
+
+        Tanpa pelipatan keluarga, 724 bacaan itu membuat SETIAP strategi
+        berpreferensi jatuh di bawah NETRAL sekaligus, dan router memulangkan
+        NONE untuk rezim yang jelas-jelas punya strateginya.
+
+        Petanya tidak dibuat di sini: `Regime.keluarga` sudah ada di
+        `core.enums` justru untuk mencocokkan lintas generasi taksonomi.
+        """
+        naik = nilai(_strategi(preferred=("TRENDING",)),
+                     peta=_peta("TRENDING_BULLISH"), performa=None, stabil=90.0)
+        turun = nilai(_strategi(preferred=("TRENDING",)),
+                      peta=_peta("TRENDING_BEARISH"), performa=None, stabil=90.0)
+        tembus = nilai(_strategi(preferred=("BREAKOUT",)),
+                       peta=_peta("BREAKDOWN"), performa=None, stabil=90.0)
+
+        assert naik.skor > NETRAL
+        assert turun.skor > NETRAL
+        assert tembus.skor > NETRAL
+
+    def test_keluarga_tidak_mencocokkan_yang_memang_beda(self) -> None:
+        """Pelipatan keluarga bukan izin mencocokkan apa saja. `RANGING` dan
+        `TRENDING` tetap dua rezim yang berbeda, dan strategi tren tidak boleh
+        naik hanya karena petanya melipat sesuatu di tempat lain."""
+        salah = nilai(_strategi(preferred=("TRENDING",)),
+                      peta=_peta("RANGING"), performa=None, stabil=90.0)
+
+        assert salah.skor < NETRAL
+
+    def test_rezim_di_luar_kosakata_tidak_meledak(self) -> None:
+        """`signal_snapshots` memuat rezim dari beberapa generasi taksonomi.
+        Nilai yang tidak dikenal `Regime` harus diperlakukan tidak cocok -
+        bukan melempar dan menjatuhkan seluruh fase router."""
+        asing = nilai(_strategi(preferred=("TRENDING",)),
+                      peta=_peta("REZIM_YANG_BELUM_ADA"), performa=None,
+                      stabil=90.0)
+
+        assert asing.skor < NETRAL
+
+    def test_rezim_tanpa_strategi_mana_pun_tetap_dijawab(self) -> None:
+        """`HIGH_VOLATILITY` (453 bacaan) dan `ANOMALY` (49) tidak ada di
+        `preferred_regimes` satu pun strategi, dan keluarganya pun tidak.
+        Itu NONE yang jujur - bukan bug - dan `nilai` tetap harus menjawab
+        alih-alih melempar."""
+        hasil = nilai(_strategi(preferred=("TRENDING",)),
+                      peta=_peta("HIGH_VOLATILITY"), performa=None, stabil=90.0)
+
+        assert hasil.skor < NETRAL
+        assert hasil.alasan
+
     def test_rezim_tak_terbaca_tidak_menghukum_siapa_pun(self) -> None:
         """`primary is None` berarti belum terbaca. Menghukum seluruh kandidat
         atas ketidaktahuan kita sendiri akan membuat setiap aset yang baru

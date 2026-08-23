@@ -32,6 +32,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from aruna.core.enums import Regime
 from aruna.governance.proposal import MIN_VALIDATION_SAMPLE
 from aruna.risk.score import RiskLevel, categorise
 from aruna.router.label import SlicePerforma
@@ -92,6 +93,43 @@ _POTONGAN_RISIKO: dict[RiskLevel, int] = {
 }
 
 
+def _keluarga(nama: str) -> str:
+    """Bentuk keluarga sebuah rezim, atau namanya sendiri kalau tak dikenal.
+
+    Nilai di luar :class:`~aruna.core.enums.Regime` dipulangkan apa adanya,
+    bukan dilempar. ``signal_snapshots`` memuat rezim dari beberapa generasi
+    taksonomi, dan satu nilai asing tidak boleh menjatuhkan seluruh fase
+    router - ia cukup tidak cocok dengan siapa pun.
+    """
+    try:
+        return str(Regime(nama).keluarga)
+    except ValueError:
+        return nama
+
+
+def _cocok(primary: str, preferensi: tuple[str, ...]) -> bool:
+    """Apakah rezim ini ada di preferensi strategi, lewat keluarganya.
+
+    **Kenapa lewat keluarga, dan bukan perbandingan langsung.** Classifier
+    memulangkan taksonomi berarah - ``TRENDING_BULLISH``, ``TRENDING_BEARISH``,
+    ``BREAKDOWN`` - sejak bagian 2 spec, sementara katalog strategi seluruhnya
+    ditulis dalam bentuk keluarga. Terukur 2026-08-23 pada 9.437 bacaan 15m
+    dalam tujuh hari: 438 ``TRENDING_BULLISH``, 270 ``TRENDING_BEARISH``, 16
+    ``BREAKDOWN``, dan **tidak satu pun** dari tujuh strategi menulis salah
+    satunya di ``preferred_regimes``.
+
+    Perbandingan langsung membuat 724 bacaan itu menjatuhkan setiap strategi
+    berpreferensi sekaligus, dan router memulangkan NONE untuk rezim yang
+    jelas-jelas punya strateginya.
+
+    Dilipat **di kedua sisi**: katalog boleh saja suatu hari menulis bentuk
+    berarah, dan melipat satu sisi saja akan memindahkan bug-nya alih-alih
+    menutupnya.
+    """
+    k = _keluarga(primary)
+    return any(k == _keluarga(p) for p in preferensi)
+
+
 @dataclass(frozen=True, slots=True)
 class Kecocokan:
     """Nilai satu strategi terhadap rezim sekarang, berikut sebabnya."""
@@ -127,7 +165,7 @@ def nilai(
         alasan.append("rezim belum terbaca - tidak ada yang bisa dicocokkan")
     elif not strategi.preferred_regimes:
         alasan.append("strategi tanpa preferensi rezim - cocok di mana pun")
-    elif peta.primary in strategi.preferred_regimes:
+    elif _cocok(peta.primary, tuple(strategi.preferred_regimes)):
         skor += _COCOK
         alasan.append(f"rezim {peta.primary} ada di preferensi strategi ini")
     else:

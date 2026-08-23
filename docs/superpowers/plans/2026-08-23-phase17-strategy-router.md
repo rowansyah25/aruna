@@ -16,7 +16,7 @@ pemilihan di atas empat sumber yang sudah tersimpan.
 
 ```
 MARKET
-  ↓  REGIME DETECTION            Task 1  (tabel `regimes` yang sudah ada)
+  ↓  REGIME DETECTION            Task 1  (`signal_snapshots.regime` - lihat PERINGATAN 0)
   ↓  REGIME STABILITY            Task 2
   ↓  STRATEGY ROUTER             Task 4  (kecocokan + performa + RISIKO)
   ↓  CHAMPION / CHALLENGER       Task 5
@@ -36,6 +36,83 @@ terbit). Keduanya menjawab pertanyaan yang berbeda, jadi keduanya berdiri.
 ---
 
 ## PERINGATAN YANG DICATAT, BUKAN DIDIAMKAN
+
+### 0. KOREKSI 2026-08-23 — sumber rezim di rencana ini SALAH
+
+Rencana ini (Task 1, diagram alur, Struktur berkas) menyebut sumbernya tabel
+`regimes`. Diukur langsung sesudah Task 4 selesai:
+
+```
+regimes:             3 baris, semuanya 1d, terakhir 2026-08-14
+technical_snapshots: 3 baris, semuanya 1d, terakhir 2026-08-14
+```
+
+Akarnya bukan tabelnya melainkan pemanggilnya. `AnalysisService` — satu-satunya
+yang mengisi keduanya lewat `AnalysisRepository.save` — **hanya dipanggil dari
+perintah `aruna analyze`**, tidak pernah dari `UpkeepLoop`. Tiga baris itu sisa
+satu kali jalan manual sembilan hari sebelumnya. Router yang berdiri di atasnya
+akan memulangkan NONE untuk tiap aset selamanya.
+
+Yang hidup `signal_snapshots.regime`, ditulis tiap siklus untuk kedua puluh aset
+terpindai:
+
+| horizon | baris (7 hari) | aset | terakhir |
+|---|---|---|---|
+| 15m | 9.437 | 20 | 2026-08-23 00:30 |
+| 1h  | 4.057 | 20 | 2026-08-22 19:00 |
+| 1d  | 2.407 | 20 | 2026-08-22 00:00 |
+
+Phase 16 sudah memilih sumber yang sama untuk alasan yang sama — lihat
+`db/repositories/konteks_pemicu.py`, yang mengejanya sejak 2026-08-22.
+
+**Tiga akibat, semuanya sudah diperbaiki dan diuji:**
+
+1. **Intervalnya tiga, bukan enam.** `BOBOT_INTERVAL` versi pertama memuat 5m,
+   30m, dan 4h — ketiganya tidak pernah dipindai, jadi `interval_hilang` akan
+   menyebutnya di tiap laporan seolah ada yang rusak. Sekarang diturunkan dari
+   `signals.outcome.STORED_INTERVALS` (minus 1m, yang tidak punya bacaan rezim)
+   dan dijaga dari **kedua arah** di `test_router_sumber_rezim`.
+
+2. **Keyakinan rezim tidak ada sumbernya.** `signal_snapshots` tidak punya
+   kolomnya; `confidence` di sana milik SINYAL, bukan classifier — memakainya
+   persis pelanggaran "ambang dipinjam dari pertanyaan yang sama" di Global
+   Constraints. `BacaanRezim.keyakinan_persen` karena itu boleh `None`, dan
+   `PetaRezim.primary_confidence` diganti menjadi **kesepakatan lintas
+   horizon**: berapa bagian dari seluruh bobot yang mendukung primary. Itu
+   pertanyaan yang berbeda dari `stabilitas` (kesepakatan lintas WAKTU pada
+   satu horizon), jadi Task 4 boleh mengalikan keduanya tanpa menghitung hal
+   yang sama dua kali.
+
+   Sekaligus menutup jebakan satuan: `regimes.confidence` disimpan **0..1**
+   (terukur 0,653–1,000) sementara peta memakai 0..100. Angka mentah yang
+   dioper apa adanya membuat penskalaan di `nilai()` menjadi 0,0065 alih-alih
+   0,65 dan **setiap strategi runtuh ke NETRAL tanpa satu pun galat**.
+   Konversinya sekarang punya satu pintu, `BacaanRezim.dari_pecahan`, dan
+   nama bidangnya menyebut satuannya di tiap tempat ia dibaca.
+
+3. **Kosakata rezim tidak cocok dengan katalog.** Classifier memulangkan
+   taksonomi berarah sejak bagian 2 spec; katalog seluruhnya ditulis dalam
+   bentuk keluarga. Terukur pada 9.437 bacaan 15m:
+
+   ```
+   TRENDING_BULLISH  438      TRENDING_BEARISH  270      BREAKDOWN  16
+   ```
+
+   Tidak satu pun dari tujuh strategi menulis salah satunya di
+   `preferred_regimes`. Perbandingan langsung membuat 724 bacaan itu
+   menjatuhkan setiap strategi berpreferensi **sekaligus**. `kecocokan._cocok`
+   sekarang melipat lewat `Regime.keluarga` yang sudah ada di `core.enums`, di
+   kedua sisi.
+
+**Yang tetap NONE dan itu jujur:** `HIGH_VOLATILITY` (453) dan `ANOMALY` (49)
+tidak punya strategi, dan keluarganya pun tidak. 502 dari 7.577 bacaan terbaca
+= 6,6%. Itu hasil yang sah, bukan cacat yang perlu ditutup.
+
+**Yang belum dikerjakan dan bukan bagian rencana ini:** `AnalysisService` tidak
+tersambung ke `UpkeepLoop`. Itu cacat keluarga yang sama — kode ditulis, diuji,
+diekspor, tidak pernah dipanggil — tapi memperbaikinya berarti menambah fase
+analisis penuh ke siklus yang sudah padat di mesin dua inti. Dicatat, bukan
+didiamkan.
 
 ### 1. Performa per rezim yang tersimpan sekarang MELINGKAR
 
@@ -147,7 +224,7 @@ rezim multi-timeframe, penilaian kecocokan, peringkat, dan penolakan.
 
 - `src/aruna/router/__init__.py` — permukaan publik
 - `src/aruna/router/rezim.py` — §17.3–17.10: baca rezim multi-timeframe dari
-  tabel `regimes`, tentukan primary vs secondary, hitung stabilitas
+  `signal_snapshots`, tentukan primary vs secondary, hitung stabilitas
 - `src/aruna/router/kecocokan.py` — §17.14–17.15: skor kecocokan strategi
   terhadap rezim, dengan faktor yang dieja satu per satu
 - `src/aruna/router/peringkat.py` — §17.17–17.18, §17.21–17.23: champion,
@@ -167,14 +244,23 @@ rezim multi-timeframe, penilaian kecocokan, peringkat, dan penolakan.
 
 ## Task 1: Rezim multi-timeframe, primary vs secondary (§17.3–17.8)
 
-**Files:** buat `src/aruna/router/rezim.py`, `tests/test_router_rezim.py`
+> **DIKOREKSI 2026-08-23 — lihat PERINGATAN 0.** Sumbernya bukan tabel
+> `regimes` (mati: 3 baris, 1d, terakhir 2026-08-14) melainkan
+> `signal_snapshots.regime` (hidup: 15m/1h/1d, 20 aset). Intervalnya tiga bukan
+> enam, dan keyakinan classifier tidak tersedia sama sekali.
+
+**Files:** buat `src/aruna/router/rezim.py`, `tests/test_router_rezim.py`,
+`tests/test_router_sumber_rezim.py`
 
 **Interfaces:**
-- Consumes: tabel `regimes` (asset_id, interval_code, as_of, regime,
-  confidence, reasons)
+- Consumes: `signal_snapshots` (asset_id, horizon_code, as_of, regime) —
+  sumber yang sama dengan Phase 16 `konteks_pemicu`
 - Produces:
-  - `BacaanRezim(interval: str, regime: str, confidence: float, alasan: tuple[str, ...])`
+  - `BacaanRezim(interval: str, regime: str, keyakinan_persen: float | None, alasan: tuple[str, ...])`
+    berikut `BacaanRezim.dari_pecahan(interval, regime, pecahan, alasan)` untuk
+    sumber berskala 0..1
   - `PetaRezim(primary: str | None, primary_confidence: float, sekunder: tuple[str, ...], per_interval: tuple[BacaanRezim, ...], interval_hilang: tuple[str, ...])`
+    — `primary_confidence` = kesepakatan lintas horizon, 0..100
   - `susun_peta(bacaan: tuple[BacaanRezim, ...]) -> PetaRezim`
 
 - [ ] **Step 1: Tulis test yang gagal**
