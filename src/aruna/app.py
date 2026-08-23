@@ -986,7 +986,12 @@ class ArunaApplication:
         from aruna.db.repositories.router import RouterRepository
         from aruna.upkeep.router import FaseRouter
 
-        return FaseRouter(repo=RouterRepository(self.db))
+        repo = RouterRepository(self.db)
+        # `status=` bukan pengulangan `repo=`. Tanpanya fase membaca status
+        # dari katalog KODE, yang menulis setiap strategi ACTIVE - dan seluruh
+        # pembedaan champion/challenger mati senyap. Terukur 2026-08-23:
+        # STR-002 dan STR-005 berstatus UNDER_REVIEW di tabel, ACTIVE di kode.
+        return FaseRouter(repo=repo, status=repo)
 
     def _build_daily(self) -> Any:
         """Laporan harian pukul 00:00 WIB.

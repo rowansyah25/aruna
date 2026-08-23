@@ -304,6 +304,103 @@ class TestPeralihanSampaiKeSini:
         assert hasil.berganti == 0
 
 
+class TestStatusDibacaDariTabelBukanDariKode:
+    """**Cacat yang ditemukan saat mengukur Task 11, 2026-08-23.**
+
+    Bentuknya persis varian yang berulang di proyek ini: fungsinya DIPANGGIL,
+    tapi masukan yang membedakannya tidak pernah sampai. Sama seperti
+    `diinvalidasi=False` yang dulu dipatok mati.
+
+    Katalog di `learning/strategies.py` menulis SETIAP strategi `ACTIVE`.
+    Tabel `strategies` - yang governance tulis berdasarkan pengukuran -
+    mencatat lain::
+
+        KODE:      STR-002 ACTIVE        STR-005 ACTIVE
+        DATABASE:  STR-002 UNDER_REVIEW  STR-005 UNDER_REVIEW
+
+        status_reason: "lebih buruk dari rata-rata pada 1043 sample;
+                        cukup diukur untuk pantas dipertimbangkan dihentikan"
+
+    Fase yang membaca katalog kode membuat seluruh pembedaan champion/
+    challenger di Task 5 mati di produksi - dan matinya senyap: uji unitnya
+    tetap hijau, karena ia mengoper statusnya sendiri.
+    """
+
+    @pytest.mark.asyncio
+    async def test_status_dari_tabel_menang_atas_kode(self) -> None:
+        """**Koreksi atas versi pertama test ini.** Aku sempat menuntut nol
+        champion, dan itu salah: `STR-005` juga menyukai TRENDING, jadi ia naik
+        menggantikan. Yang benar-benar dijaga bukan "tidak ada yang memimpin"
+        melainkan "yang DITURUNKAN tidak memimpin"."""
+
+        class _Katalog:
+            async def status(self) -> dict[str, str]:
+                return {"STR-001": "UNDER_REVIEW"}
+
+        repo = _RepoPalsu({"BTC/USDT": _sepakat("TRENDING")})
+        await _fase(repo=repo, status=_Katalog()).jalankan(
+            [_Pindai("BTC/USDT")], now=SAAT
+        )
+        putusan, _ = repo.disimpan[0]
+
+        assert putusan.champion is None or putusan.champion.kode != "STR-001"
+
+    @pytest.mark.asyncio
+    async def test_seluruh_kandidat_diturunkan_berarti_none(self) -> None:
+        """Ujung yang sebenarnya: kalau SEMUA yang cocok diturunkan, tidak ada
+        yang memimpin - dan itu keadaan nyata. Terukur 2026-08-23: BREAKOUT
+        adalah rezim TERBANYAK (2.254 dari 9.437 bacaan 15m) dan kedua strategi
+        yang menutupinya - STR-002 dan STR-005 - berstatus UNDER_REVIEW di
+        tabel sementara katalog kode menulis keduanya ACTIVE."""
+
+        class _Katalog:
+            async def status(self) -> dict[str, str]:
+                return {"STR-002": "UNDER_REVIEW", "STR-005": "UNDER_REVIEW"}
+
+        repo = _RepoPalsu({"BTC/USDT": _sepakat("BREAKOUT")})
+        hasil = await _fase(repo=repo, status=_Katalog()).jalankan(
+            [_Pindai("BTC/USDT")], now=SAAT
+        )
+
+        assert hasil.terpilih == 0
+
+    @pytest.mark.asyncio
+    async def test_tabel_tak_terbaca_kembali_ke_kode(self) -> None:
+        """Router yang menolak berjalan karena tabel status tidak terbaca akan
+        berhenti justru pada hari tabel itu paling perlu diperbaiki. Yang
+        benar: mundur ke katalog kode, dan **catat** bahwa itu terjadi."""
+
+        class _Meledak:
+            async def status(self) -> dict[str, str]:
+                raise RuntimeError("strategies tidak terbaca")
+
+        repo = _RepoPalsu({"BTC/USDT": _sepakat("TRENDING")})
+        hasil = await _fase(repo=repo, status=_Meledak()).jalankan(
+            [_Pindai("BTC/USDT")], now=SAAT
+        )
+
+        assert hasil.terpilih == 1
+
+    @pytest.mark.asyncio
+    async def test_status_asing_di_tabel_tidak_meloloskan(self) -> None:
+        """Nilai yang tidak dikenal enum diperlakukan TIDAK BOLEH MEMIMPIN.
+        Menebaknya sebagai ACTIVE berarti status baru yang lupa diurus lolos
+        memimpin diam-diam."""
+
+        class _Katalog:
+            async def status(self) -> dict[str, str]:
+                return dict.fromkeys(
+                    ("STR-001", "STR-005"), "SEDANG_DIPIKIRKAN"
+                )
+
+        repo = _RepoPalsu({"BTC/USDT": _sepakat("TRENDING")})
+        hasil = await _fase(repo=repo, status=_Katalog()).jalankan(
+            [_Pindai("BTC/USDT")], now=SAAT
+        )
+
+        assert hasil.terpilih == 0
+
+
 class TestStatusMenyaringSampaiKeSini:
     @pytest.mark.asyncio
     async def test_under_review_tidak_pernah_jadi_champion(self) -> None:

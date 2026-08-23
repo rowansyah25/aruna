@@ -37,6 +37,7 @@ from typing import Any
 from aruna.core.enums import Market
 from aruna.core.logging import get_logger
 from aruna.governance.proposal import MIN_VALIDATION_SAMPLE
+from aruna.learning.strategies import StrategyStatus
 from aruna.router.invalidasi import PilihanSebelumnya, kenapa_berganti
 from aruna.router.kecocokan import Kecocokan, nilai
 from aruna.router.label import performa_rezim
@@ -107,12 +108,17 @@ class FaseRouter:
         *,
         repo: Any = None,
         katalog: Any = None,
+        status: Any = None,
         performa: Any = None,
         minimum_sampel: int = MIN_VALIDATION_SAMPLE,
     ) -> None:
         self._repo = repo
         #: Sumber katalog strategi. ``None`` memakai katalog bawaan.
         self._katalog = katalog
+        #: Pembaca status dari tabel ``strategies``. ``None`` memakai status
+        #: yang tertulis di katalog kode - dan itu **salah di produksi**, lihat
+        #: :func:`_dengan_status`.
+        self._status = status
         #: Pembaca ``strategy_performance``. ``None`` menjalankan router tanpa
         #: bukti performa - lihat catatan kelas.
         self._performa = performa
@@ -134,7 +140,10 @@ class FaseRouter:
         risiko = await self._repo.risiko_terakhir(sekarang=now)
         sebelumnya = await self._repo.pilihan_terakhir()
         baris_performa = await self._baris_performa()
-        strategi = kandidat_layak(_katalog(self._katalog))
+        katalog = _dengan_status(
+            _katalog(self._katalog), await self._status_tersimpan()
+        )
+        strategi = kandidat_layak(katalog)
         boleh_memimpin = frozenset(s.code for s in strategi.champion)
 
         for simbol, ident in sorted(terpindai.items()):
@@ -210,6 +219,22 @@ class FaseRouter:
 
         return pilih(tuple(kandidat), peta=peta), peta, stabil
 
+    async def _status_tersimpan(self) -> dict[str, str]:
+        """Status dari tabel ``strategies``, atau kosong kalau tak terbaca.
+
+        Kegagalannya mengembalikan status ke katalog kode - yang berarti
+        seluruhnya ``ACTIVE`` - dan itu **dicatat**, tidak didiamkan. Router
+        yang menolak berjalan karena tabel status tidak terbaca akan berhenti
+        justru pada hari tabel itu paling perlu diperbaiki.
+        """
+        if self._status is None:
+            return {}
+        try:
+            return dict(await self._status.status())
+        except Exception:
+            log.exception("router.status_katalog_tak_terbaca")
+            return {}
+
     async def _baris_performa(self) -> list[Any]:
         """Baris ``strategy_performance``, atau kosong kalau tak terbaca.
 
@@ -272,6 +297,60 @@ def _terpindai(hasil: list[Any]) -> dict[str, tuple[int, Market, str]]:
             str(simbol),
         )
     return keluar
+
+
+#: Status yang dipakai ketika tabel menyebut nilai yang tidak dikenal enum.
+#:
+#: ``RETIRED``, dan itu arah kegagalan yang benar: sebuah status baru yang lupa
+#: diurus di sini tidak akan memimpin apa pun sampai seseorang mengurusnya.
+#: Menebaknya ``ACTIVE`` berarti status yang belum dipahami lolos memimpin
+#: diam-diam.
+_STATUS_ASING = StrategyStatus.RETIRED
+
+
+def _dengan_status(
+    katalog: tuple[Any, ...], tersimpan: dict[str, str]
+) -> tuple[Any, ...]:
+    """Katalog kode, dengan status dari TABEL kalau ada.
+
+    **Cacat yang ditemukan saat mengukur Task 11, 2026-08-23**, dan bentuknya
+    varian yang berulang di proyek ini: fungsinya dipanggil, tapi masukan yang
+    membedakannya tidak pernah sampai.
+
+    Katalog di :mod:`aruna.learning.strategies` menulis setiap strategi
+    ``ACTIVE``. Tabel ``strategies`` - yang governance tulis berdasarkan
+    pengukuran - mencatat lain::
+
+        KODE:      STR-002 ACTIVE        STR-005 ACTIVE
+        DATABASE:  STR-002 UNDER_REVIEW  STR-005 UNDER_REVIEW
+
+    dengan sebab yang tertulis di barisnya sendiri: "lebih buruk dari rata-rata
+    pada 1043 sample; cukup diukur untuk pantas dipertimbangkan dihentikan".
+
+    Tanpa fungsi ini, seluruh pembedaan champion/challenger di
+    :mod:`aruna.router.peringkat` mati di produksi - dan matinya senyap, karena
+    test unitnya mengoper statusnya sendiri dan tetap hijau.
+
+    Yang diambil dari tabel **hanya statusnya**. ``preferred_regimes`` tetap
+    dari kode: kolomnya di tabel bertipe JSON dan bisa kosong pada baris lama,
+    dan mengambil keduanya dari sumber berbeda berarti strategi yang statusnya
+    baru tapi preferensinya lama.
+    """
+    if not tersimpan:
+        return katalog
+    return tuple(
+        replace(s, status=_status(tersimpan.get(s.code), s.status)) for s in katalog
+    )
+
+
+def _status(nilai: str | None, bawaan: StrategyStatus) -> StrategyStatus:
+    if nilai is None:
+        return bawaan
+    try:
+        return StrategyStatus(str(nilai).strip().upper())
+    except ValueError:
+        log.warning("router.status_tak_dikenal", status=nilai)
+        return _STATUS_ASING
 
 
 def _katalog(sumber: Any) -> tuple[Any, ...]:

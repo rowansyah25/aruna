@@ -223,6 +223,21 @@ class RouterRepository:
             keluar.setdefault(str(r["symbol"]), str(r["risk_level"]))
         return keluar
 
+    async def status(self) -> dict[str, str]:
+        """Status tiap strategi menurut TABEL, bukan menurut katalog kode.
+
+        Bedanya bukan akademis. Terukur 2026-08-23::
+
+            KODE:      STR-002 ACTIVE        STR-005 ACTIVE
+            DATABASE:  STR-002 UNDER_REVIEW  STR-005 UNDER_REVIEW
+
+        Governance menulis ke tabel berdasarkan pengukuran; katalog kode tidak
+        pernah ikut berubah. Fase yang membaca kode membuat seluruh pembedaan
+        champion/challenger mati di produksi, tanpa satu pun galat.
+        """
+        rows = await self._db.fetch("SELECT code, status FROM strategies")
+        return {str(r["code"]): str(r["status"]) for r in rows}
+
     async def pilihan_terakhir(self) -> dict[str, tuple[str | None, str | None]]:
         """Champion dan rezim yang terakhir tercatat per simbol.
 

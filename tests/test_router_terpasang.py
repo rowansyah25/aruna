@@ -81,6 +81,16 @@ class TestTersambungKeLoop:
         assert "FaseRouter" in dibangun
         assert "RouterRepository" in dibangun
 
+    def test_status_katalog_benar_benar_dioper(self) -> None:
+        """**Ditemukan saat mengukur Task 11, 2026-08-23.** `status=` bukan
+        pengulangan `repo=`. Tanpanya fase membaca status dari katalog KODE,
+        yang menulis setiap strategi ACTIVE - dan seluruh pembedaan champion/
+        challenger di Task 5 mati senyap sementara test unitnya tetap hijau.
+        """
+        from aruna.app import ArunaApplication
+
+        assert _kwarg_ke(_pohon(ArunaApplication._build_router), "FaseRouter", "status")
+
     def test_loop_benar_benar_memanggil_fasenya(self) -> None:
         """Parameter yang diterima lalu disimpan tanpa pernah dipakai adalah
         bentuk cacat yang sama, satu lapis lebih dalam lagi."""
@@ -145,6 +155,7 @@ class TestSeluruhRantaiTask1SampaiTask7Terpakai:
             "dari_tersimpan": "Task 9 - terjemahan kosakata risiko, satu tempat",
             "kenapa_berganti": "Task 10 - peralihan dicatat, bukan disimpulkan",
             "pilihan_terakhir": "Task 10 - pilihan sebelumnya untuk dibandingkan",
+            "_dengan_status": "Task 11 - status dari TABEL, bukan dari kode",
         }
         hilang = {k: v for k, v in wajib.items() if k not in dipanggil}
 
