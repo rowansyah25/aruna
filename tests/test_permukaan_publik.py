@@ -84,6 +84,10 @@ DISENGAJA: dict[str, str] = {
         "Phase 17 Task 2. Stabilitas rezim dari riwayat bacaan; pemanggilnya "
         "lahir di Task 4. Hapus baris ini begitu tersambung."
     ),
+    "performa_rezim": (
+        "Phase 17 Task 3. Slice performa per rezim yang menolak baris "
+        "turunan; pemanggilnya lahir di Task 4. Hapus begitu tersambung."
+    ),
     # -- 4. Perkakas pengembangan dan kosakata -----------------------------
     "reset_logging": "Mengembalikan logging antar test. Tidak punya arti di produksi.",
     "reset_settings_cache": "Sama seperti `reset_logging`, untuk cache settings.",
