@@ -8,9 +8,28 @@ bukti, dan menolak memilih ketika buktinya tidak cukup.
 
 **Architecture:** Router yang membaca rezim dari tabel `regimes` yang sudah ada,
 menilai kecocokan tiap strategi di katalog `strategies` terhadap rezim itu, lalu
-memberi peringkat memakai performa historis yang **di-slice ulang** supaya
-per-rezim berarti. Tidak ada mesin baru: yang dibangun adalah lapisan pemilihan
-di atas empat sumber yang sudah tersimpan.
+memberi peringkat memakai performa historis yang **dilabeli ulang oleh router**
+supaya per-rezim berarti. Tidak ada mesin baru: yang dibangun adalah lapisan
+pemilihan di atas empat sumber yang sudah tersimpan.
+
+**Alurnya, sesuai diagram operator 2026-08-23:**
+
+```
+MARKET
+  ↓  REGIME DETECTION            Task 1  (tabel `regimes` yang sudah ada)
+  ↓  REGIME STABILITY            Task 2
+  ↓  STRATEGY ROUTER             Task 4  (kecocokan + performa + RISIKO)
+  ↓  CHAMPION / CHALLENGER       Task 5
+  ↓  PHASE 15 MEMORY             ditunda - lihat PERINGATAN
+  ↓  PHASE 16 SCENARIO           sudah ada
+  ↓  PHASE 13 RISK GATE          Task 9
+  ↓  PHASE 14 FINAL DECISION     sudah ada
+```
+
+Risk muncul **dua kali**, dan itu keputusan operator: sebagai bahan peringkat
+di Task 4 (§17.21 - strategi berisiko ekstrem tidak boleh naik ke champion) dan
+sebagai gerbang di Task 9 (diagram - rencana berisiko ekstrem tidak boleh
+terbit). Keduanya menjawab pertanyaan yang berbeda, jadi keduanya berdiri.
 
 **Tech Stack:** Python 3.13, MySQL 8.4 lewat asyncmy, pytest, ruff.
 
@@ -439,10 +458,21 @@ harus dilaporkan apa adanya**, bukan ditutupi dengan memakai baris lama.
 **Files:** buat `src/aruna/router/kecocokan.py`, `tests/test_router_kecocokan.py`
 
 **Interfaces:**
-- Consumes: `PetaRezim` (Task 1), `stabilitas` (Task 2), `SLICE_BERARTI` (Task 3)
+- Consumes: `PetaRezim` (Task 1), `stabilitas` (Task 2), `performa_rezim`
+  (Task 3), `aruna.risk.score.categorise`
 - Produces:
-  - `Kecocokan(kode: str, skor: int, alasan: tuple[str, ...], sampel: int)`
+  - `Kecocokan(kode: str, skor: int, alasan: tuple[str, ...], sampel: int, risiko: RiskLevel | None)`
   - `nilai(strategi, *, peta, performa, stabil) -> Kecocokan`
+
+**Risk masuk DUA KALI, dan itu keputusan operator (2026-08-23).** Di sini
+sebagai bahan peringkat (§17.21–17.22), dan lagi di ujung sebagai gerbang
+(diagram operator). Alasan keduanya berbeda: yang di sini mencegah strategi
+berisiko ekstrem NAIK ke champion; yang di ujung mencegah rencana berisiko
+ekstrem TERBIT walau strateginya wajar.
+
+Sumbernya tidak perlu dibangun: `strategy_performance.max_drawdown` sudah
+tersimpan, dan `risk.score.categorise` sudah menerjemahkan skor menjadi
+`RiskLevel`.
 
 - [ ] **Step 1: Tulis test yang gagal**
 
@@ -476,7 +506,29 @@ def test_sampel_kecil_tidak_mengalahkan_sampel_besar() -> None:
     assert tebal.skor > tipis.skor
 ```
 
-- [ ] **Step 4: Implementasi**
+- [ ] **Step 4: Test bahwa risiko ekstrem menahan champion — §17.21**
+
+```python
+def test_risiko_ekstrem_menahan_strategi_berperforma_tinggi() -> None:
+    """§17.21 dengan angkanya sendiri: performa 91% dengan risk 92/100 tidak
+    boleh otomatis mengalahkan performa 84% dengan risk 42/100.
+
+    Sumbernya `strategy_performance.max_drawdown`, yang sudah tersimpan -
+    bukan pembacaan baru.
+    """
+    peta = PetaRezim("TRENDING_BULLISH", 85.0, (), (), ())
+    ganas = nilai(_strategi(), peta=peta, stabil=90.0,
+                  performa=Slice(win_rate=0.91, sample_size=900,
+                                 max_drawdown=Decimal("-0.92")))
+    tenang = nilai(_strategi(), peta=peta, stabil=90.0,
+                   performa=Slice(win_rate=0.84, sample_size=900,
+                                  max_drawdown=Decimal("-0.42")))
+
+    assert tenang.skor > ganas.skor
+    assert ganas.risiko is RiskLevel.HIGH
+```
+
+- [ ] **Step 5: Implementasi**
 
 ```python
 #: Sampel minimum sebelum win rate ikut menaikkan skor.
@@ -514,21 +566,35 @@ def nilai(strategi, *, peta, performa, stabil) -> Kecocokan:
         alasan.append(f"{performa.sample_size} sampel di bawah "
                       f"{MIN_VALIDATION_SAMPLE} - win rate TIDAK dihitung")
 
+    # §17.21: risiko MENURUNKAN, tidak pernah menaikkan. Strategi yang
+    # drawdown historisnya dalam boleh tetap dipilih - yang dilarang adalah ia
+    # naik ke champion HANYA karena win rate-nya tinggi.
+    risiko = None
+    if performa is not None and performa.max_drawdown is not None:
+        risiko = categorise(abs(float(performa.max_drawdown)) * 100)
+        potong = {RiskLevel.HIGH: 25, RiskLevel.MEDIUM: 10}.get(risiko, 0)
+        if potong:
+            skor -= potong
+            alasan.append(
+                f"drawdown historis {performa.max_drawdown:.0%} - risiko "
+                f"{risiko.value}, skor dipotong {potong}"
+            )
+
     return Kecocokan(strategi.code, max(0, min(100, skor)), tuple(alasan),
-                     performa.sample_size if performa else 0)
+                     performa.sample_size if performa else 0, risiko)
 ```
 
-- [ ] **Step 5: Jalankan, pastikan HIJAU**
+- [ ] **Step 6: Jalankan, pastikan HIJAU**
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add src/aruna/router/kecocokan.py tests/test_router_kecocokan.py
-git commit -m "Router: skor kecocokan dengan perlindungan sampel"
+git commit -m "Router: skor kecocokan dengan perlindungan sampel dan risiko"
 ```
 
 **Cabut-uji:** buang gerbang `sample_size >= MIN_VALIDATION_SAMPLE` → test
-sampel kecil MERAH.
+sampel kecil MERAH. Buang potongan risiko → test risiko ekstrem MERAH.
 
 ---
 
@@ -829,7 +895,97 @@ git commit -m "Router tersambung ke siklus upkeep"
 
 ---
 
-## Task 9: Ruff, suite penuh, restart, ukur
+## Task 9: Gerbang risiko di ujung (diagram operator 2026-08-23)
+
+Risk sudah menurunkan skor di Task 4. Task ini yang kedua: **gerbang sesudah
+scenario**, sebelum keputusan akhir.
+
+**Files:** ubah `src/aruna/router/putusan.py`, `tests/test_router_gerbang.py`
+
+**Interfaces:**
+- Consumes: `PutusanRouter` (Task 5), `aruna.risk.gate.evaluate`, `Vonis`
+- Produces: `lolos_gerbang(putusan, *, vonis) -> PutusanRouter`
+
+- [ ] **Step 1: Tulis test yang gagal**
+
+```python
+def test_vonis_risiko_membatalkan_champion() -> None:
+    """Alurnya: router memilih, scenario menguji, risk memutuskan. Champion
+    yang lolos peringkat masih bisa gugur di sini - dan sebabnya harus
+    tercatat, bukan menghilang sebagai NONE tanpa keterangan."""
+    from aruna.risk.gate import Keputusan, Vonis
+
+    semula = PutusanRouter(Kecocokan("STR-001", 91, (), 900, None), None, "")
+    hasil = lolos_gerbang(
+        semula, vonis=Vonis(keputusan=Keputusan.TAHAN, alasan=("drawdown",))
+    )
+
+    assert hasil.champion is None
+    assert "drawdown" in hasil.alasan_kosong
+```
+
+- [ ] **Step 2: Jalankan, pastikan MERAH**
+
+Expected: FAIL — `ImportError: cannot import name 'lolos_gerbang'`
+
+- [ ] **Step 3: Implementasi**
+
+```python
+def lolos_gerbang(putusan: PutusanRouter, *, vonis: Any) -> PutusanRouter:
+    """Gerbang risiko sesudah scenario (diagram operator 2026-08-23).
+
+    **Kedua kalinya risk masuk, dan alasannya berbeda dari yang pertama.** Di
+    `kecocokan.nilai` risiko menahan strategi berisiko ekstrem NAIK ke
+    champion; di sini ia menahan rencana berisiko ekstrem TERBIT walau
+    strateginya wajar. Yang pertama tentang pilihan, yang kedua tentang
+    keadaan saat ini.
+
+    Champion yang gugur tidak diganti challenger. Challenger dipilih karena
+    kecocokan, bukan karena ia lebih aman - dan menaikkannya diam-diam ketika
+    champion gugur berarti menerbitkan rencana yang tidak pernah dinilai
+    gerbang ini.
+    """
+    if putusan.champion is None:
+        return putusan
+    if getattr(vonis, "keputusan", None) is Keputusan.LOLOS:
+        return putusan
+    sebab = ", ".join(getattr(vonis, "alasan", ()) or ("tidak disebutkan",))
+    return PutusanRouter(None, None, f"gerbang risiko menahan: {sebab}")
+```
+
+- [ ] **Step 4: Test bahwa challenger TIDAK naik diam-diam**
+
+```python
+def test_challenger_tidak_naik_saat_champion_gugur() -> None:
+    from aruna.risk.gate import Keputusan, Vonis
+
+    semula = PutusanRouter(
+        Kecocokan("STR-001", 91, (), 900, None),
+        Kecocokan("STR-005", 84, (), 900, None),
+        "",
+    )
+    hasil = lolos_gerbang(
+        semula, vonis=Vonis(keputusan=Keputusan.TAHAN, alasan=("risiko",))
+    )
+
+    assert hasil.challenger is None
+```
+
+- [ ] **Step 5: Jalankan, pastikan HIJAU**
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/aruna/router/putusan.py tests/test_router_gerbang.py
+git commit -m "Router: gerbang risiko sesudah scenario"
+```
+
+**Cabut-uji:** buat `lolos_gerbang` selalu memulangkan `putusan` apa adanya →
+kedua test MERAH.
+
+---
+
+## Task 10: Ruff, suite penuh, restart, ukur
 
 - [ ] `.\.venv\Scripts\python.exe -m ruff check src tests`
 - [ ] Suite penuh, sendirian
@@ -847,8 +1003,9 @@ git commit -m "Router tersambung ke siklus upkeep"
 **Cakupan spec.** §17.1 Task 6 · §17.2 Task 4 · §17.3–17.6 Task 1 · §17.7–17.8
 Task 1 · §17.9 Task 7 (kolom `dipilih_pada`, baris tidak pernah ditimpa) ·
 §17.10 Task 2 · §17.11–17.13 sudah ada + Task 5 (filter DISABLED) · §17.14–17.15
-Task 4 · §17.16 Task 3 · §17.17–17.18 Task 5 · §17.19 Task 8 · §17.21–17.23
-Task 4 · §17.27 Task 7 · §17.29–17.30 Task 5 · §17.44 Task 7 (`versi_router`) ·
+Task 4 · §17.16 Task 3 · §17.17–17.18 Task 5 · §17.19 Task 8 · **§17.21–17.22
+Task 4 (peringkat) DAN Task 9 (gerbang)** · §17.23 Task 4 · §17.27 Task 7 ·
+§17.29–17.30 Task 5 · §17.37 Task 3 · §17.44 Task 7 (`versi_router`) ·
 §17.46 Task 5 · §17.52 Task 7 · §17.53 Task 8.
 
 **Celah yang disebut, bukan disembunyikan:**
