@@ -132,11 +132,32 @@ DISENGAJA: dict[str, str] = {
         "Menyusun kandidat dari riwayat seleksi. Jalur pembelajaran memakai "
         "`pilih` yang menyusunnya sendiri."
     ),
+    # -- 6. Ditemukan 2026-08-23 saat penghitungnya diperketat --------------
+    #
+    # Keduanya lolos versi lama karena namanya dipakai sebagai NAMA LAIN di
+    # tempat lain - `nilai_satu` ada dua (yang satu di `upkeep/manfaat.py`
+    # memang terpakai), dan `tally` terbaca sebagai atribut. Diperiksa satu per
+    # satu sebelum ditulis di sini, bukan didaftarkan borongan.
+    "nilai_satu": (
+        "Bagian 16.19, dan ia BUKAN kembaran `nilai_dari_pasar`. Yang terpakai "
+        "menilai dari keluarga jejak harga; yang ini menilai dari RANTAI "
+        "KONSEKUENSI - berapa langkah perkembangan yang benar-benar terjadi - "
+        "dan hanya ia yang bisa menjawab 'dua dari tiga langkah terjadi'. "
+        "Bahannya `perkembangan_terjadi`, satu boolean per langkah, dan "
+        "**tidak ada yang menghitungnya**: itu menuntut memeriksa tiap kalimat "
+        "rantai terhadap candle. Kemampuannya ada, pemasok buktinya belum."
+    ),
+    "tally": (
+        "PASAL 11: menjawab 'kenapa NO SIGNAL sebanyak ini' sebagai daftar "
+        "pendek per kelompok. `classify_withheld` yang dipakai jalur produksi "
+        "untuk melabeli satu penahanan; yang meringkas BANYAK penahanan belum "
+        "punya pembaca - laporan harian menghitung sendiri lewat SQL."
+    ),
 }
 
 
-def _publik(berkas: Path) -> dict[str, str]:
-    pohon = ast.parse(berkas.read_text(encoding="utf-8"))
+def _publik(sumber: str) -> dict[str, str]:
+    pohon = ast.parse(sumber)
     keluar: dict[str, str] = {}
     for n in pohon.body:
         if isinstance(n, ast.FunctionDef | ast.AsyncFunctionDef):
@@ -147,33 +168,81 @@ def _publik(berkas: Path) -> dict[str, str]:
     return keluar
 
 
-def _rujukan(berkas: Path) -> Counter:
-    """Nama yang DIRUJUK. Definisinya sendiri bukan rujukan."""
-    pohon = ast.parse(berkas.read_text(encoding="utf-8"))
+def _lintas(sumber: str) -> Counter:
+    """Rujukan yang hanya mungkin datang dari LUAR modul pendefinisinya.
+
+    Dua bentuk, dan keduanya diperlukan karena kode ini memakai keduanya:
+    ``from x import y`` dan ``modul.y(...)``. Meninggalkan yang kedua akan
+    menuduh seluruh :mod:`aruna.analysis.indicators` dan
+    :mod:`aruna.notify.telegram.formatting` menganggur - terukur 67 tuduhan,
+    dua setengah kali daftar keputusan yang ada.
+
+    **Atribut hanya dihitung kalau ia DIPANGGIL.** ``x.nilai`` yang cuma dibaca
+    hampir selalu bidang dataclass, bukan fungsi modul; ``x.nilai(...)`` hampir
+    selalu sebaliknya. Perbedaan itu menurunkan tuduhan dari 67 ke 33 dan
+    sekaligus **menemukan dua yatim nyata** yang versi sebelumnya lewatkan.
+
+    **Batasnya diakui, bukan disembunyikan.** Penghitung ini tetap tidak bisa
+    membedakan fungsi modul dari METODE yang namanya sama. Sebuah fungsi
+    bernama ``nilai`` akan terlihat terpakai kalau ada kelas mana pun yang
+    punya metode ``nilai``. Menutupnya menuntut analisis lingkup sungguhan;
+    yang ada sekarang menyaring sebagian besar, dan sisanya harus ditangkap
+    dengan cara lain - penjaga AST per-fase seperti `test_scenario_terpasang`.
+    """
+    pohon = ast.parse(sumber)
     c: Counter = Counter()
     for n in ast.walk(pohon):
-        if isinstance(n, ast.Name):
-            c[n.id] += 1
-        elif isinstance(n, ast.Attribute):
-            c[n.attr] += 1
+        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute):
+            c[n.func.attr] += 1
         elif isinstance(n, ast.ImportFrom):
             for a in n.names:
                 c[a.name] += 1
     return c
 
 
+def _lokal(sumber: str) -> Counter:
+    """Nama telanjang yang DIBACA di dalam satu berkas.
+
+    Dihitung terpisah dari :func:`_lintas`, dan hanya berlaku untuk berkas yang
+    mendefinisikan namanya. Sebuah fungsi yang dipanggil tetangganya di modul
+    yang sama tidak yatim - `dilabeli_router` di `router/label.py` begitu - tapi
+    `ast.Name` di berkas LAIN tidak membuktikan apa pun tentangnya.
+    """
+    pohon = ast.parse(sumber)
+    c: Counter = Counter()
+    for n in ast.walk(pohon):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+            c[n.id] += 1
+    return c
+
+
 def _menganggur() -> dict[str, str]:
-    berkas = sorted(SRC.rglob("*.py"))
-    dirujuk: Counter = Counter()
-    for b in berkas:
-        dirujuk.update(_rujukan(b))
+    """Nama publik yang tidak dirujuk di mana pun dalam ``src/``.
+
+    **Cara menghitungnya dikoreksi 2026-08-23, dan koreksinya penting.**
+
+    Versi pertama menjumlahkan seluruh `ast.Name` dari seluruh berkas ke dalam
+    satu penghitung. Akibatnya sebuah fungsi yang namanya kebetulan kata umum
+    terlihat punya pemanggil karena nama itu dipakai sebagai **variabel lokal
+    di berkas lain**. Terbukti pada `router.kecocokan.nilai`: nol pemanggil,
+    tapi lolos karena `label.py` memakai `nilai` sebagai variabel biasa.
+
+    Itu lubang di penjaga yang justru ada untuk cacat paling berulang di proyek
+    ini - dan lubangnya melebar tepat pada nama berbahasa Indonesia, yang
+    dipakai di seluruh kode ini.
+    """
+    berkas = [b for b in sorted(SRC.rglob("*.py")) if b.name != "__init__.py"]
+    sumber = {b: b.read_text(encoding="utf-8") for b in sorted(SRC.rglob("*.py"))}
+
+    lintas: Counter = Counter()
+    for teks in sumber.values():
+        lintas.update(_lintas(teks))
 
     keluar: dict[str, str] = {}
     for b in berkas:
-        if b.name == "__init__.py":
-            continue
-        for nama, jenis in _publik(b).items():
-            if dirujuk[nama] == 0:
+        sendiri = _lokal(sumber[b])
+        for nama, jenis in _publik(sumber[b]).items():
+            if lintas[nama] == 0 and sendiri[nama] == 0:
                 keluar[nama] = f"{jenis} di {b.relative_to(SRC.parent.parent)}"
     return keluar
 
@@ -204,6 +273,83 @@ class TestPermukaanPublikPunyaKeputusan:
             f"sudah punya pemanggil, jadi barisnya boleh dihapus: {basi}"
         )
 
+class TestPenghitungnyaTidakBisaDIPALSUKAN:
+    """**Lubang yang ditemukan 2026-08-23, sesudah penjaga ini dipakai.**
+
+    Penjaga yang bisa dipuaskan oleh kebetulan lebih buruk daripada tidak ada
+    penjaga: ia memberi rasa aman tanpa memberi jaminan.
+    """
+
+    def test_variabel_lokal_bernama_sama_bukan_pemanggil(self) -> None:
+        """Inilah kasusnya, apa adanya. `router.kecocokan.nilai` nol pemanggil,
+        tapi versi pertama meloloskannya karena `router/label.py` memakai
+        `nilai` sebagai nama variabel biasa.
+
+        Lubangnya melebar tepat pada nama berbahasa Indonesia - `nilai`,
+        `hasil`, `bacaan`, `putusan` - yaitu seluruh kosakata kode ini.
+        """
+        pendefinisi = "def nilai(x):\n    return x\n"
+        tetangga = "def lain(row):\n    nilai = row.get('a')\n    return nilai\n"
+
+        lintas = Counter()
+        lintas.update(_lintas(pendefinisi))
+        lintas.update(_lintas(tetangga))
+
+        assert lintas["nilai"] == 0
+        assert _lokal(pendefinisi)["nilai"] == 0
+
+    def test_impor_lintas_modul_tetap_terhitung(self) -> None:
+        """Yang benar-benar dipakai harus tetap lolos - kalau tidak, daftar
+        DISENGAJA akan membengkak sampai berhenti dibaca."""
+        pemakai = "from aruna.router.kecocokan import nilai\n\nnilai(1)\n"
+
+        assert _lintas(pemakai)["nilai"] == 1
+
+    def test_pemanggilan_lewat_atribut_terhitung(self) -> None:
+        assert _lintas("import mod\n\nmod.nilai(1)\n")["nilai"] == 1
+
+    def test_pemanggil_di_modul_yang_sama_bukan_yatim(self) -> None:
+        """`dilabeli_router` dipanggil `performa_rezim` di berkas yang sama.
+        Menghitungnya yatim akan memaksa menulis alasan untuk fungsi yang
+        jelas-jelas terpakai."""
+        sendiri = (
+            "def dilabeli_router(r):\n    return True\n\n"
+            "def performa_rezim(rows):\n"
+            "    return [r for r in rows if dilabeli_router(r)]\n"
+        )
+
+        assert _lokal(sendiri)["dilabeli_router"] == 1
+
+    def test_definisinya_sendiri_bukan_rujukan(self) -> None:
+        assert _lokal("def nilai(x):\n    return x\n")["nilai"] == 0
+        assert _lintas("class Kecocokan:\n    pass\n")["Kecocokan"] == 0
+
+    def test_atribut_yang_cuma_dibaca_bukan_pemanggil(self) -> None:
+        """`x.nilai` yang cuma dibaca hampir selalu bidang dataclass;
+        `x.nilai(...)` hampir selalu fungsi. Membedakannya menurunkan tuduhan
+        dari 67 ke 33 dan sekaligus menemukan dua yatim nyata."""
+        dibaca = "def f(b):\n    return b.nilai\n"
+        dipanggil = "def f(m):\n    return m.nilai(1)\n"
+
+        assert _lintas(dibaca)["nilai"] == 0
+        assert _lintas(dipanggil)["nilai"] == 1
+
+    def test_batasnya_diakui_bukan_disembunyikan(self) -> None:
+        """**Penjaga ini masih punya lubang, dan mengakuinya bagian dari
+        gunanya.** Ia tidak bisa membedakan fungsi modul dari METODE yang
+        namanya sama - sebuah fungsi `nilai` terlihat terpakai kalau ada kelas
+        mana pun yang punya metode `nilai`.
+
+        Test ini ada supaya siapa pun yang bersandar penuh pada penjaga ini
+        tahu apa yang TIDAK dijaminnya. Sisanya harus ditangkap penjaga AST
+        per-fase, seperti `test_scenario_terpasang`.
+        """
+        metode = "class A:\n    def nilai(self, x):\n        return x\n\na.nilai(1)\n"
+
+        assert _lintas(metode)["nilai"] == 1
+
+
+class TestKawatPerangkap:
     def test_kawat_perangkap_tetap_tidak_menyala(self) -> None:
         """Yang ini justru HARUS tetap menganggur. `RealTradingForbiddenError`
         yang punya pemanggil berarti ada jalur kode yang mencoba eksekusi
