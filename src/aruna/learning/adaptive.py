@@ -95,12 +95,17 @@ def _observation(row: dict[str, Any]) -> Observation:
     )
 
 
-def _drawdown(pnls: list[Decimal]) -> Decimal:
+def drawdown(pnls: list[Decimal]) -> Decimal:
     """Penurunan terdalam dari puncak kumulatif.
 
     Dihitung dari urutan yang diberikan pemanggil, dan pemanggil bertanggung
     jawab mengurutkannya menurut waktu. Drawdown atas urutan yang salah adalah
     angka yang terlihat benar dan tidak berarti apa-apa.
+
+    **Publik sejak 2026-08-23**, dan bukan demi kerapian:
+    :mod:`aruna.router.pengukuran` menulis baris ``strategy_performance`` juga,
+    dan drawdown yang dihitung dua kali dengan dua rumus adalah dua angka yang
+    harus tetap sepakat selamanya. Satu rumus, satu tempat.
     """
     puncak = Decimal(0)
     kumulatif = Decimal(0)
@@ -116,7 +121,7 @@ def _strategy_slices(rows: list[dict[str, Any]]) -> tuple[StrategySlice, ...]:
     """Performa per strategi, dan per strategi x rezim.
 
     Diurutkan menurut waktu penyelesaian sebelum drawdown dihitung - lihat
-    :func:`_drawdown`.
+    :func:`drawdown`.
     """
     berurut = sorted(
         rows, key=lambda r: (r.get("resolved_at") or datetime.min)
@@ -141,7 +146,7 @@ def _strategy_slices(rows: list[dict[str, Any]]) -> tuple[StrategySlice, ...]:
                 dimensions={"regime": regime},
                 evidence=bukti,
                 net_pnl=sum(pnls, Decimal(0)),
-                max_drawdown=_drawdown(pnls),
+                max_drawdown=drawdown(pnls),
             )
         )
     hasil.sort(key=lambda s: (-s.evidence.total, s.slice_key))

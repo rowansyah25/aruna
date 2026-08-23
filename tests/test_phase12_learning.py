@@ -413,17 +413,67 @@ class TestPerformaStrategi:
     """PASAL 12.4, 12.7."""
 
     def test_drawdown_dihitung_dari_puncak_kumulatif(self) -> None:
-        from aruna.learning.adaptive import _drawdown
+        from aruna.learning.adaptive import drawdown
 
         # naik 10, turun 30, naik 5: puncak 10, terendah -20, dalam 30.
-        assert _drawdown(
+        assert drawdown(
             [Decimal("10"), Decimal("-30"), Decimal("5")]
         ) == Decimal("30")
 
     def test_deret_yang_selalu_naik_tidak_punya_drawdown(self) -> None:
-        from aruna.learning.adaptive import _drawdown
+        from aruna.learning.adaptive import drawdown
 
-        assert _drawdown([Decimal("5"), Decimal("5")]) == Decimal("0")
+        assert drawdown([Decimal("5"), Decimal("5")]) == Decimal("0")
+
+    @pytest.mark.asyncio
+    async def test_kunci_urutan_drawdown_benar_benar_dibaca(self) -> None:
+        """**Bug yang ditemukan 2026-08-23, dan diamnya mahal.**
+
+        `_strategy_slices` mengurutkan barisnya menurut `resolved_at` SEBELUM
+        menghitung drawdown - dan `LearningRepository.resolved()` tidak pernah
+        memilih kolom itu. Kolom yang tak pernah dipilih memulangkan `None`
+        untuk tiap baris, jadi pengurutannya menjadi tanpa efek dan `sorted`
+        yang stabil membiarkan urutan `locked_at DESC` apa adanya.
+
+        Akibatnya `strategy_performance.max_drawdown` dihitung atas deret
+        TERBALIK. Ia tetap sebuah angka, tetap masuk akal dilihat, dan tidak
+        menggambarkan apa pun - persis yang docstring `drawdown` peringatkan.
+        """
+        from datetime import UTC, datetime
+
+        from aruna.db.repositories.learning import LearningRepository
+
+        class _DbPalsu:
+            def __init__(self) -> None:
+                self.sql = ""
+
+            async def fetch(self, sql: str, *args: object) -> list[dict]:
+                self.sql = sql
+                return [{
+                    "signal_id": "S1", "symbol": "BTC/USDT",
+                    "market_code": "CRYPTO", "horizon_code": "15m",
+                    "direction": "BUY", "confidence": 70,
+                    "reference_price": 1, "entry_price": 1, "target_price": 2,
+                    "expected_move_pct": 1,
+                    "locked_at": datetime(2026, 8, 23, tzinfo=UTC),
+                    "as_of": datetime(2026, 8, 23, tzinfo=UTC),
+                    "resolves_at": datetime(2026, 8, 23, 1, tzinfo=UTC),
+                    "resolved_at": datetime(2026, 8, 23, 2, tzinfo=UTC),
+                    "reasoning": "[]", "regime": "TRENDING",
+                    "risk_level": "MODERATE", "news_state": None,
+                    "council_session_id": None, "published": 1,
+                    "outcome_class": "WIN", "direction_correct": 1,
+                    "actual_move_pct": 1, "predicted_move_pct": 1,
+                    "final_price": 2, "max_adverse_pct": 0,
+                    "max_favourable_pct": 1, "target_reached": 1,
+                    "net_pnl": 5, "result": "WIN",
+                }]
+
+        db = _DbPalsu()
+        rows = await LearningRepository(db).resolved(limit=1)
+
+        assert "resolved_at" in db.sql
+        assert rows[0]["resolved_at"] is not None
 
     def test_rezim_dipetakan_ke_strategi_yang_masuk_akal(self) -> None:
         """Setiap rezim dipakukan ke pemiliknya.

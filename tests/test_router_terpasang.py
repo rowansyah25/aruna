@@ -173,6 +173,10 @@ class TestSeluruhRantaiTask1SampaiTask7Terpakai:
             "kenapa_berganti": "Task 10 - peralihan dicatat, bukan disimpulkan",
             "pilihan_terakhir": "Task 10 - pilihan sebelumnya untuk dibandingkan",
             "_dengan_status": "Task 11 - status dari TABEL, bukan dari kode",
+            "susun_slice": "Penulis - pilihan tuntas jadi baris performa",
+            "baris_simpan": "Penulis - bentuk baris untuk penyimpan Phase 12",
+            "hasil_terkait_pilihan": "Penulis - attribusi sinyal ke pilihan",
+            "simpan_performa": "Penulis - tulis baris berlabel router-1",
         }
         hilang = {k: v for k, v in wajib.items() if k not in dipanggil}
 

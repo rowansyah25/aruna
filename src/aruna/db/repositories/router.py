@@ -34,12 +34,29 @@ from aruna.router.putusan import PutusanRouter
 from aruna.router.rezim import BOBOT_INTERVAL, BacaanRezim, PetaRezim
 
 __all__ = [
+    "BATAS_ATRIBUSI",
     "LEBAR_ALASAN_KOSONG",
+    "LEBAR_BAR_MENIT",
     "RIWAYAT_STABILITAS",
     "UMUR_MAKSIMUM_BAR",
     "RouterRepository",
     "umur_maksimum",
 ]
+
+
+#: Lebar bar router dalam menit, untuk jendela attribusi.
+#:
+#: Diturunkan dari :data:`~aruna.upkeep.router.INTERVAL_ROUTER`, bukan diketik
+#: ulang: jendela yang tidak sama dengan stempelnya akan mengaitkan sinyal ke
+#: bar yang salah, atau tidak sama sekali - dan diam.
+LEBAR_BAR_MENIT = 15
+
+#: Berapa sinyal tuntas yang dibaca sekali ukur.
+#:
+#: Sama dengan bawaan `LearningRepository.resolved`, dan pertanyaannya memang
+#: sama: berapa riwayat yang cukup untuk mengukur tanpa memindai seluruh tabel
+#: tiap kali.
+BATAS_ATRIBUSI = 500
 
 
 #: Berapa bar sendiri sebelum sebuah bacaan rezim dianggap basi.
@@ -246,6 +263,44 @@ class RouterRepository:
             keluar[str(r["symbol"])] = (int(r["id"]), pasar)
         return keluar
 
+    async def hasil_terkait_pilihan(
+        self, *, batas: int = BATAS_ATRIBUSI
+    ) -> list[dict[str, Any]]:
+        """Sinyal yang sudah tuntas, berikut champion yang berlaku saat itu.
+
+        **Attribusinya per BAR, dan hanya ke depan.** Sebuah sinyal dikaitkan
+        ke pilihan router untuk aset yang sama pada bar yang sama, dan hanya
+        yang terkunci **sesudah** pilihannya tercatat. Urutan itu bukan
+        kerapian: pilihan yang dicatat sesudah sinyalnya terkunci tidak
+        menjelaskan apa pun tentang sinyal itu, dan memakainya adalah
+        look-ahead yang bagian 17.43 larang.
+
+        Barisnya tidak menjadi ganda: kunci ``(asset_id, dipilih_pada)`` unik
+        dan jendela barnya tidak tumpang tindih, jadi tiap sinyal cocok dengan
+        paling banyak satu pilihan.
+
+        ``exit_at`` yang jadi urutan waktu, bukan ``locked_at``: drawdown
+        dihitung atas kurva pnl kumulatif, dan yang menambah pnl adalah
+        penutupan perdagangan - bukan pembukaannya.
+        """
+        rows = await self._db.fetch(
+            "SELECT rp.champion, rp.regime_primary AS regime, "
+            "       t.result, t.net_pnl, t.exit_at AS resolved_at "
+            "FROM router_pilihan rp "
+            "JOIN signal_snapshots s "
+            "  ON s.asset_id = rp.asset_id "
+            " AND s.locked_at >= rp.dipilih_pada "
+            " AND s.locked_at < rp.dipilih_pada + INTERVAL %s MINUTE "
+            "JOIN paper_trades t ON t.signal_id = s.signal_id "
+            "WHERE rp.champion IS NOT NULL AND t.exit_at IS NOT NULL "
+            "ORDER BY t.exit_at DESC LIMIT %s",
+            LEBAR_BAR_MENIT,
+            batas,
+        )
+        for r in rows:
+            r["resolved_at"] = as_utc(r["resolved_at"])
+        return [dict(r) for r in rows]
+
     async def semua_slice(self) -> list[dict[str, Any]]:
         """Baris ``strategy_performance``, seluruhnya, tanpa disaring di SQL.
 
@@ -272,6 +327,27 @@ class RouterRepository:
             "FROM strategy_performance"
         )
         return [dict(r) for r in rows]
+
+    async def simpan_performa(self, baris: list[dict[str, Any]]) -> int:
+        """Tulis baris performa berlabel router.
+
+        Memakai penyimpan Phase 12 apa adanya. Kunci uniknya
+        ``(strategy_code, slice_key, model_version)``, jadi baris ``router-1``
+        berdiri di samping ``learn-12.0`` tanpa saling menimpa - dan
+        :func:`~aruna.router.label.dilabeli_router` yang memilih mana yang
+        router pakai.
+
+        Penyimpannya **dipinjam, bukan ditulis ulang**: dua INSERT ke satu
+        tabel dengan daftar kolom yang berbeda adalah dua bentuk baris yang
+        harus tetap sepakat selamanya.
+        """
+        if not baris:
+            return 0
+        from aruna.db.repositories.learning12 import (
+            LearningRepository as Learning12,
+        )
+
+        return await Learning12(self._db).save_strategy_performance(baris)
 
     async def status(self) -> dict[str, str]:
         """Status tiap strategi menurut TABEL, bukan menurut katalog kode.

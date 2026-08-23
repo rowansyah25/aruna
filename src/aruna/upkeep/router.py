@@ -41,6 +41,7 @@ from aruna.learning.strategies import StrategyStatus
 from aruna.router.invalidasi import PilihanSebelumnya, kenapa_berganti
 from aruna.router.kecocokan import Kecocokan, nilai
 from aruna.router.label import performa_rezim
+from aruna.router.pengukuran import baris_simpan, susun_slice
 from aruna.router.peringkat import kandidat_layak
 from aruna.router.putusan import (
     AlasanKosong,
@@ -95,6 +96,13 @@ class HasilRouter:
     #: berarti pemetaannya melingkar. Tanpa angka ini keduanya tak terbedakan.
     berganti: int = 0
     disimpan: int = 0
+    #: Berapa baris ``strategy_performance`` berlabel router yang ditulis.
+    #:
+    #: Nol terus berarti tidak ada pilihan router yang sinyalnya sudah tuntas -
+    #: wajar di hari-hari pertama, dan **tidak wajar** sesudahnya. Tanpa angka
+    #: ini, Task 3 yang menunggu selamanya dan Task 3 yang bekerja terlihat
+    #: sama persis dari luar.
+    slice_ditulis: int = 0
 
     def catat_tolak(self, kode: AlasanKosong | None) -> None:
         kunci = str(kode or "TIDAK_DISEBUT")
@@ -222,11 +230,20 @@ class FaseRouter:
                 stabil=stabil, now=bar,
             )
 
+        # Diukur sekali per bar, dan hanya kalau bar ini memang baru. Ini yang
+        # membuat Task 3 berhenti menunggu: tanpa penulis, `performa_rezim`
+        # menyaring baris berlabel `router-1` yang tidak pernah ada, dan
+        # seluruh separuh performa-dan-risiko `kecocokan.nilai` menganggur
+        # selamanya.
+        if keluar.dipertimbangkan:
+            keluar.slice_ditulis = await self._ukur(pada=bar)
+
         log.info(
             "router.selesai",
             dipertimbangkan=keluar.dipertimbangkan,
             terpilih=keluar.terpilih,
             berganti=keluar.berganti,
+            slice_ditulis=keluar.slice_ditulis,
             ditolak=keluar.ditolak,
         )
         return keluar
@@ -274,6 +291,34 @@ class FaseRouter:
             )
 
         return pilih(tuple(kandidat), peta=peta), peta, stabil
+
+    async def _ukur(self, *, pada: datetime) -> int:
+        """Ubah pilihan router yang sudah tuntas menjadi baris performa.
+
+        **Yang diukur observasional, bukan edge sebuah strategi.** ARUNA
+        menganalisis saja - tidak ada order yang dikirim - jadi tidak ada
+        perdagangan yang benar-benar dihasilkan sebuah strategi, dan jalur
+        sinyal pun tidak membaca pilihan router. Yang terjawab: ketika router
+        merekomendasikan STR-001 untuk sebuah aset pada sebuah bar, bagaimana
+        sinyal ARUNA di jendela itu akhirnya berakhir.
+
+        Itu pertanyaan yang sah dan justru yang dibutuhkan router. Yang tidak
+        boleh adalah membacanya sebagai "STR-001 menang 62%" - lihat catatan
+        :mod:`aruna.router.pengukuran`.
+
+        Kegagalannya tidak menjatuhkan siklus maupun fase: pengukuran yang
+        gagal berarti peringkat berikutnya berjalan tanpa bukti performa, yang
+        memang keadaan bawaannya.
+        """
+        try:
+            baris = await self._repo.hasil_terkait_pilihan()
+            irisan = susun_slice(baris)
+            return await self._repo.simpan_performa(
+                baris_simpan(irisan, pada=pada)
+            )
+        except Exception:
+            log.exception("router.pengukuran_gagal")
+            return 0
 
     async def _status_tersimpan(self) -> dict[str, str]:
         """Status dari tabel ``strategies``, atau kosong kalau tak terbaca.

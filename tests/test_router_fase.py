@@ -67,6 +67,9 @@ class _RepoPalsu:
         self._risiko = risiko or {}
 
         self.disimpan: list[Any] = []
+        #: Sinyal tuntas yang bisa diatribusikan ke pilihan router.
+        self.hasil: list[dict[str, Any]] = []
+        self.performa_ditulis: list[dict[str, Any]] = []
 
     async def peta_rezim(self, *, sekarang: datetime) -> dict[str, tuple[Any, ...]]:
         return self._peta
@@ -99,6 +102,13 @@ class _RepoPalsu:
     async def simpan(self, putusan: Any, **kw: Any) -> int:
         self.disimpan.append((putusan, kw))
         return 1
+
+    async def hasil_terkait_pilihan(self, **kw: Any) -> list[dict[str, Any]]:
+        return list(self.hasil)
+
+    async def simpan_performa(self, baris: list[dict[str, Any]]) -> int:
+        self.performa_ditulis.extend(baris)
+        return len(baris)
 
 
 class _PerformaMeledak:
@@ -435,6 +445,62 @@ class TestPeralihanSampaiKeSini:
         hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
 
         assert hasil.berganti == 0
+
+
+class TestPengukuranMenutupLingkarannya:
+    """Task 3 berhenti menunggu: pilihan router yang tuntas menjadi baris
+    `strategy_performance` berlabel `router-1`, yang `performa_rezim` baca."""
+
+    @pytest.mark.asyncio
+    async def test_pilihan_tuntas_menjadi_baris_performa(self) -> None:
+        repo = _RepoPalsu({"BTC/USDT": _sepakat()})
+        repo.hasil = [
+            {
+                "champion": "STR-001",
+                "regime": "TRENDING",
+                "result": "WIN",
+                "net_pnl": 5,
+                "resolved_at": SAAT,
+            }
+        ]
+        hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+
+        assert hasil.slice_ditulis > 0
+        assert all(
+            b["model_version"] == VERSI_ROUTER for b in repo.performa_ditulis
+        )
+
+    @pytest.mark.asyncio
+    async def test_diukur_sekali_per_bar_bukan_tiap_siklus(self) -> None:
+        """Menulis ulang slice tiap siklus berarti empat kali kerja per bar
+        untuk angka yang sama - dan `market_snapshots` lagi, dalam bentuk
+        lain."""
+        repo = _RepoPalsu({"BTC/USDT": _sepakat()})
+        repo.hasil = [
+            {"champion": "STR-001", "regime": "TRENDING", "result": "WIN",
+             "net_pnl": 5, "resolved_at": SAAT}
+        ]
+        fase = _fase(repo=repo)
+        await fase.jalankan([_Pindai("BTC/USDT")], now=SAAT + timedelta(seconds=3))
+        ditulis_pertama = len(repo.performa_ditulis)
+        await fase.jalankan([_Pindai("BTC/USDT")], now=SAAT + timedelta(seconds=41))
+
+        assert len(repo.performa_ditulis) == ditulis_pertama
+
+    @pytest.mark.asyncio
+    async def test_pengukuran_gagal_tidak_menjatuhkan_fase(self) -> None:
+        """Pengukuran yang gagal berarti peringkat berikutnya berjalan tanpa
+        bukti performa - keadaan bawaannya - bukan siklus yang jatuh."""
+
+        class _Meledak(_RepoPalsu):
+            async def hasil_terkait_pilihan(self, **kw: Any) -> list[Any]:
+                raise RuntimeError("join gagal")
+
+        repo = _Meledak({"BTC/USDT": _sepakat()})
+        hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+
+        assert hasil.terpilih == 1
+        assert hasil.slice_ditulis == 0
 
 
 class TestStatusDibacaDariTabelBukanDariKode:

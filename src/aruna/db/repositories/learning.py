@@ -66,7 +66,18 @@ class LearningRepository:
             "s.target_price, s.expected_move_pct, s.locked_at, s.as_of, "
             "s.resolves_at, s.reasoning, s.regime, s.risk_level, s.news_state, "
             "s.council_session_id, g.published, "
-            "r.outcome_class, r.direction_correct, "
+            # **`resolved_at` sempat hilang dari daftar ini, dan diamnya
+            # mahal.** `adaptive._strategy_slices` mengurutkan barisnya menurut
+            # `resolved_at` SEBELUM menghitung drawdown - dan kolom yang tidak
+            # pernah dipilih memulangkan `None` untuk tiap baris, jadi
+            # pengurutannya menjadi tanpa efek dan `sorted` yang stabil
+            # membiarkan urutan `locked_at DESC` apa adanya.
+            #
+            # Akibatnya `strategy_performance.max_drawdown` dihitung atas deret
+            # TERBALIK. Ia tetap sebuah angka, tetap masuk akal dilihat, dan
+            # tidak menggambarkan apa pun - persis bentuk kegagalan yang
+            # docstring `drawdown` sendiri peringatkan.
+            "r.resolved_at, r.outcome_class, r.direction_correct, "
             "r.actual_move_pct, r.predicted_move_pct, r.final_price, "
             "r.max_adverse_pct, r.max_favourable_pct, r.target_reached, "
             "t.net_pnl, t.result "
@@ -81,6 +92,7 @@ class LearningRepository:
             row["locked_at"] = as_utc(row["locked_at"])
             row["as_of"] = as_utc(row["as_of"])
             row["resolves_at"] = as_utc(row["resolves_at"])
+            row["resolved_at"] = as_utc(row["resolved_at"])
             row["reasoning"] = load_json(row["reasoning"]) or []
             row["published"] = bool(row["published"])
         return rows
