@@ -178,6 +178,16 @@ class FaseRouter:
             # menulis pilihan atas aset yang salah.
             if not bacaan or ident is None:
                 continue
+
+            lama = sebelumnya.get(simbol)
+            # Bar ini sudah ditulis. Ditahan DI SINI, bukan diserahkan kepada
+            # kunci UNIQUE: yang paling murah adalah tidak mengirimnya sama
+            # sekali. Empat siklus per bar x dua puluh aset = enam puluh INSERT
+            # yang diabaikan tiap bar, masing-masing memuntahkan peringatan
+            # `Duplicate entry` ke log - 5.760 baris sehari.
+            if lama is not None and lama[2] == bar:
+                continue
+
             keluar.dipertimbangkan += 1
             putusan, peta, stabil = self._putuskan(
                 bacaan, riwayat.get(simbol, ()), strategi, baris_performa
@@ -193,9 +203,8 @@ class FaseRouter:
             # baris dengan champion baru tidak menyebutkan siapa yang ia
             # gantikan, apalagi kenapa - dan adaptasi yang tidak bisa dilihat
             # tidak bisa dibuktikan terjadi.
-            lama = sebelumnya.get(simbol)
             peralihan = kenapa_berganti(
-                None if lama is None else PilihanSebelumnya(*lama),
+                None if lama is None else PilihanSebelumnya(lama[0], lama[1]),
                 putusan=putusan,
                 peta=peta,
                 boleh_memimpin=boleh_memimpin,

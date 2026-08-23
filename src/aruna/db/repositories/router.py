@@ -261,8 +261,15 @@ class RouterRepository:
         rows = await self._db.fetch("SELECT code, status FROM strategies")
         return {str(r["code"]): str(r["status"]) for r in rows}
 
-    async def pilihan_terakhir(self) -> dict[str, tuple[str | None, str | None]]:
-        """Champion dan rezim yang terakhir tercatat per simbol.
+    async def pilihan_terakhir(
+        self,
+    ) -> dict[str, tuple[str | None, str | None, datetime | None]]:
+        """Champion, rezim, dan STEMPEL yang terakhir tercatat per simbol.
+
+        Stempelnya ikut karena dua hal bergantung padanya. Fase router memakainya
+        untuk melewati aset yang barnya sudah ditulis - tanpa itu tiap siklus
+        mengirim dua puluh INSERT yang diabaikan kunci UNIQUE, dan tiap satu
+        memuntahkan peringatan ``Duplicate entry`` ke log.
 
         Untuk :func:`~aruna.router.invalidasi.kenapa_berganti`. Satu kueri
         untuk seluruh simbol, dan **tanpa batas waktu**: pilihan terakhir tetap
@@ -270,7 +277,8 @@ class RouterRepository:
         waktu mati justru yang paling perlu terlihat.
         """
         rows = await self._db.fetch(
-            "SELECT r.symbol, r.champion, r.regime_primary FROM router_pilihan r "
+            "SELECT r.symbol, r.champion, r.regime_primary, r.dipilih_pada "
+            "FROM router_pilihan r "
             "JOIN (SELECT asset_id, MAX(dipilih_pada) t FROM router_pilihan "
             "      GROUP BY asset_id) k "
             "  ON r.asset_id = k.asset_id AND r.dipilih_pada = k.t"
@@ -279,6 +287,7 @@ class RouterRepository:
             str(r["symbol"]): (
                 None if r["champion"] is None else str(r["champion"]),
                 None if r["regime_primary"] is None else str(r["regime_primary"]),
+                as_utc(r["dipilih_pada"]),
             )
             for r in rows
         }

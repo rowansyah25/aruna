@@ -22,6 +22,11 @@ from aruna.scanner.events import ScanResult
 from aruna.upkeep.router import FaseRouter, HasilRouter
 
 SAAT = datetime(2026, 8, 23, 10, 0, tzinfo=UTC)
+#: Bar SEBELUM `SAAT`. Pilihan tersimpan yang stempelnya sama dengan bar
+#: sekarang akan dilewati, jadi fixture peralihan harus memakai bar yang lebih
+#: tua - kalau tidak, ia diam-diam menguji jalur "sudah ditulis" alih-alih
+#: jalur peralihan.
+SEBELUM = datetime(2026, 8, 23, 9, 45, tzinfo=UTC)
 
 
 def _Pindai(symbol: str, *, scanned: bool = True) -> ScanResult:
@@ -49,7 +54,8 @@ class _RepoPalsu:
         peta: dict[str, tuple[Any, ...]] | None = None,
         riwayat: dict[str, tuple[str, ...]] | None = None,
         risiko: dict[str, str] | None = None,
-        sebelumnya: dict[str, tuple[str | None, str | None]] | None = None,
+        sebelumnya: dict[str, tuple[str | None, str | None, datetime | None]]
+        | None = None,
     ) -> None:
         self._peta = peta or {}
         self._riwayat = riwayat or {}
@@ -71,8 +77,19 @@ class _RepoPalsu:
     async def risiko_terakhir(self, *, sekarang: datetime) -> dict[str, str]:
         return {s: self._risiko.get(s, "MODERATE") for s in self._peta}
 
-    async def pilihan_terakhir(self) -> dict[str, tuple[str | None, str | None]]:
-        return self._sebelumnya
+    async def pilihan_terakhir(
+        self,
+    ) -> dict[str, tuple[str | None, str | None, datetime | None]]:
+        """Stempel yang tersimpan ikut dilacak, seperti aslinya.
+
+        Yang sudah ditulis di siklus ini masuk ke sini juga - kalau tidak, test
+        dua-panggilan tidak bisa membuktikan bar yang sama tidak dikirim ulang.
+        """
+        keluar = dict(self._sebelumnya)
+        for putusan, kw in self.disimpan:
+            kode = None if putusan.champion is None else putusan.champion.kode
+            keluar[kw["symbol"]] = (kode, putusan.regime, kw["dipilih_pada"])
+        return keluar
 
     async def identitas(self) -> dict[str, tuple[int, Market]]:
         return {
@@ -250,15 +267,40 @@ class TestHanyaYangDipindai:
         repo = _RepoPalsu({"BTC/USDT": _sepakat()})
         fase = _fase(repo=repo)
         await fase.jalankan([_Pindai("BTC/USDT")], now=SAAT + timedelta(seconds=3))
-        await fase.jalankan([_Pindai("BTC/USDT")], now=SAAT + timedelta(seconds=41))
 
-        stempel = {kw["dipilih_pada"] for _, kw in repo.disimpan}
+        stempel = repo.disimpan[0][1]["dipilih_pada"]
 
-        assert len(repo.disimpan) == 2
-        assert len(stempel) == 1, (
-            "dua siklus dalam bar yang sama menulis stempel berbeda, jadi "
-            "INSERT IGNORE tidak akan pernah menggigit"
+        assert stempel == SAAT, (
+            "stempelnya jam sistem, bukan awal bar - kunci UNIQUE "
+            "(asset_id, dipilih_pada) tidak akan pernah menggigit"
         )
+        assert stempel.second == 0 and stempel.microsecond == 0
+
+    @pytest.mark.asyncio
+    async def test_bar_yang_sudah_ditulis_tidak_dikirim_ulang(self) -> None:
+        """**Terukur di produksi 2026-08-23.** Stempel bar membuat kunci UNIQUE
+        akhirnya menggigit - tapi tiap siklus berikutnya di bar yang sama tetap
+        mengirim dua puluh INSERT yang diabaikan, dan tiap satu memuntahkan
+        peringatan `Duplicate entry` ke log. Empat siklus per bar berarti enam
+        puluh baris peringatan tiap bar, 5.760 sehari.
+
+        Ditahan di hulu, bukan diserahkan kepada kunci: yang paling murah
+        adalah tidak mengirimnya sama sekali.
+
+        Ini juga memperbaiki `berganti` yang tadinya membandingkan pilihan
+        dengan barisnya SENDIRI - `pilihan_terakhir` memulangkan baris dengan
+        stempel terbaru, dan sesudah tulisan pertama di sebuah bar, baris itu
+        adalah yang baru saja ditulis.
+        """
+        repo = _RepoPalsu({"BTC/USDT": _sepakat()})
+        fase = _fase(repo=repo)
+        await fase.jalankan([_Pindai("BTC/USDT")], now=SAAT + timedelta(seconds=3))
+        hasil = await fase.jalankan(
+            [_Pindai("BTC/USDT")], now=SAAT + timedelta(seconds=41)
+        )
+
+        assert len(repo.disimpan) == 1
+        assert hasil.dipertimbangkan == 0
 
     @pytest.mark.asyncio
     async def test_bar_berikutnya_stempelnya_berbeda(self) -> None:
@@ -374,7 +416,7 @@ class TestPeralihanSampaiKeSini:
         membandingkan dua baris."""
         repo = _RepoPalsu(
             {"BTC/USDT": _sepakat("RANGING")},
-            sebelumnya={"BTC/USDT": ("STR-001", "TRENDING")},
+            sebelumnya={"BTC/USDT": ("STR-001", "TRENDING", SEBELUM)},
         )
         hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
         putusan, _ = repo.disimpan[0]
@@ -388,7 +430,7 @@ class TestPeralihanSampaiKeSini:
         """Angka adaptasi yang naik tiap siklus tidak mengukur adaptasi."""
         repo = _RepoPalsu(
             {"BTC/USDT": _sepakat("TRENDING")},
-            sebelumnya={"BTC/USDT": ("STR-001", "TRENDING")},
+            sebelumnya={"BTC/USDT": ("STR-001", "TRENDING", SEBELUM)},
         )
         hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
 
