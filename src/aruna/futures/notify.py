@@ -34,9 +34,8 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
-from zoneinfo import ZoneInfo
 
-from aruna.core.clock import wib
+from aruna.core.clock import JAKARTA, wib
 from aruna.core.logging import get_logger
 from aruna.decision.output import KAKI
 from aruna.futures.plan import (
@@ -62,7 +61,14 @@ SIDE_MARK: dict[str, str] = {"LONG": LONG, "SHORT": SHORT}
 
 log = get_logger("aruna.futures.notify")
 
-WIB = ZoneInfo("Asia/Jakarta")
+#: Zona waktu operator. **Didefinisikan di :mod:`aruna.core.clock`.**
+#:
+#: Empat modul menuliskan ``ZoneInfo("Asia/Jakarta")`` sendiri-sendiri sampai
+#: 2026-08-23, tiga di antaranya sambil mengimpor `wib` dari modul yang sama
+#: yang sudah punya :data:`~aruna.core.clock.JAKARTA`. Satu zona waktu yang
+#: ditulis di empat tempat adalah empat tempat yang harus diubah kalau ARUNA
+#: kelak melayani operator di zona lain.
+WIB = JAKARTA
 
 #: Menit terakhir hari WIB. Laporan harian dibuka di sini, bukan pada tick mana
 #: pun yang kebetulan lewat: operator memintanya "jam 23:59 - 00:00", dan

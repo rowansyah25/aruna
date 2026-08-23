@@ -298,21 +298,93 @@ class TestPemicuTanpaSumberData:
     memang belum ada.
     """
 
-    def test_ada_di_kosakata(self) -> None:
-        assert Peristiwa.LONJAKAN_LIKUIDASI in Peristiwa
+    def test_tidak_ada_lagi_yang_tanpa_sumber(self) -> None:
+        """Daftar ini kosong sejak 2026-08-23, dan dua yang terakhir keluar
+        dengan cara yang sama: bukan dengan menunggu sumber yang ditarik venue,
+        melainkan dengan menemukan bacaan yang datanya sudah tersimpan.
 
-    def test_terdaftar_sebagai_tanpa_sumber_data(self) -> None:
-        assert Peristiwa.LONJAKAN_LIKUIDASI in TANPA_SUMBER_DATA
+        `KONFLIK_LINTAS_PASAR` menjadi "aset yang melawan kohortnya";
+        `LONJAKAN_LIKUIDASI` menjadi "gerak keras dengan OI menyusut".
+        """
+        assert not TANPA_SUMBER_DATA
 
-    def test_tinggal_satu_yang_mati(self) -> None:
-        """Daftar ini menyusut 2026-08-22: `KONFLIK_LINTAS_PASAR` keluar
-        ketika ia dibaca sebagai "aset yang bergerak melawan kohortnya" -
-        bacaan yang datanya sudah ada di tangan fase skenario.
+    def test_daftarnya_tetap_ada_walau_kosong(self) -> None:
+        """Menghapusnya menghilangkan tempat bertanya "apakah masih ada pemicu
+        tanpa sumber". Pertanyaan itu perlu punya jawaban yang bisa diperiksa,
+        bukan disimpulkan dari ketiadaan."""
+        from aruna.scenario import pemicu as modul
 
-        Yang tersisa memang buntu: Binance menarik endpoint REST likuidasi, dan
-        stream `forceOrder` di jaringan ini menerima koneksi tanpa mengirim
-        data."""
-        assert frozenset({Peristiwa.LONJAKAN_LIKUIDASI}) == TANPA_SUMBER_DATA
+        assert hasattr(modul, "TANPA_SUMBER_DATA")
+
+
+class TestLonjakanLikuidasi:
+    """Bagian 16.2 "liquidation spike", dibaca sebagai penutupan paksa.
+
+    Uang baru MEMBUKA posisi; uang yang lari MENUTUPNYA. Gerak keras yang
+    dibarengi open interest menyusut berarti yang menggerakkannya posisi yang
+    keluar - dan itu sidik jari likuidasi, terbaca dari deret yang sudah
+    disimpan tanpa endpoint yang ditarik venue.
+    """
+
+    def test_tembusan_dengan_oi_menyusut_menyala(self) -> None:
+        k = KonteksPemicu(
+            peristiwa_pindai=(_peristiwa(EventKind.BREAKOUT, 1.0, 1.0),),
+            perubahan_oi_pct=-SIGNIFICANT_PCT,
+        )
+
+        assert Peristiwa.LONJAKAN_LIKUIDASI in deteksi(k)
+
+    def test_terjun_dengan_oi_menyusut_menyala(self) -> None:
+        """Dua arah. Long yang terlempar saat harga jatuh dan short yang
+        tertekan saat harga melesat sama-sama penutupan paksa; memilih satu
+        berarti menyelundupkan arah ke dalam pemicu (bagian 16.18)."""
+        k = KonteksPemicu(
+            peristiwa_pindai=(_peristiwa(EventKind.BREAKDOWN, 1.0, 1.0),),
+            perubahan_oi_pct=-SIGNIFICANT_PCT,
+        )
+
+        assert Peristiwa.LONJAKAN_LIKUIDASI in deteksi(k)
+
+    def test_oi_yang_TUMBUH_bukan_likuidasi(self) -> None:
+        """Ujung yang sebenarnya dijaga. Gerak keras dengan OI NAIK adalah uang
+        baru yang masuk - kebalikan dari likuidasi. Menyalakannya di sini akan
+        membuat pemicunya menyala pada setiap tembusan bervolume."""
+        k = KonteksPemicu(
+            peristiwa_pindai=(_peristiwa(EventKind.BREAKOUT, 3.0, 1.0),),
+            perubahan_oi_pct=SIGNIFICANT_PCT * 3,
+        )
+
+        assert Peristiwa.LONJAKAN_LIKUIDASI not in deteksi(k)
+
+    def test_oi_menyusut_tanpa_gerak_harga_bukan_likuidasi(self) -> None:
+        """Posisi yang ditutup pelan-pelan bukan posisi yang dipaksa keluar."""
+        k = KonteksPemicu(
+            peristiwa_pindai=(_peristiwa(EventKind.VOLUME_SPIKE, 1.4, 9.9),),
+            perubahan_oi_pct=-SIGNIFICANT_PCT * 5,
+        )
+
+        assert Peristiwa.LONJAKAN_LIKUIDASI not in deteksi(k)
+
+    def test_oi_tak_terbaca_tidak_menyala(self) -> None:
+        """`None` berarti futures-loop belum menuliskan bacaan kedua - bukan
+        berarti OI-nya diam."""
+        k = KonteksPemicu(
+            peristiwa_pindai=(_peristiwa(EventKind.BREAKDOWN, 3.0, 1.0),),
+            perubahan_oi_pct=None,
+        )
+
+        assert Peristiwa.LONJAKAN_LIKUIDASI not in deteksi(k)
+
+    def test_ambangnya_dipinjam_dari_pertanyaan_yang_sama(self) -> None:
+        """`SIGNIFICANT_PCT` memang berarti "pergeseran nyata pada berapa posisi
+        yang terbuka". Tidak ada angka baru yang dikarang - dan meminjam ambang
+        untuk pertanyaan yang BERBEDA sudah dua kali jadi bug di proyek ini."""
+        tepat_di_bawah = KonteksPemicu(
+            peristiwa_pindai=(_peristiwa(EventKind.BREAKOUT, 1.0, 1.0),),
+            perubahan_oi_pct=-SIGNIFICANT_PCT + Decimal("0.01"),
+        )
+
+        assert Peristiwa.LONJAKAN_LIKUIDASI not in deteksi(tepat_di_bawah)
 
     def test_likuidasi_memang_tidak_bisa_diukur(self) -> None:
         """Bukan kelalaian: Binance menarik endpoint REST-nya, dan adapternya

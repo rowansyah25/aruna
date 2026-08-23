@@ -70,14 +70,33 @@ class TestArahKohort:
             [_tembusan("A"), _tembusan("B"), _tembusan("C"), _terjun("D")]
         )
 
-        assert arah == 1
+        assert arah.arah == 1
+        assert (arah.naik, arah.turun) == (3, 1)
 
     def test_mayoritas_turun(self) -> None:
         arah = _arah_kohort(
             [_terjun("A"), _terjun("B"), _terjun("C"), _tembusan("D")]
         )
 
-        assert arah == -1
+        assert arah.arah == -1
+        assert (arah.naik, arah.turun) == (1, 3)
+
+    def test_hitungannya_ikut_walau_tak_berarah(self) -> None:
+        """**Bug diagnostik, VPS 2026-08-23.** Log mencetak `arah_kohort=None`
+        tiga siklus berturut-turut, dan tidak ada cara membedakan "kurang dari
+        tiga aset berarah" dari "seri". Keduanya menuntut tindakan berbeda:
+        yang pertama soal lantainya, yang kedua soal pasarnya.
+
+        Hitungannya dibawa di tipe supaya pemanggil berikutnya tidak bisa
+        mencatat putusannya lalu membuang buktinya."""
+        kurang = _arah_kohort([_tembusan("A"), _tembusan("B")])
+        seri = _arah_kohort(
+            [_tembusan("A"), _tembusan("B"), _terjun("C"), _terjun("D")]
+        )
+
+        assert kurang.arah is None and seri.arah is None
+        assert kurang.berarah == 2
+        assert (seri.naik, seri.turun) == (2, 2)
 
     def test_seri_tidak_punya_arah(self) -> None:
         """Separuh naik separuh turun adalah pasar yang terbelah. Memilih salah
@@ -86,14 +105,14 @@ class TestArahKohort:
             [_tembusan("A"), _tembusan("B"), _terjun("C"), _terjun("D")]
         )
 
-        assert arah is None
+        assert arah.arah is None
 
     def test_di_bawah_minimum_tidak_punya_arah(self) -> None:
         """Dua aset bukan pasar. Tanpa lantai ini satu aset yang bergerak
         melawan satu tetangganya sudah cukup untuk menyalakan konflik."""
         arah = _arah_kohort([_tembusan("A"), _tembusan("B")])
 
-        assert arah is None
+        assert arah.arah is None
         assert MINIMUM_KOHORT == 3
 
     def test_yang_tak_terpindai_tidak_ikut_menghitung(self) -> None:
@@ -105,7 +124,7 @@ class TestArahKohort:
             _hasil("C", _event(EventKind.BREAKOUT, 3.0, 1.0), scanned=False),
         ]
 
-        assert _arah_kohort(hasil) is None
+        assert _arah_kohort(hasil).arah is None
 
     def test_satu_aset_menyumbang_satu_suara(self) -> None:
         """Aset yang menembus lalu terjun di bar yang sama tidak boleh
@@ -116,7 +135,7 @@ class TestArahKohort:
             _event(EventKind.BREAKDOWN, 3.0, 1.0),
         )
 
-        assert _arah_kohort([bimbang, _tembusan("B"), _tembusan("C")]) == 1
+        assert _arah_kohort([bimbang, _tembusan("B"), _tembusan("C")]).arah == 1
 
     def test_pasar_sepi_tidak_bisa_dikonfliki(self) -> None:
         """Lonjakan volume tanpa arah bukan arah. `None`, bukan nol."""
@@ -125,7 +144,7 @@ class TestArahKohort:
             for s in ("A", "B", "C", "D")
         ]
 
-        assert _arah_kohort(sepi) is None
+        assert _arah_kohort(sepi).arah is None
 
 
 class _RepoPalsu:

@@ -369,6 +369,90 @@ class TestTidakTerbacaBukanNol:
         assert k.regime_sekarang is Regime.RANGING
 
 
+class TestSatuPenerjemahSimbol:
+    """**Konflik nyata, ditemukan 2026-08-23 lewat audit.**
+
+    Modul ini sempat punya `_kanonik` sendiri dengan empat quote hardcoded,
+    sementara `data.crypto.symbols.to_canonical_symbol` sudah melakukan hal yang
+    sama dengan daftar quote lengkap venue. Dua tempat menerjemahkan
+    ``BTCUSDT`` -> ``BTC/USDT`` dengan **aturan gagal yang berbeda**: yang asli
+    MELEMPAR, salinannya memulangkan simbol apa adanya.
+
+    Bentuk kegagalannya yang membuatnya mahal: simbol dengan quote di luar
+    keempatnya tidak diterjemahkan, tidak cocok dengan baris mana pun, dan
+    funding serta open interest-nya tidak pernah sampai ke pemicu - yang
+    terlihat persis seperti pasar yang tenang.
+    """
+
+    def test_memakai_penerjemah_yang_sama_dengan_seluruh_sistem(self) -> None:
+        """Penjaga AST. Salinan yang tumbuh lagi di sini akan melenceng dari
+        daftar quote venue tanpa satu pun test merah."""
+        import ast
+        import inspect
+
+        from aruna.db.repositories import konteks_pemicu as modul
+
+        pohon = ast.parse(inspect.getsource(modul))
+        diimpor = {
+            a.name
+            for n in ast.walk(pohon)
+            if isinstance(n, ast.ImportFrom)
+            for a in n.names
+        }
+
+        assert "to_canonical_symbol" in diimpor
+
+    @pytest.mark.parametrize(
+        ("venue", "diharap"),
+        [
+            ("BTCUSDT", "BTC/USDT"),
+            ("ETH/USDT", "ETH/USDT"),
+            ("btcusdt", "BTC/USDT"),
+        ],
+    )
+    def test_bentuk_venue_menjadi_kanonik(self, venue, diharap) -> None:
+        from aruna.db.repositories.konteks_pemicu import _kanonik
+
+        assert _kanonik(venue) == diharap
+
+    def test_yang_tak_bisa_diterjemahkan_jadi_none_bukan_dirinya_sendiri(
+        self,
+    ) -> None:
+        """Ujung yang sebenarnya dijaga. Memulangkan simbol asli hanya menunda
+        kegagalan sampai ke tempat yang jauh dari sebabnya - ia tidak akan
+        cocok dengan baris mana pun."""
+        from aruna.db.repositories.konteks_pemicu import _kanonik
+
+        assert _kanonik("BTCXYZ") is None
+
+    @pytest.mark.asyncio
+    async def test_satu_simbol_buruk_tidak_mematikan_sisanya(self) -> None:
+        """Sembilan belas simbol yang baik tidak boleh hilang karena satu yang
+        tidak terbaca - dan yang hilang harus DICATAT, bukan didiamkan."""
+
+        class _Metrik:
+            async def terbaru(self, *, sekarang, umur_maksimum):
+                return {
+                    "BTCUSDT": _Bacaan(),
+                    "BTCXYZ": _Bacaan(),
+                    "ETHUSDT": _Bacaan(),
+                }
+
+        db = _Db([], [], [])
+        hasil = await KonteksPemicuRepository(db, metrik=_Metrik()).terbaru(
+            sekarang=NOW
+        )
+
+        assert "BTC/USDT" in hasil
+        assert "ETH/USDT" in hasil
+        assert not any("XYZ" in s for s in hasil)
+
+
+class _Bacaan:
+    funding_rate = None
+    perubahan_oi_pct = None
+
+
 class TestTerpasangDiProduksi:
     def test_app_mengoper_konteks(self) -> None:
         """Bug aslinya bukan logika yang salah melainkan pembaca yang tidak

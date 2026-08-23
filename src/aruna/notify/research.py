@@ -32,13 +32,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
+from aruna.core.clock import JAKARTA
 from aruna.core.logging import get_logger
 
 log = get_logger("aruna.notify.research")
 
-WIB = ZoneInfo("Asia/Jakarta")
+#: Satu sumber, lihat :data:`~aruna.core.clock.JAKARTA`.
+WIB = JAKARTA
 
 #: Kunci di ``app_state``. Nilainya ``{"date": "YYYY-MM-DD"}``.
 RESEARCH_SENT_KEY = "research_digest_sent"

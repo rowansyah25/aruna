@@ -27,13 +27,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
+from aruna.core.clock import JAKARTA
 from aruna.core.logging import get_logger
 
 log = get_logger("aruna.notify.screening")
 
-WIB = ZoneInfo("Asia/Jakarta")
+#: Satu sumber, lihat :data:`~aruna.core.clock.JAKARTA`.
+WIB = JAKARTA
 
 #: Kunci di ``app_state``. Nilainya ``{"date": "YYYY-MM-DD"}``.
 SCREENING_SENT_KEY = "idx_screening_sent"

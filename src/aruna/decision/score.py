@@ -47,6 +47,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from aruna.risk.score import MIN_COVERAGE as _MIN_COVERAGE
+
 
 class Arah(StrEnum):
     """PASAL 14.2 dan 14.43. Tiga keluaran, tidak lebih."""
@@ -123,7 +125,14 @@ DEFAULT_THRESHOLD = 60.0
 #: Sama dengan :data:`aruna.risk.score.MIN_COVERAGE`, dan alasannya sama: skor
 #: dari sedikit komponen lebih menggambarkan komponen mana yang kebetulan
 #: tersedia daripada keadaan pasarnya.
-MIN_COVERAGE = 0.60
+#:
+#: **Diimpor, bukan ditulis ulang, sejak 2026-08-23.** Sampai hari itu baris ini
+#: berbunyi ``MIN_COVERAGE = 0.60`` dengan komentar "sama dengan risk.score" di
+#: atasnya - sebuah invarian yang DIDOKUMENTASIKAN tapi tidak ditegakkan. Yang
+#: mengubah salah satunya tidak akan pernah tahu bahwa yang lain ada, dan tidak
+#: ada satu pun test yang merah ketika keduanya melenceng: masing-masing
+#: menguji miliknya sendiri.
+MIN_COVERAGE = _MIN_COVERAGE
 
 
 class ThresholdError(ValueError):

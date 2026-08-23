@@ -34,12 +34,14 @@ untuk seluruhnya adalah persis ledakan yang bagian 16.14 larang.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from aruna.core.enums import Horizon, Regime
 from aruna.core.logging import get_logger
 from aruna.council.protest import HIGH_DISAGREEMENT
+from aruna.futures.openinterest import SIGNIFICANT_PCT
 from aruna.scanner.events import EventKind
 from aruna.scenario.adapter import HasilAdapter, coba_simulasi
 from aruna.scenario.bukti import BuktiSkenario, susun_bukti
@@ -177,7 +179,8 @@ class PenyimulasiSkenario:
         # Dihitung sekali untuk seluruh siklus: arahnya milik kohort, bukan
         # milik satu aset, dan menghitungnya per aset akan menghasilkan dua
         # puluh jawaban untuk satu pertanyaan.
-        kohort = self._terakhir_kohort = _arah_kohort(hasil_pindai)
+        kohort = _arah_kohort(hasil_pindai)
+        self._terakhir_kohort = kohort.arah
 
         menyala: list[tuple[Any, frozenset, float]] = []
         for r in hasil_pindai:
@@ -185,7 +188,9 @@ class PenyimulasiSkenario:
                 continue
             keluar.dipertimbangkan += 1
 
-            pemicu = deteksi(_konteks_untuk(r, konteks.get(r.symbol), kohort))
+            pemicu = deteksi(
+                _konteks_untuk(r, konteks.get(r.symbol), kohort.arah)
+            )
             if not layak_simulasi(pemicu):
                 continue
 
@@ -268,7 +273,12 @@ class PenyimulasiSkenario:
             # `MINIMUM_KOHORT` aset berarah, atau seri. Kalau angka ini SELALU
             # None, yang perlu diperiksa lantainya; kalau ia berarah dan
             # pemicunya tetap diam, tidak ada aset yang melawan.
-            arah_kohort=kohort,
+            arah_kohort=kohort.arah,
+            # Buktinya, bukan cuma putusannya. `None` dengan `berarah=1` berarti
+            # lantainya belum tercapai; `None` dengan `naik=5 turun=5` berarti
+            # pasarnya terbelah. Keduanya menuntut tindakan berbeda.
+            kohort_naik=kohort.naik,
+            kohort_turun=kohort.turun,
         )
         return keluar
 
@@ -373,16 +383,40 @@ class PenyimulasiSkenario:
 MINIMUM_KOHORT = 3
 
 
-def _arah_kohort(hasil_pindai: list[Any]) -> int | None:
-    """Arah yang sedang ditempuh mayoritas aset, atau ``None``.
+@dataclass(frozen=True, slots=True)
+class ArahKohort:
+    """Arah kohort, **berikut hitungan yang menghasilkannya**.
+
+    Sebelumnya fungsinya memulangkan ``int | None`` saja, dan log mencetak
+    ``arah_kohort=None`` - putusan tanpa buktinya. Terukur di VPS 2026-08-23:
+    tiga siklus berturut-turut ``None``, dan tidak ada cara membedakan "kurang
+    dari :data:`MINIMUM_KOHORT` aset berarah" dari "seri". Keduanya menuntut
+    tindakan yang berbeda: yang pertama soal lantainya, yang kedua soal
+    pasarnya.
+
+    Hitungannya dibawa di tipe, bukan dilaporkan terpisah, supaya pemanggil
+    berikutnya tidak bisa mencatat putusannya lalu membuang buktinya.
+    """
+
+    arah: int | None
+    naik: int
+    turun: int
+
+    @property
+    def berarah(self) -> int:
+        return self.naik + self.turun
+
+
+def _arah_kohort(hasil_pindai: list[Any]) -> ArahKohort:
+    """Arah yang sedang ditempuh mayoritas aset, berikut hitungannya.
 
     **Fase ini satu-satunya tempat yang memegang seluruh aset sekaligus.**
     Deteksi pemicu bekerja per aset, jadi ia tidak bisa melihat kohortnya
     sendiri - dan tanpa angka ini `KONFLIK_LINTAS_PASAR` tidak punya apa pun
     untuk dilawan.
 
-    ``None`` ketika tidak ada mayoritas yang jelas, dan itu bukan nol: pasar
-    yang tidak ke mana-mana tidak bisa dikonfliki siapa pun. Seri juga
+    ``arah`` ``None`` ketika tidak ada mayoritas yang jelas, dan itu bukan nol:
+    pasar yang tidak ke mana-mana tidak bisa dikonfliki siapa pun. Seri juga
     ``None`` - separuh naik separuh turun adalah pasar yang terbelah, dan
     keduanya sama benarnya.
     """
@@ -398,11 +432,9 @@ def _arah_kohort(hasil_pindai: list[Any]) -> int | None:
                 turun += 1
                 break
 
-    if naik + turun < MINIMUM_KOHORT:
-        return None
-    if naik == turun:
-        return None
-    return 1 if naik > turun else -1
+    if naik + turun < MINIMUM_KOHORT or naik == turun:
+        return ArahKohort(arah=None, naik=naik, turun=turun)
+    return ArahKohort(arah=1 if naik > turun else -1, naik=naik, turun=turun)
 
 
 def _kondisi(
@@ -452,6 +484,18 @@ def _kondisi(
         keluar.append(
             f"selisih pendapat antar-agent {keputusan.disagreement:.2f} "
             f"melewati ambang {HIGH_DISAGREEMENT:.2f}"
+        )
+    if (
+        Peristiwa.LONJAKAN_LIKUIDASI in pemicu
+        and keputusan.perubahan_oi_pct is not None
+    ):
+        # Menyebut ANGKANYA, dan menyebut apa artinya. "BREAKDOWN terukur 1.0"
+        # tidak mengatakan sepatah pun tentang open interest, padahal justru
+        # OI yang membedakan penutupan paksa dari uang baru yang masuk.
+        keluar.append(
+            f"open interest menyusut {keputusan.perubahan_oi_pct:+.2f}% "
+            f"melewati ambang {SIGNIFICANT_PCT}% bersamaan dengan gerak harga "
+            "yang keras - posisi yang keluar, bukan posisi yang masuk"
         )
     return tuple(keluar)
 

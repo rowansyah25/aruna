@@ -78,14 +78,20 @@ from aruna.futures.stops import (
     stop_loss,
     take_profit,
 )
+from aruna.signals.lock import (
+    MAX_EVIDENCE_AGE_MULTIPLE as _MAX_EVIDENCE_AGE_MULTIPLE,
+)
 
-#: Claims FUTURES SPEC 51 forbids outright, lowercased. Both languages, because
-#: the reports are written in one and the spec in the other.
 #: Evidence older than this multiple of the horizon cannot forecast it.
 #: 1.0 is the same figure the spot lock uses, deliberately: a call whose newest
 #: settled bar closed longer ago than the window it predicts has already been
 #: overtaken by the market it is describing.
-MAX_EVIDENCE_AGE_MULTIPLE = 1.0
+#:
+#: **Diimpor, bukan ditulis ulang, sejak 2026-08-23.** "The same figure the spot
+#: lock uses, deliberately" adalah invarian - dan sampai hari itu ia cuma
+#: kalimat di atas literal kedua. Yang mengubah satu sisi tidak akan tahu sisi
+#: lain ada, dan tidak ada test yang merah ketika keduanya melenceng.
+MAX_EVIDENCE_AGE_MULTIPLE = _MAX_EVIDENCE_AGE_MULTIPLE
 
 #: Which set of fields the fingerprint currently covers.
 #:

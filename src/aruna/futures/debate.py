@@ -39,7 +39,24 @@ from aruna.notify.verdict import VoteSplit, vote_split
 #: Disagreement di atas ini disebut, tapi tidak dengan sendirinya memicu
 #: pengiriman. Angka tinggi tanpa satu pun pendapat berubah artinya para agent
 #: memang melihat pasar berbeda, bukan bahwa terjadi perdebatan.
-HIGH_DISAGREEMENT = 0.75
+#:
+#: **Diberi nama ulang 2026-08-23, dan angkanya TIDAK berubah.** Sampai hari itu
+#: konstanta ini bernama ``HIGH_DISAGREEMENT``, sama persis dengan
+#: :data:`~aruna.council.protest.HIGH_DISAGREEMENT` yang bernilai 0,4 - nama
+#: yang sama untuk dua pertanyaan yang berbeda atas metrik yang sama:
+#:
+#: * 0,40 di ``council.protest`` menjawab "haruskah ronde review adversarial
+#:   dijalankan?" - itu ambang TINDAKAN.
+#: * 0,75 di sini menjawab "apakah selisih ini layak disebut ke pembaca?" - itu
+#:   ambang PENUTURAN.
+#:
+#: Keduanya sah. Yang tidak sah adalah keduanya bisa diimpor dengan nama yang
+#: sama, sehingga yang mengimpor "HIGH_DISAGREEMENT" mendapat angka yang berbeda
+#: tergantung modul mana yang kebetulan diraih. Itu sudah terjadi: bagian 16.2
+#: menurunkan ambangnya dari yang 0,4, dan tidak ada apa pun di nama itu yang
+#: memberi tahu bahwa ada 0,75 di tempat lain yang menjawab pertanyaan lebih
+#: dekat.
+SELISIH_LAYAK_DISEBUT = 0.75
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +241,7 @@ class CouncilNote:
 
     @property
     def high_disagreement(self) -> bool:
-        return self.disagreement >= HIGH_DISAGREEMENT
+        return self.disagreement >= SELISIH_LAYAK_DISEBUT
 
 
 def note_of(verdict: Any, *, symbol: str | None = None) -> CouncilNote:
@@ -240,7 +257,7 @@ def note_of(verdict: Any, *, symbol: str | None = None) -> CouncilNote:
 
 
 __all__ = [
-    "HIGH_DISAGREEMENT",
+    "SELISIH_LAYAK_DISEBUT",
     "CouncilNote",
     "DebateSummary",
     "note_of",

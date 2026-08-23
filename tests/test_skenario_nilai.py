@@ -30,7 +30,11 @@ import pytest
 from aruna.scenario.evaluasi import MINIMUM_TITIK, nilai_dari_pasar
 from aruna.scenario.kerumunan import AMBANG_ARAH, klasifikasi_jejak
 from aruna.scenario.models import HasilSkenario, Invalidasi, Skenario
-from aruna.upkeep.skenario_nilai import BAR_HORIZON, PenilaiSkenario
+from aruna.upkeep.skenario_nilai import (
+    BAR_HORIZON,
+    MINIMUM_PERINGATAN,
+    PenilaiSkenario,
+)
 
 NOW = datetime(2026, 8, 22, 12, 0, tzinfo=UTC)
 
@@ -299,6 +303,43 @@ class TestSapuanMenulisHasil:
         await _penilai(repo, [0.8, -0.4, -0.8, -1.2]).nilai(now=NOW)
 
         assert repo.peringatan_diminta == 1
+
+    @pytest.mark.parametrize(
+        ("diperiksa", "ditahan"),
+        [(MINIMUM_PERINGATAN - 1, True), (MINIMUM_PERINGATAN, False)],
+    )
+    async def test_persennya_ditahan_sampai_sampelnya_cukup(
+        self, monkeypatch, diperiksa, ditahan
+    ) -> None:
+        """**Bug 2026-08-23.** Laporan ini sempat mengoper `cukup=True` tanpa
+        syarat dan mencetak "102/131 = 77,9%" seolah sudah mapan - sementara
+        modul yang SAMA menahan angka akurasi sampai sampelnya cukup.
+
+        Bagian 16.19 menuntut ambang sampel sebelum ANGKA APA PUN dilaporkan,
+        bukan sebelum sebagian angka. Pecahannya tetap dicetak; yang ditahan
+        persennya.
+        """
+        from aruna.upkeep import skenario_nilai as modul
+
+        dicatat: list[dict] = []
+        monkeypatch.setattr(
+            modul.log, "info", lambda nama, **kw: dicatat.append({"_": nama, **kw})
+        )
+
+        repo = _Repo([_baris("Bullish Continuation")])
+        repo.peringatan = [{
+            "versi_simulasi": "internal-2",
+            "salah": diperiksa + 5,
+            "memperingatkan": diperiksa,
+            "diam": 0,
+            "tak_terperiksa": 5,
+        }]
+        await _penilai(repo, [0.8, -0.4, -0.8, -1.2]).nilai(now=NOW)
+
+        baris = [d for d in dicatat if d["_"] == "upkeep.skenario_peringatan"]
+        assert baris, dicatat
+        assert baris[-1]["cukup_sampel"] is not ditahan
+        assert ("ditahan" in baris[-1]["memperingatkan"]) is ditahan
 
     async def test_semua_tak_terperiksa_tidak_membagi_nol(self) -> None:
         """**Bug produksi, 2026-08-23, satu menit sesudah kolomnya dipasang.**

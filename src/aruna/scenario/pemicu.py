@@ -26,11 +26,12 @@ breakout / breakdown besar    ambang pemindai sendiri, dikali :data:`AMBANG_BESA
 Satu-satunya angka yang lahir di berkas ini adalah :data:`AMBANG_BESAR`, dan ia
 sengaja **bukan** hasil pengukuran - lihat catatannya.
 
-**Satu pemicu tidak akan pernah menyala.** ``LONJAKAN_LIKUIDASI`` ada di
-kosakata karena bagian 16.2 menyebutnya, tapi datanya belum dikumpulkan (lihat
-anggotanya). Ia dibiarkan berdiri dan diuji sebagai mati, bukan dihapus: pemicu
-yang hilang dari daftar akan terbaca sebagai pemicu yang sudah dipertimbangkan
-dan ditolak.
+**Ketiga belas pemicu punya sumber data sejak 2026-08-23.** Dua yang terakhir -
+``KONFLIK_LINTAS_PASAR`` dan ``LONJAKAN_LIKUIDASI`` - tidak dihidupkan dengan
+menunggu sumber yang tidak ada, melainkan dengan menemukan bacaan yang datanya
+sudah tersimpan: aset yang bergerak melawan kohortnya, dan gerak keras yang
+dibarengi open interest menyusut. Keduanya ditulis lengkap di anggotanya masing-
+masing supaya tidak ada yang mengira bacaan harfiahnya sudah terpenuhi.
 """
 
 from __future__ import annotations
@@ -123,9 +124,24 @@ class Peristiwa(StrEnum):
     ANOMALI_FUNDING = "ANOMALI_FUNDING"
     #: open interest anomaly
     ANOMALI_OPEN_INTEREST = "ANOMALI_OPEN_INTEREST"
-    #: liquidation spike. **Tidak pernah menyala**: Binance menarik endpoint
-    #: REST-nya, dan :meth:`~aruna.futures.binance.BinanceFutures.liquidations`
-    #: selalu memulangkan daftar kosong sampai stream ``forceOrder`` dipasang.
+    #: liquidation spike, dibaca sebagai **penutupan paksa**: gerak harga yang
+    #: keras bersamaan dengan open interest yang MENYUSUT.
+    #:
+    #: Bacaan harfiahnya - daftar order likuidasi dari venue - tidak tersedia:
+    #: Binance menarik endpoint REST-nya, dan stream ``forceOrder`` di jaringan
+    #: ini menerima koneksi tanpa mengirim satu pun pesan. Menunggu bacaan itu
+    #: berarti membiarkan pemicunya mati selamanya.
+    #:
+    #: Yang dipakai bacaan yang datanya ADA dan maknanya sama. Uang baru MEMBUKA
+    #: posisi, uang yang lari MENUTUPNYA - jadi gerak besar yang dibarengi OI
+    #: turun berarti yang menggerakkannya adalah posisi yang keluar. ARUNA sudah
+    #: memakai pembacaan itu di
+    #: :data:`~aruna.futures.openinterest.EXHAUSTION`; di sini ia dibaca oleh
+    #: pemicu, bukan ditemukan ulang.
+    #:
+    #: Dua arah: long yang terlempar saat harga jatuh, dan short yang tertekan
+    #: saat harga melesat. Keduanya penutupan paksa, dan memilih satu berarti
+    #: menyelundupkan arah ke dalam pemicu.
     LONJAKAN_LIKUIDASI = "LONJAKAN_LIKUIDASI"
     #: major market regime change
     PERUBAHAN_REGIME = "PERUBAHAN_REGIME"
@@ -152,13 +168,22 @@ class Peristiwa(StrEnum):
 
 #: Pemicu yang buktinya belum dikumpulkan. Diuji sebagai mati, bukan dihapus.
 #:
-#: Tinggal satu. ``KONFLIK_LINTAS_PASAR`` keluar dari daftar ini 2026-08-22
-#: ketika ia dibaca sebagai "aset yang bergerak melawan kohortnya" - bacaan
-#: yang datanya sudah ada di tangan fase skenario, karena ia menerima seluruh
-#: hasil pemindaian sekaligus.
-TANPA_SUMBER_DATA = frozenset({
-    Peristiwa.LONJAKAN_LIKUIDASI,
-})
+#: **Kosong sejak 2026-08-23.** Ketiga belas pemicu bagian 16.2 punya sumber
+#: data. Yang terakhir keluar adalah ``LONJAKAN_LIKUIDASI``, dan caranya sama
+#: dengan ``KONFLIK_LINTAS_PASAR`` sehari sebelumnya: bukan dengan menunggu
+#: sumber yang ditarik venue, melainkan dengan menemukan bacaan yang datanya
+#: SUDAH ada di tangan.
+#:
+#: Binance menarik endpoint REST likuidasinya dan stream ``forceOrder`` di
+#: jaringan ini menerima koneksi tanpa mengirim data. Tapi likuidasi punya
+#: sidik jari yang terbaca dari dua deret yang sudah disimpan: gerak harga yang
+#: keras bersamaan dengan open interest yang MENYUSUT. Uang baru membuka posisi;
+#: uang yang lari menutupnya.
+#:
+#: Daftar ini dibiarkan berdiri walau kosong. Menghapusnya menghilangkan tempat
+#: bertanya "apakah masih ada pemicu tanpa sumber", dan pertanyaan itu perlu
+#: punya jawaban yang bisa diperiksa - bukan disimpulkan dari ketiadaan.
+TANPA_SUMBER_DATA: frozenset[Peristiwa] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -292,6 +317,30 @@ def deteksi(konteks: KonteksPemicu) -> frozenset[Peristiwa]:
         and abs(konteks.perubahan_oi_pct) >= SIGNIFICANT_PCT
     ):
         nyala.add(Peristiwa.ANOMALI_OPEN_INTEREST)
+
+    # Penutupan PAKSA: harga bergerak keras sementara open interest MENYUSUT.
+    #
+    # Uang baru membuka posisi; uang yang lari menutupnya. Gerak besar yang
+    # dibarengi OI turun berarti yang menggerakkannya adalah posisi yang keluar,
+    # bukan posisi yang masuk - dan posisi yang keluar saat harga melawannya
+    # adalah likuidasi. ARUNA sudah memakai pembacaan ini di
+    # :data:`~aruna.futures.openinterest.EXHAUSTION`; yang di sini bukan konsep
+    # baru, cuma konsep yang sama dibaca oleh pemicu.
+    #
+    # **Dua arah, bukan satu.** ``LONG_LIQUIDATION`` dan ``SHORT_COVERING``
+    # keduanya penutupan paksa - yang pertama long terlempar saat harga jatuh,
+    # yang kedua short tertekan saat harga melesat. Memilih satu berarti
+    # menyelundupkan arah ke dalam pemicu, dan bagian 16.18 menutup itu.
+    #
+    # Ambangnya dipinjam dari pertanyaan yang SAMA - ``SIGNIFICANT_PCT`` memang
+    # berarti "pergeseran nyata pada berapa posisi yang terbuka". Tidak ada
+    # angka baru yang dikarang di sini.
+    if (
+        arah_sendiri
+        and konteks.perubahan_oi_pct is not None
+        and konteks.perubahan_oi_pct <= -SIGNIFICANT_PCT
+    ):
+        nyala.add(Peristiwa.LONJAKAN_LIKUIDASI)
 
     # Bergerak melawan kohortnya. Butuh keduanya: arah aset ini sendiri, DAN
     # arah mayoritas yang jelas untuk dilawan. Tanpa yang kedua tidak ada

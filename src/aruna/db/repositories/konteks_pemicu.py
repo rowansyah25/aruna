@@ -30,6 +30,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from aruna.core.logging import get_logger
+from aruna.data.crypto.symbols import to_canonical_symbol
 from aruna.db.pool import Database
 from aruna.db.types import to_mysql_datetime
 
@@ -115,25 +116,34 @@ class KonteksKeputusan:
     perubahan_oi_pct: Any = None
 
 
-#: Quote yang dipakai perpetual di venue, terpanjang lebih dulu supaya
-#: ``BUSD`` tidak tersobek menjadi ``USD``.
-_QUOTE = ("USDT", "BUSD", "USDC", "USD")
+#: Penerjemah simbol. **Satu, bukan dua.**
+#:
+#: Modul ini sempat punya `_kanonik` sendiri dengan empat quote hardcoded, dan
+#: itu bug diam yang ditemukan 2026-08-23 lewat audit: dua tempat menerjemahkan
+#: ``BTCUSDT`` menjadi ``BTC/USDT`` dengan **aturan gagal yang berbeda**.
+#:
+#: :func:`~aruna.data.crypto.symbols.to_canonical_symbol` memakai daftar quote
+#: lengkap venue dan MELEMPAR ketika quote-nya tidak dikenal - persis supaya
+#: simbol yang salah potong tidak melanjutkan perjalanannya. Salinan di sini
+#: memulangkan simbol apa adanya, yang berarti simbol dengan quote di luar
+#: keempatnya diam-diam tidak diterjemahkan, tidak cocok dengan baris mana pun,
+#: dan pemicunya diam tanpa satu pun galat.
+#:
+#: Salinan itu dibuang. Yang tersisa satu sumber kebenaran, dan lemparannya
+#: ditangani PER SIMBOL di :meth:`KonteksPemicuRepository._futures` - satu
+#: simbol yang tidak bisa diterjemahkan tidak boleh mematikan sembilan belas
+#: lainnya, dan tidak boleh lewat diam-diam.
+def _kanonik(venue: str) -> str | None:
+    """Bentuk kanonik, atau ``None`` kalau simbolnya tidak bisa diterjemahkan.
 
-
-def _kanonik(venue: str) -> str:
-    """``BTCUSDT`` menjadi ``BTC/USDT``.
-
-    Pemindai dan seluruh sisi keputusan memakai bentuk kanonik; ``futures_metrics``
-    menyimpan bentuk venue. Yang tidak dikenali dipulangkan apa adanya - simbol
-    yang tidak cocok lebih baik daripada simbol yang dipotong salah.
+    ``None`` dan bukan simbol asli: simbol yang tidak diterjemahkan tidak akan
+    cocok dengan baris mana pun, jadi memulangkannya apa adanya hanya menunda
+    kegagalan sampai ke tempat yang jauh dari sebabnya.
     """
-    atas = venue.strip().upper()
-    if "/" in atas:
-        return atas
-    for q in _QUOTE:
-        if atas.endswith(q) and len(atas) > len(q):
-            return f"{atas[: -len(q)]}/{q}"
-    return atas
+    try:
+        return to_canonical_symbol(venue)
+    except ValueError:
+        return None
 
 
 class KonteksPemicuRepository:
@@ -185,7 +195,25 @@ class KonteksPemicuRepository:
         except Exception:
             log.warning("konteks.futures_tak_terbaca", exc_info=True)
             return {}
-        return {_kanonik(s): v for s, v in mentah.items()}
+        keluar: dict[str, Any] = {}
+        tak_terbaca: list[str] = []
+        for s, v in mentah.items():
+            kanonik = _kanonik(s)
+            if kanonik is None:
+                tak_terbaca.append(s)
+                continue
+            keluar[kanonik] = v
+
+        if tak_terbaca:
+            # Dicatat, bukan didiamkan. Simbol yang tidak diterjemahkan berarti
+            # funding dan open interest-nya tidak pernah sampai ke pemicu, dan
+            # itu terlihat persis seperti pasar yang tenang.
+            log.warning(
+                "konteks.simbol_tak_terterjemahkan",
+                simbol=sorted(tak_terbaca)[:10],
+                jumlah=len(tak_terbaca),
+            )
+        return keluar
 
     async def _regime(self, batas: Any) -> dict[str, tuple[str, ...]]:
         """Dua bacaan regime **terakhir berurutan** per simbol, pada satu horizon.

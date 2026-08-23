@@ -25,14 +25,15 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
-from zoneinfo import ZoneInfo
 
+from aruna.core.clock import JAKARTA
 from aruna.core.logging import get_logger
 from aruna.notify.daily import Component, DailyReport, render_daily
 
 log = get_logger("aruna.notify.daily")
 
-WIB = ZoneInfo("Asia/Jakarta")
+#: Satu sumber, lihat :data:`~aruna.core.clock.JAKARTA`.
+WIB = JAKARTA
 
 #: Kunci di ``app_state``. Nilainya ``{"date": "YYYY-MM-DD"}``.
 DAILY_SENT_KEY = "daily_report_sent"

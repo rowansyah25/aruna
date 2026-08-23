@@ -45,6 +45,7 @@ __all__ = [
     "BAR_HORIZON",
     "BATAS_PER_SAPUAN",
     "INTERVAL_NILAI",
+    "MINIMUM_PERINGATAN",
     "PenilaiSkenario",
 ]
 
@@ -68,6 +69,26 @@ BATAS_PER_SAPUAN = 40
 
 #: Berapa bar sebelum skenario lahir yang dipakai menghitung ATR.
 _BAR_ATR = 20
+
+#: Berapa skenario SALAH yang syarat batalnya terperiksa sebelum pangsanya
+#: dilaporkan sebagai persen.
+#:
+#: **Bukan :data:`~aruna.scenario.evaluasi.MINIMUM_DINILAI`.** Angka itu menjaga
+#: akurasi, yang penyebutnya SIMULASI; yang ini pangsa di antara SKENARIO yang
+#: salah. Meminjam ambang untuk pertanyaan yang berbeda sudah dua kali menjadi
+#: bug di proyek ini - terakhir ketika `HIGH_DISAGREEMENT` dipakai memutuskan
+#: "selisih pendapat tajam" dan menyala pada 45 dari 54 simulasi.
+#:
+#: Seratus, dan aritmetikanya yang memilih: galat baku sebuah pangsa paling
+#: besar di ``p=0,5``, yaitu ``0,5/sqrt(n)``. Pada seratus itu lima poin - cukup
+#: untuk membedakan 78% dari 50%, yang memang pertanyaannya. Di bawah itu
+#: persennya bergerak lebih jauh daripada yang sedang diukur.
+#:
+#: **Bug 2026-08-23:** laporan ini sempat mengoper ``cukup=True`` tanpa syarat
+#: dan mencetak "102/131 = 77,9%" seolah sudah mapan, sementara modul yang sama
+#: menahan angka akurasi sampai sampelnya cukup. Bagian 16.19 menuntut ambang
+#: sampel sebelum ANGKA APA PUN dilaporkan, bukan sebelum sebagian angka.
+MINIMUM_PERINGATAN = 100
 
 
 class PenilaiSkenario:
@@ -198,14 +219,17 @@ class PenilaiSkenario:
             if not salah:
                 continue
             diperiksa = salah - int(r["tak_terperiksa"] or 0)
+            cukup = diperiksa >= MINIMUM_PERINGATAN
             log.info(
                 "upkeep.skenario_peringatan",
                 versi=r["versi_simulasi"],
                 salah=salah,
                 # Salah, TAPI syarat batalnya terpicu: mesinnya bekerja.
-                memperingatkan=_bagian(r["memperingatkan"], diperiksa, True),
+                memperingatkan=_bagian(r["memperingatkan"], diperiksa, cukup),
                 # Salah TANPA peringatan: meleset, dan invalidasinya sia-sia.
-                diam=_bagian(r["diam"], diperiksa, True),
+                diam=_bagian(r["diam"], diperiksa, cukup),
+                minimum=MINIMUM_PERINGATAN,
+                cukup_sampel=cukup,
                 # Baris lama, dinilai kode yang belum memeriksanya sama sekali.
                 tak_terperiksa=int(r["tak_terperiksa"] or 0),
             )

@@ -188,10 +188,24 @@ class TestJembatanSimbol:
         menjadi ``SOLB/USD`` - simbol yang tidak pernah cocok dengan apa pun."""
         assert _kanonik("SOLBUSD") == "SOL/BUSD"
 
-    def test_yang_tak_dikenali_dipulangkan_apa_adanya(self) -> None:
-        """Simbol yang tidak cocok lebih baik daripada simbol yang dipotong
-        salah - yang pertama diam, yang kedua cocok dengan aset yang keliru."""
-        assert _kanonik("ANEH") == "ANEH"
+    def test_yang_tak_dikenali_jadi_none_bukan_dirinya_sendiri(self) -> None:
+        """Niat yang dijaga sejak awal tidak berubah: simbol yang tidak cocok
+        lebih baik daripada simbol yang dipotong salah - yang pertama diam,
+        yang kedua cocok dengan aset yang KELIRU. `to_canonical_symbol`
+        MELEMPAR alih-alih menebak, jadi tidak ada yang bisa terpotong salah,
+        dan `test_busd_tidak_tersobek_jadi_usd` di atas menjaganya.
+
+        Yang berubah **cara kegagalannya diwakili**. Sampai 2026-08-23 modul
+        ini punya penerjemah sendiri dengan empat quote hardcoded, dan yang tak
+        dikenal dipulangkan APA ADANYA. Itu terlihat aman - ia toh tidak cocok
+        dengan baris mana pun. Tapi "tidak cocok" dan "tidak bisa dibaca" lalu
+        terlihat sama persis dari luar, dan tidak ada yang bisa menghitung
+        berapa banyak yang hilang.
+
+        `None` membuatnya bisa dihitung dan dicatat - lihat
+        ``konteks.simbol_tak_terterjemahkan``.
+        """
+        assert _kanonik("ANEH") is None
 
 
 @pytest.mark.asyncio

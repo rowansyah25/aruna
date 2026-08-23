@@ -48,6 +48,172 @@ def _premis(a=Absorpsi.NETRAL, k=Kedalaman.NORMAL, d=Dorongan.TIDAK_ADA) -> Prem
     return Premis(absorpsi=a, kedalaman=k, dorongan=d)
 
 
+class TestKeluargaYangTakTerjangkau:
+    """**Temuan 2026-08-23, dan yang paling mahal di Phase 16.**
+
+    Mesin ini punya delapan keluarga di :data:`KELUARGA`, dan
+    `klasifikasi_jejak` punya cabang untuk semuanya. Diukur pada 162 kombinasi
+    pemicu yang benar-benar menyala di produksi, ia cuma pernah menghasilkan
+    TIGA: `Bullish Continuation`, `Bearish Reversal`, `Sideways`.
+
+    Akibatnya terukur di 260 simulasi yang sudah dinilai: `False Breakout`
+    adalah **46,2%** hasil pasar yang sebenarnya dan **nol dari 260** kali
+    diberi bobot tertinggi - ia cuma pernah muncul lewat `LANTAI_WAJIB`. Dan
+    skenario yang benar paling sering duduk di peringkat 4. Pembobotannya
+    berakhir ~3 simpangan baku DI BAWAH tebakan acak.
+
+    Kelas ini mengunci temuannya supaya ia tidak hilang, dan supaya perbaikan
+    yang tampak jelas tidak dipasang tanpa bukti - lihat test di bawah.
+    """
+
+    def test_hanya_tiga_keluarga_yang_tercapai(self) -> None:
+        from aruna.scenario.kerumunan import guncangan_dari, klasifikasi_jejak
+        from aruna.scenario.premis import kisi
+
+        hidup = [
+            Peristiwa.PERUBAHAN_REGIME,
+            Peristiwa.BREAKOUT_BESAR,
+            Peristiwa.SELISIH_PENDAPAT_TAJAM,
+            Peristiwa.VOLATILITAS_ABNORMAL,
+            Peristiwa.VOLUME_EKSTREM,
+        ]
+        tercapai = set()
+        for i in range(1, len(hidup) + 1):
+            for j in range(len(hidup) - i + 1):
+                pemicu = frozenset(hidup[j : j + i])
+                for g in guncangan_dari(pemicu):
+                    for p in kisi(pemicu):
+                        tercapai.add(klasifikasi_jejak(jalankan(p, g).jejak))
+
+        assert tercapai == {
+            "Bullish Continuation",
+            "Bearish Reversal",
+            "Sideways",
+        }, tercapai
+        # Lima dari delapan tidak pernah tercapai. Kalau angka ini berubah,
+        # mesinnya berubah - dan itu perubahan model yang butuh validasi,
+        # bukan test yang diperbarui supaya hijau lagi.
+        assert len(KELUARGA) - len(tercapai) == 3
+
+    def test_menaikkan_kekuatan_tidak_membuka_keluarga_yang_hilang(self) -> None:
+        """**Perbaikan yang tampak jelas, dan ia SALAH.**
+
+        `simulasikan` menerima `kekuatan` dan mendokumentasikannya sebagai
+        severity peristiwa; produksi tidak pernah mengisinya, jadi guncangannya
+        terkunci di `GUNCANGAN_DASAR`. Menyambungkannya satu baris - severity-nya
+        sudah ada di tangan pemanggil.
+
+        Diukur sebelum disambung: menaikkan kekuatan ke 1,5-4,0 justru MENGHAPUS
+        `Sideways` dan membuat hampir semuanya `Bullish Continuation`. Ia tidak
+        membuka satu pun keluarga yang hilang.
+
+        Test ini menahan perbaikan itu dari dipasang tanpa bukti.
+        """
+        from aruna.scenario.kerumunan import guncangan_dari, klasifikasi_jejak
+        from aruna.scenario.premis import kisi
+
+        pemicu = frozenset({Peristiwa.BREAKOUT_BESAR})
+        hilang = {"False Breakout", "High Volatility", "Liquidation Cascade"}
+
+        for kuat in (1.5, 2.0, 3.0, 4.0):
+            tercapai = {
+                klasifikasi_jejak(jalankan(p, g).jejak)
+                for g in guncangan_dari(pemicu, kekuatan=kuat)
+                for p in kisi(pemicu)
+            }
+            assert not (tercapai & hilang), (kuat, tercapai)
+
+    def test_absorpsi_tidak_pernah_membalik_aliran(self) -> None:
+        """**Perbaikan kedua yang diuji dan DITOLAK, 2026-08-23.**
+
+        `Absorpsi` menjanjikan tiga keadaan - KUAT, NETRAL, LEMAH - dan modul
+        premisnya menyebut pertanyaan ini "satu-satunya yang tidak bisa dijawab
+        dari data yang sudah ada". Tapi ketiganya menghasilkan aliran bersih
+        POSITIF: diukur tepat sesudah guncangan, +0,115 / +0,068 / +0,028.
+
+        Titik seimbang model - tempat ``mengejar + meredam * absorpsi = 0`` -
+        ada di 1,39 sampai 2,15 tergantung keadaan. ``KUAT = 1,35`` berada di
+        BAWAH seluruhnya, jadi "penyerapan kuat" tidak pernah membalik apa pun.
+
+        Perbaikan yang jelas - geser seluruh sebaran ke titik seimbang - diuji
+        dan memperburuk: `Sideways` melonjak dari 33% ke 67%, dan keluarga yang
+        hilang tetap hilang. Sebabnya struktural: `pembalik` adalah pegas menuju
+        nol, dan pegas teredam mendekati nol secara asimtotik - ia tidak pernah
+        MELEWATINYA.
+
+        Test ini mengunci pengukurannya, bukan melarang perbaikan. Yang dilarang
+        adalah memasangnya tanpa bukti bahwa ia bekerja.
+        """
+        from aruna.scenario.kohort import KOHORT, aliran
+        from aruna.scenario.premis import _NILAI_ABSORPSI
+
+        mengejar = meredam = 0.0
+        for k in KOHORT:
+            nilai = aliran(
+                k,
+                gerak_terakhir=GUNCANGAN_DASAR,
+                jarak_kumulatif=GUNCANGAN_DASAR,
+                ketidakseimbangan=GUNCANGAN_DASAR,
+                kedalaman=1.0,
+                dorongan_berita=0.0,
+                paksa=0.0,
+            )
+            if k.tanda < 0:
+                meredam += nilai
+            else:
+                mengejar += nilai
+
+        seimbang = -mengejar / meredam
+        assert seimbang > max(_NILAI_ABSORPSI.values()), (
+            f"titik seimbang {seimbang:.2f} sekarang DI BAWAH absorpsi "
+            f"terkuat {max(_NILAI_ABSORPSI.values())} - artinya mesinnya "
+            "berubah, dan sebaran keluarganya harus diukur ulang"
+        )
+
+    def test_lintasan_monoton_jadi_kaskade_balik_tak_punya_bahan(self) -> None:
+        """**Perbaikan ketiga yang diuji dan DITOLAK, 2026-08-23.**
+
+        `kolam_searah` - long yang membeli tembusan lalu terjebak - adalah
+        satu-satunya gaya di model ini yang TIDAK ikut mengecil saat harga
+        mendekati nol, jadi ia satu-satunya yang bisa membawa harga melewatinya.
+        Ia menyala ketika harga mundur `AMBANG_LIKUIDASI_BALIK` dari puncaknya.
+
+        Menurunkan ambang itu sampai 0,2 tidak mengubah apa pun - nol keluarga
+        baru di kedelapan nilai yang diuji. Sebabnya bukan ambangnya:
+        **lintasannya monoton**, jadi mundurnya nol dan ambang berapa pun tidak
+        punya bahan untuk menyala.
+        """
+        pemicu = frozenset({Peristiwa.BREAKOUT_BESAR})
+        from aruna.scenario.kerumunan import guncangan_dari
+        from aruna.scenario.premis import kisi
+
+        for g in guncangan_dari(pemicu):
+            for p in kisi(pemicu):
+                j = jalankan(p, g).jejak
+                naik = g.besar >= 0
+                puncak = max(j) if naik else min(j)
+                mundur = abs(puncak - j[-1])
+                assert mundur < 0.05, (
+                    f"lintasan sekarang MUNDUR {mundur:.2f} dari puncaknya - "
+                    "mesinnya berubah, dan kaskade balik mungkin sudah punya "
+                    f"bahan. Ukur ulang sebaran keluarganya. premis={p}"
+                )
+
+    def test_lintasan_tidak_pernah_lari_liar(self) -> None:
+        """Batas kewarasan yang sudah dibayar sekali: versi tanpa saturasi
+        berakhir di +12,54 ATR - angka yang bukan ramalan melainkan bug yang
+        terlihat seperti tren kuat."""
+        from aruna.scenario.kerumunan import guncangan_dari
+        from aruna.scenario.premis import kisi
+
+        pemicu = frozenset({Peristiwa.BREAKOUT_BESAR})
+        for kuat in (1.0, 2.0, 4.0, 8.0):
+            for g in guncangan_dari(pemicu, kekuatan=kuat):
+                for p in kisi(pemicu):
+                    j = jalankan(p, g).jejak
+                    assert max(abs(x) for x in j) < 6.0, (kuat, p, j)
+
+
 class TestButuhRangsangan:
     """Cacat pertama: pasar netral sempurna adalah titik tetap di nol."""
 

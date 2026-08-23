@@ -339,6 +339,24 @@ def simulasikan(
     tembusan yang dua kali lebih jauh melewati ambangnya menggoyang kerumunan
     dua kali lebih keras, dan bobot yang keluar berbeda.
 
+    **Produksi tidak mengisinya, dan itu SENGAJA sejak 2026-08-23** - bukan
+    kelalaian. `upkeep.skenario._satu` memanggil fungsi ini tanpa ``kekuatan``,
+    jadi nilainya selalu 1,0. Severity-nya ada di tangan pemanggil
+    (``hasil.events[i].severity``), jadi menyambungkannya satu baris.
+
+    Yang menahannya: disambungkan, hasilnya lebih BURUK, dan itu terukur bukan
+    diduga. Dijalankan pada kisi premis nyata, menaikkan kekuatan ke 1,5-4,0
+    justru menghapus ``Sideways`` dan membuat hampir seluruh lintasan
+    ``Bullish Continuation``; ``False Breakout`` baru muncul sekali di 5-6 lalu
+    hilang lagi di 8. Padahal ``False Breakout`` adalah **46,2%** hasil pasar
+    yang sebenarnya.
+
+    Jadi menyambungkannya akan menggeser bobot tanpa satu pun bukti bahwa
+    geserannya ke arah yang benar - persis yang :class:`
+    ~aruna.governance.proposal.Verdict` ``WITHIN_NOISE`` ada untuk menolak.
+    Perubahannya menunggu :class:`~aruna.governance.proposal.ModelProposal`
+    yang divalidasi out-of-sample, bukan satu baris yang ditambahkan diam-diam.
+
     ``scenario_id`` diturunkan dari aset, waktu, dan urutan - bukan dari UUID
     acak. Simulasi yang sama, dijalankan ulang, menghasilkan id yang sama, dan
     itu yang membuat baris ganda bisa dikenali alih-alih menumpuk diam-diam.

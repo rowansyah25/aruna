@@ -419,8 +419,42 @@ membantu - ia sistematis menaruh keluarga yang benar di peringkat bawah.
 
 Ini **produk pertama bagian 16.19**, dan persis gunanya ia ada. Rencana ini
 menyatakan sejak awal bahwa bobot tidak terkalibrasi (§16.6) dan yang dinilai
-cuma urutannya - sekarang urutannya sudah dinilai. Memperbaiki pembobotannya
-adalah pekerjaan berikutnya, bukan bagian dari Phase 16.
+cuma urutannya - sekarang urutannya sudah dinilai.
+
+#### Mekanismenya ditemukan 2026-08-23, dan bukan bug kode
+
+Ditelusuri atas 260 simulasi `internal-2` yang sudah dinilai:
+
+| keluarga | pangsa BOBOT | pangsa yang BENAR-BENAR terjadi |
+|---|---|---|
+| False Breakout | **7,2 rata-rata (maks 12)** | **46,2%** |
+| Bullish Continuation | 31,1 | 16,9% |
+| Sideways | 29,8 | 8,1% |
+| Bearish Reversal | 26,4 | 28,8% |
+
+`False Breakout` **nol dari 260** kali diberi bobot tertinggi. Ia tidak pernah
+seri dan tidak pernah kalah tipis - jaraknya 15 poin. Dan skenario yang benar
+paling sering duduk di **peringkat 4** (104 dari 260), bukan tersebar merata.
+Itu tanda pembalikan sistematis.
+
+Sebabnya bukan cacat di `mesin.py`. `LANTAI_WAJIB` bekerja sesuai janjinya, dan
+bobot memang dihitung sebagai pangsa lintasan. Yang tidak berlaku adalah
+asumsinya: **pangsa lintasan di kisi premis bukan frekuensi pasar.** Mesin
+kerumunan jarang menghasilkan perjalanan pulang-pergi melewati titik awal -
+`klasifikasi_jejak` menuntut lonjakan >= `AMBANG_ARAH` lalu kembali melewati
+nol dalam dua belas ronde - sementara di pasar, tembusan kecil yang gagal
+justru kejadian paling biasa.
+
+Jadi ada dua hal yang berbeda yang disamakan: bobot berarti "berapa banyak
+kombinasi premis mendarat di sini", sementara Task 11 menilainya sebagai
+"seberapa mungkin ini terjadi".
+
+**Memperbaikinya adalah perubahan model, bukan perbaikan bug**, dan proyek ini
+sudah punya jalurnya: `ModelProposal` (SPEC 44) - hipotesis tertulis, dijalankan
+`SHADOWED`, divalidasi **out-of-sample** melawan minimal 100 prediksi
+terselesaikan dengan ambang sigma yang naik mengikuti jumlah varian, lalu
+disetujui manusia yang namanya tercatat. Menyetel bobotnya sekarang atas 260
+amatan in-sample adalah persis yang `Verdict.WITHIN_NOISE` ada untuk menolak.
 
 **Pemicu: 8 dari 13 pernah menyala.**
 
@@ -465,6 +499,31 @@ kendali fase skenario:
   penyebut "yang bisa diperiksa" nol. Diperbaiki di `_bagian`, bukan di
   pemanggilnya.
 
+### Dua bug lama dibuktikan BERHENTI, bukan sekadar tak terlihat
+
+"Terakhir terlihat jam sembilan" tidak membuktikan apa pun sendirian - fasenya
+mungkin cuma berhenti berjalan. Yang membuktikan: kejadiannya berhenti
+**sementara fase yang sama terus berjalan**.
+
+| bug | gagal terakhir | fase berjalan sesudahnya |
+|---|---|---|
+| `skenario.nilai_gagal` (zona waktu) | jam 09, 80x | **44 sapuan, nol gagal** |
+| `upkeep.scenario_failed` (`max()` kosong) | jam 11, 54x | **1.055 siklus, nol gagal** |
+
+### Gerbang sampel yang bocor (2026-08-23)
+
+`_laporkan_peringatan` mengoper ``cukup=True`` tanpa syarat dan mencetak
+"102/131 = 77,9%" seolah sudah mapan - sementara modul yang **sama** menahan
+angka akurasi sampai sampelnya cukup. Bagian 16.19 menuntut ambang sampel
+sebelum ANGKA APA PUN dilaporkan, bukan sebelum sebagian angka.
+
+Ambangnya **bukan** `MINIMUM_DINILAI`: itu menjaga akurasi, yang penyebutnya
+SIMULASI, sementara ini pangsa di antara SKENARIO yang salah. Meminjam ambang
+untuk pertanyaan berbeda sudah dua kali menjadi bug di proyek ini.
+:data:`MINIMUM_PERINGATAN` = 100, dan aritmetikanya yang memilih: galat baku
+sebuah pangsa paling besar di ``p=0,5``, yaitu ``0,5/sqrt(n)`` - pada seratus
+itu lima poin, cukup untuk membedakan 78% dari 50%.
+
 ---
 
 ## Self-review
@@ -487,9 +546,24 @@ kendali fase skenario:
   melawan kohortnya**, dihitung dari 20 aset yang sudah dipegang fase skenario
   sekaligus. Kedua bacaan ditulis berdampingan di `Peristiwa` supaya tidak ada
   yang mengira yang pertama sudah terpenuhi.
-- **`liquidation spike`** (§16.2) tinggal satu-satunya yang tanpa sumber:
-  Binance menarik endpoint REST-nya, dan stream `forceOrder` di jaringan ini
-  menerima koneksi tanpa mengirim data. Diuji sebagai mati, bukan dihapus.
+- ~~**`liquidation spike`** (§16.2) tinggal satu-satunya yang tanpa sumber.~~
+  **Ditutup 2026-08-23, dan `TANPA_SUMBER_DATA` sekarang KOSONG.** Bacaan
+  harfiahnya memang tidak tersedia — Binance menarik endpoint REST-nya dan
+  stream `forceOrder` di jaringan ini menerima koneksi tanpa mengirim data.
+  Tapi likuidasi punya sidik jari yang terbaca dari dua deret yang **sudah**
+  disimpan: gerak harga keras bersamaan dengan open interest yang MENYUSUT.
+  Uang baru membuka posisi; uang yang lari menutupnya.
+
+  Bukan konsep baru — ARUNA sudah memakainya di
+  `futures.openinterest.EXHAUSTION`, dan ambangnya dipinjam dari pertanyaan
+  yang sama (`SIGNIFICANT_PCT` = "pergeseran nyata pada berapa posisi yang
+  terbuka"). Dua arah, karena long yang terlempar dan short yang tertekan
+  sama-sama penutupan paksa; memilih satu berarti menyelundupkan arah ke dalam
+  pemicu, dan §16.18 menutup itu.
+
+  Daftarnya dibiarkan berdiri walau kosong: menghapusnya menghilangkan tempat
+  bertanya "apakah masih ada pemicu tanpa sumber", dan pertanyaan itu perlu
+  jawaban yang bisa diperiksa — bukan disimpulkan dari ketiadaan.
 - **Bobot skenario tidak terkalibrasi**, dan §16.6 memang menyatakannya. Ia
   tidak akan pernah dibandingkan dengan hasil sebagai probabilitas — hanya
   urutannya yang dinilai (Task 11).

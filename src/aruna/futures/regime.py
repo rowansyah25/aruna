@@ -27,11 +27,23 @@ from typing import Any
 
 from aruna.core.enums import Regime
 from aruna.futures.funding import FundingAnalysis
+from aruna.futures.liquidation import CASCADE_SHARE as _CASCADE_SHARE
 from aruna.futures.openinterest import OpenInterestAnalysis
 
 #: Liquidation notional, as a share of open interest, that marks a move as
 #: forced rather than chosen.
-CASCADE_SHARE = Decimal("0.02")
+#:
+#: **Didefinisikan di :mod:`aruna.futures.liquidation`, bukan di sini.** Sampai
+#: 2026-08-23 kedua modul mendefinisikannya sendiri-sendiri dengan nilai yang
+#: sama, dan dua angka yang HARUS sepakat tapi ditulis di dua tempat adalah dua
+#: angka yang suatu saat tidak sepakat - tanpa satu pun test merah, karena
+#: masing-masing menguji miliknya sendiri.
+#:
+#: Rumahnya di modul likuidasi: di sanalah FUTURES SPEC 26 mendefinisikan
+#: kaskade, dan modul ini memakainya untuk membaca sebuah gerak sebagai paksa.
+#: Di-re-export supaya import lama tetap jalan - pola yang sama dengan
+#: :data:`~aruna.futures.plan.FORBIDDEN_CLAIMS`.
+CASCADE_SHARE = _CASCADE_SHARE
 
 #: A breakout with OI change smaller than this was not funded by anyone.
 UNFUNDED_OI_PCT = Decimal("0.3")
