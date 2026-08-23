@@ -276,7 +276,19 @@ def jalankan(
 
         bersih = mengejar + meredam * premis.kekuatan_absorpsi
 
-        gerak = bersih / max(kedalaman, _KEDALAMAN_MINIMUM)
+        dorongan = bersih / max(kedalaman, _KEDALAMAN_MINIMUM)
+        # **Sebagian gerak ronde lalu terbawa.** Tanpa suku ini harga berhenti
+        # PERSIS saat aliran bersih berbalik tanda - sistem teredam-lebih yang
+        # mendekati keseimbangan tanpa pernah melampauinya. Akibatnya terukur:
+        # nol dari 162 lintasan pernah berakhir di seberang titik awalnya, jadi
+        # `False Breakout` mustahil dihasilkan walau `klasifikasi_jejak` punya
+        # cabang untuknya.
+        #
+        # Aliran order sungguhan tidak berhenti seketika: order yang sudah
+        # antre tetap tereksekusi, dan eksekusi bertahap membuat harga terus
+        # bergerak sesaat setelah tekanannya hilang. Itu yang membuat tembusan
+        # gagal - hasil pasar yang paling sering - mungkin terjadi sama sekali.
+        gerak = _INERSIA * gerak_terakhir + (1.0 - _INERSIA) * dorongan
         gerak = max(-_BATAS_GERAK, min(_BATAS_GERAK, gerak))
 
         harga += gerak
@@ -383,6 +395,24 @@ def klasifikasi_jejak(jejak: tuple[float, ...], *, kaskade: bool = False) -> str
     # satu tetangganya.
     return "Sideways"
 
+
+#: Berapa bagian gerak ronde lalu yang terbawa ke ronde berikutnya.
+#:
+#: **Bahan yang hilang sampai 2026-08-23.** Tanpanya harga dihitung ulang dari
+#: nol tiap ronde, jadi ia berhenti persis saat aliran berbalik dan tidak pernah
+#: MELEWATI titik awalnya. Terukur: nol dari 162 lintasan menyeberang, di
+#: seluruh kekuatan guncangan dan seluruh ambang kaskade yang diuji.
+#:
+#: Setengah, dan itu bukan angka yang mencocokkan pasar - mencocokkannya berarti
+#: mengepas. Ia diuji berpasangan dengan :data:`~aruna.scenario.premis._SEIMBANG`
+#: dan dipilih dari yang membuat generator sanggup menghasilkan KOSAKATA YANG
+#: SUDAH DIKLAIMNYA: pada 0,3 keluaran menumpuk di `Sideways` (86 dari 162), pada
+#: 0,7 `Sideways` hilang sama sekali, dan pada 0,5 keempat keluarga yang bisa
+#: dicapai terbagi paling merata.
+#:
+#: Dua keluarga tetap tak terjangkau - `High Volatility` dan
+#: `Liquidation Cascade` - dan itu ditulis di sini alih-alih didiamkan.
+_INERSIA = 0.5
 
 #: Berapa titik berturut-turut yang berarti "bertahan satu bar penuh".
 #:

@@ -55,7 +55,16 @@ __all__ = [
 #: tangan dan mulai dihitung dari simulasi kerumunan. Evaluasi bagian 16.19
 #: membandingkan per versi; skenario dari kedua mesin yang tercampur dalam satu
 #: angka akurasi tidak mengatakan apa pun tentang keduanya.
-VERSI = "internal-2"
+#: Naik ke ``internal-3`` pada 2026-08-23, saat mesin kerumunan diberi inersia
+#: dan sebaran absorpsinya dipusatkan di titik seimbangnya sendiri. Sebelum itu
+#: generator cuma sanggup menghasilkan TIGA dari enam keluarga yang dimiliki
+#: `klasifikasi_jejak`; `False Breakout` - hasil pasar yang paling sering -
+#: mustahil dihasilkan, dan ia muncul di keluaran hanya lewat `LANTAI_WAJIB`.
+#:
+#: Bagian 16.19 menilai per versi, jadi `internal-2` dan `internal-3` diadu di
+#: data hidup tanpa satu pun baris lama ditulis ulang. Itu yang membuat
+#: perubahan ini bisa dibantah alih-alih diumumkan.
+VERSI = "internal-3"
 
 #: Bagian 16.5: minimal tiga.
 MINIMUM_SKENARIO = 3

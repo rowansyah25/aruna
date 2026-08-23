@@ -288,7 +288,7 @@ class TestBobotDariKerumunan:
         """Evaluasi bagian 16.19 membandingkan per versi; skenario dari mesin
         bobot-tangan dan mesin kerumunan yang tercampur dalam satu angka
         akurasi tidak mengatakan apa pun tentang keduanya."""
-        assert VERSI == "internal-2"
+        assert VERSI == "internal-3"
 
     def test_geser_tangan_benar_benar_hilang(self) -> None:
         """Penjaga AST. Konstanta lama yang tertinggal akan dipakai lagi oleh

@@ -49,24 +49,41 @@ def _premis(a=Absorpsi.NETRAL, k=Kedalaman.NORMAL, d=Dorongan.TIDAK_ADA) -> Prem
 
 
 class TestKeluargaYangTakTerjangkau:
-    """**Temuan 2026-08-23, dan yang paling mahal di Phase 16.**
+    """**Temuan 2026-08-23, dan perbaikannya.**
 
-    Mesin ini punya delapan keluarga di :data:`KELUARGA`, dan
-    `klasifikasi_jejak` punya cabang untuk semuanya. Diukur pada 162 kombinasi
-    pemicu yang benar-benar menyala di produksi, ia cuma pernah menghasilkan
-    TIGA: `Bullish Continuation`, `Bearish Reversal`, `Sideways`.
+    :data:`KELUARGA` punya enam keluarga dan `klasifikasi_jejak` punya cabang
+    untuk semuanya. Diukur pada 162 kombinasi pemicu yang benar-benar menyala
+    di produksi, generatornya cuma pernah menghasilkan **tiga**. `False
+    Breakout` - hasil pasar yang paling sering, 45% dari 270 simulasi yang
+    sudah dinilai - mustahil dihasilkan, jadi ia muncul di keluaran hanya lewat
+    `LANTAI_WAJIB` dan bobotnya selalu lantai.
 
-    Akibatnya terukur di 260 simulasi yang sudah dinilai: `False Breakout`
-    adalah **46,2%** hasil pasar yang sebenarnya dan **nol dari 260** kali
-    diberi bobot tertinggi - ia cuma pernah muncul lewat `LANTAI_WAJIB`. Dan
-    skenario yang benar paling sering duduk di peringkat 4. Pembobotannya
-    berakhir ~3 simpangan baku DI BAWAH tebakan acak.
+    Empat perbaikan diuji. Tiga ditolak pengukuran, dan yang keempat - dua
+    bahan bersamaan - berhasil. Yang ditolak tetap ditulis di bawah, karena
+    daftar tempat yang BUKAN jawabannya sama berharganya dengan jawabannya.
 
-    Kelas ini mengunci temuannya supaya ia tidak hilang, dan supaya perbaikan
-    yang tampak jelas tidak dipasang tanpa bukti - lihat test di bawah.
+    Satu klaim di sini dibatalkan pada hari yang sama: "pembobotan ~3 sigma di
+    bawah acak" diukur pada satu jendela yang didominasi pasar menyamping.
+    Diadu out-of-sample - frekuensi dipelajari dari paruh awal, diuji pada
+    paruh baru - bobot lama mencetak 39,2% melawan acak 22,5%. Yang benar:
+    generatornya sempit, bukan pembobotannya terbalik.
     """
 
-    def test_hanya_tiga_keluarga_yang_tercapai(self) -> None:
+    def test_false_breakout_bisa_dihasilkan(self) -> None:
+        """**Diperbaiki 2026-08-23 (internal-3).** Sebelumnya generator cuma
+        sanggup TIGA dari enam keluarga yang dimiliki `klasifikasi_jejak`, dan
+        `False Breakout` - 45% hasil pasar yang sebenarnya - mustahil dihasilkan.
+        Ia muncul di keluaran hanya lewat `LANTAI_WAJIB`, jadi bobotnya selalu
+        lantai dan tidak pernah bisa menjadi yang tertinggi.
+
+        Dua bahan bersamaan yang memperbaikinya, dan masing-masing sendirian
+        sudah diuji dan GAGAL:
+
+        * absorpsi dipusatkan di titik seimbang model, supaya aliran bersih
+          benar-benar bisa berbalik tanda;
+        * inersia, supaya harga MELEWATI titik awalnya alih-alih berhenti di
+          situ.
+        """
         from aruna.scenario.kerumunan import guncangan_dari, klasifikasi_jejak
         from aruna.scenario.premis import kisi
 
@@ -85,17 +102,68 @@ class TestKeluargaYangTakTerjangkau:
                     for p in kisi(pemicu):
                         tercapai.add(klasifikasi_jejak(jalankan(p, g).jejak))
 
-        assert tercapai == {
-            "Bullish Continuation",
-            "Bearish Reversal",
-            "Sideways",
-        }, tercapai
-        # Lima dari delapan tidak pernah tercapai. Kalau angka ini berubah,
-        # mesinnya berubah - dan itu perubahan model yang butuh validasi,
-        # bukan test yang diperbarui supaya hijau lagi.
-        assert len(KELUARGA) - len(tercapai) == 3
+        assert "False Breakout" in tercapai, tercapai
 
-    def test_menaikkan_kekuatan_tidak_membuka_keluarga_yang_hilang(self) -> None:
+    def test_dua_keluarga_masih_tak_terjangkau(self) -> None:
+        """Ditulis, bukan didiamkan. `High Volatility` dan
+        `Liquidation Cascade` tetap mustahil dihasilkan generator.
+
+        Yang kedua nyaris: mundur terjauh sebuah lintasan sekarang 0,98 ATR,
+        tepat di bawah `AMBANG_LIKUIDASI_BALIK` = 1,0 yang menyalakan kaskade
+        long-terjebak. Menurunkan ambang itu akan membukanya - dan justru
+        karena semudah itu, ia tidak dilakukan di sini: perubahan berikutnya
+        harus dinilai bagian 16.19 sebagai versi tersendiri, bukan ditumpuk ke
+        perubahan yang belum sempat diukur.
+        """
+        from aruna.scenario.kerumunan import guncangan_dari, klasifikasi_jejak
+        from aruna.scenario.premis import kisi
+
+        hidup = [
+            Peristiwa.PERUBAHAN_REGIME,
+            Peristiwa.BREAKOUT_BESAR,
+            Peristiwa.VOLATILITAS_ABNORMAL,
+            Peristiwa.VOLUME_EKSTREM,
+        ]
+        tercapai = set()
+        for i in range(1, len(hidup) + 1):
+            for j in range(len(hidup) - i + 1):
+                pemicu = frozenset(hidup[j : j + i])
+                for g in guncangan_dari(pemicu):
+                    for p in kisi(pemicu):
+                        tercapai.add(klasifikasi_jejak(jalankan(p, g).jejak))
+
+        assert "High Volatility" not in tercapai
+        assert "Liquidation Cascade" not in tercapai
+        assert len(KELUARGA) - len(tercapai) == 2
+
+    def test_kisi_premis_menghasilkan_hasil_yang_BERBEDA(self) -> None:
+        """Ujung yang sebenarnya dijaga, dan sebab semua ini.
+
+        Sampai 2026-08-23 ketiga premis absorpsi menghasilkan aliran bersih
+        yang sama-sama POSITIF, jadi kisinya dekoratif: tiga nama untuk satu
+        hasil. Sekarang KUAT membalik harga, LEMAH membiarkannya berlari, dan
+        NETRAL duduk di antaranya - dan itu yang membuat kisi premis berguna.
+        """
+        from aruna.scenario.kerumunan import guncangan_dari, klasifikasi_jejak
+        from aruna.scenario.premis import kisi
+
+        pemicu = frozenset({
+            Peristiwa.PERUBAHAN_REGIME, Peristiwa.VOLATILITAS_ABNORMAL
+        })
+        per: dict[Absorpsi, set[str]] = {}
+        for g in guncangan_dari(pemicu):
+            for p in kisi(pemicu):
+                per.setdefault(p.absorpsi, set()).add(
+                    klasifikasi_jejak(jalankan(p, g).jejak)
+                )
+
+        assert len(per) >= 2, per
+        nilai = list(per.values())
+        assert any(a != b for a in nilai for b in nilai), (
+            f"ketiga premis menghasilkan keluarga yang sama: {per}"
+        )
+
+    def test_kekuatan_menggeser_jangkauan_bukan_melebarkan(self) -> None:
         """**Perbaikan yang tampak jelas, dan ia SALAH.**
 
         `simulasikan` menerima `kekuatan` dan mendokumentasikannya sebagai
@@ -103,49 +171,58 @@ class TestKeluargaYangTakTerjangkau:
         terkunci di `GUNCANGAN_DASAR`. Menyambungkannya satu baris - severity-nya
         sudah ada di tangan pemanggil.
 
-        Diukur sebelum disambung: menaikkan kekuatan ke 1,5-4,0 justru MENGHAPUS
-        `Sideways` dan membuat hampir semuanya `Bullish Continuation`. Ia tidak
-        membuka satu pun keluarga yang hilang.
+        Diukur pada internal-2 sebelum disambung: menaikkan kekuatan ke 1,5-4,0
+        justru MENGHAPUS `Sideways` dan membuat hampir semuanya
+        `Bullish Continuation`. Ia tidak membuka satu pun keluarga yang hilang.
 
-        Test ini menahan perbaikan itu dari dipasang tanpa bukti.
+        **Pada internal-3 hasilnya berubah** - dengan inersia dan absorpsi yang
+        berpusat di titik seimbang, kekuatan 2,0 mulai menghasilkan
+        `High Volatility`. Itu petunjuk untuk versi berikutnya, bukan izin
+        memasangnya sekarang: perubahan yang belum sempat dinilai bagian 16.19
+        tidak boleh ditumpuk di atas perubahan yang juga belum dinilai.
+
+        Jadi yang dijaga sekarang bukan lagi "tidak membuka apa pun" melainkan
+        "`False Breakout` tetap tidak datang dari sini" - keluarga yang justru
+        paling penting, dan yang perbaikan sebenarnya sudah membukanya lewat
+        jalur lain.
         """
         from aruna.scenario.kerumunan import guncangan_dari, klasifikasi_jejak
         from aruna.scenario.premis import kisi
 
         pemicu = frozenset({Peristiwa.BREAKOUT_BESAR})
-        hilang = {"False Breakout", "High Volatility", "Liquidation Cascade"}
 
-        for kuat in (1.5, 2.0, 3.0, 4.0):
-            tercapai = {
+        def tercapai(kuat: float) -> set[str]:
+            return {
                 klasifikasi_jejak(jalankan(p, g).jejak)
                 for g in guncangan_dari(pemicu, kekuatan=kuat)
                 for p in kisi(pemicu)
             }
-            assert not (tercapai & hilang), (kuat, tercapai)
 
-    def test_absorpsi_tidak_pernah_membalik_aliran(self) -> None:
-        """**Perbaikan kedua yang diuji dan DITOLAK, 2026-08-23.**
+        # Yang dicatat: severity yang dioper MENGGESER jangkauan generator -
+        # bukan melebarkannya. Pada 1,0 keluarannya {Bullish, Sideways}; pada
+        # 4,0 menjadi {Bullish, False Breakout}. Jumlahnya sama, isinya tidak.
+        #
+        # Itu kandidat internal-4, dan test ini menandainya supaya tidak
+        # hilang - tapi juga menahannya dari dipasang tanpa diukur: menukar
+        # `Sideways` dengan `False Breakout` bukan perbaikan sampai ada yang
+        # membuktikan pasarnya memang lebih sering yang kedua pada pemicu ini.
+        assert "False Breakout" in tercapai(4.0)
+        assert "False Breakout" not in tercapai(1.0)
 
-        `Absorpsi` menjanjikan tiga keadaan - KUAT, NETRAL, LEMAH - dan modul
-        premisnya menyebut pertanyaan ini "satu-satunya yang tidak bisa dijawab
-        dari data yang sudah ada". Tapi ketiganya menghasilkan aliran bersih
-        POSITIF: diukur tepat sesudah guncangan, +0,115 / +0,068 / +0,028.
+    def test_absorpsi_kuat_benar_benar_membalik_aliran(self) -> None:
+        """Angka yang membuat perbaikan ini bisa dibantah.
 
         Titik seimbang model - tempat ``mengejar + meredam * absorpsi = 0`` -
-        ada di 1,39 sampai 2,15 tergantung keadaan. ``KUAT = 1,35`` berada di
-        BAWAH seluruhnya, jadi "penyerapan kuat" tidak pernah membalik apa pun.
+        diukur di 1,39 sampai 2,15 tergantung keadaan. Sampai 2026-08-23
+        ``KUAT = 1,35`` berada DI BAWAH seluruhnya, jadi "penyerapan kuat" tidak
+        pernah membalik apa pun.
 
-        Perbaikan yang jelas - geser seluruh sebaran ke titik seimbang - diuji
-        dan memperburuk: `Sideways` melonjak dari 33% ke 67%, dan keluarga yang
-        hilang tetap hilang. Sebabnya struktural: `pembalik` adalah pegas menuju
-        nol, dan pegas teredam mendekati nol secara asimtotik - ia tidak pernah
-        MELEWATINYA.
-
-        Test ini mengunci pengukurannya, bukan melarang perbaikan. Yang dilarang
-        adalah memasangnya tanpa bukti bahwa ia bekerja.
+        Sekarang KUAT di atas titik itu dan LEMAH di bawahnya. Kalau salah satu
+        pindah sisi, mesinnya berubah dan sebaran keluarganya harus diukur
+        ulang.
         """
         from aruna.scenario.kohort import KOHORT, aliran
-        from aruna.scenario.premis import _NILAI_ABSORPSI
+        from aruna.scenario.premis import _NILAI_ABSORPSI, Absorpsi
 
         mengejar = meredam = 0.0
         for k in KOHORT:
@@ -164,40 +241,34 @@ class TestKeluargaYangTakTerjangkau:
                 mengejar += nilai
 
         seimbang = -mengejar / meredam
-        assert seimbang > max(_NILAI_ABSORPSI.values()), (
-            f"titik seimbang {seimbang:.2f} sekarang DI BAWAH absorpsi "
-            f"terkuat {max(_NILAI_ABSORPSI.values())} - artinya mesinnya "
-            "berubah, dan sebaran keluarganya harus diukur ulang"
-        )
+        assert _NILAI_ABSORPSI[Absorpsi.KUAT] > seimbang
+        assert _NILAI_ABSORPSI[Absorpsi.LEMAH] < seimbang
 
-    def test_lintasan_monoton_jadi_kaskade_balik_tak_punya_bahan(self) -> None:
-        """**Perbaikan ketiga yang diuji dan DITOLAK, 2026-08-23.**
+    def test_lintasan_sekarang_bisa_mundur(self) -> None:
+        """Bahan yang dulu tidak ada.
 
-        `kolam_searah` - long yang membeli tembusan lalu terjebak - adalah
-        satu-satunya gaya di model ini yang TIDAK ikut mengecil saat harga
-        mendekati nol, jadi ia satu-satunya yang bisa membawa harga melewatinya.
-        Ia menyala ketika harga mundur `AMBANG_LIKUIDASI_BALIK` dari puncaknya.
+        Sampai 2026-08-23 lintasannya MONOTON - naik lalu bertahan, atau
+        membeku - jadi `kolam_searah` (long yang membeli tembusan lalu
+        terjebak) tidak pernah punya bahan untuk menyala, dan menurunkan
+        ambangnya sampai 0,2 tidak mengubah apa pun.
 
-        Menurunkan ambang itu sampai 0,2 tidak mengubah apa pun - nol keluarga
-        baru di kedelapan nilai yang diuji. Sebabnya bukan ambangnya:
-        **lintasannya monoton**, jadi mundurnya nol dan ambang berapa pun tidak
-        punya bahan untuk menyala.
+        Sekarang mundurnya sampai 0,98 ATR. `AMBANG_LIKUIDASI_BALIK` = 1,0,
+        jadi kaskadenya hampir - tapi belum - menyala.
         """
-        pemicu = frozenset({Peristiwa.BREAKOUT_BESAR})
         from aruna.scenario.kerumunan import guncangan_dari
         from aruna.scenario.premis import kisi
 
+        pemicu = frozenset({
+            Peristiwa.PERUBAHAN_REGIME, Peristiwa.VOLATILITAS_ABNORMAL
+        })
+        mundur_maks = 0.0
         for g in guncangan_dari(pemicu):
             for p in kisi(pemicu):
                 j = jalankan(p, g).jejak
-                naik = g.besar >= 0
-                puncak = max(j) if naik else min(j)
-                mundur = abs(puncak - j[-1])
-                assert mundur < 0.05, (
-                    f"lintasan sekarang MUNDUR {mundur:.2f} dari puncaknya - "
-                    "mesinnya berubah, dan kaskade balik mungkin sudah punya "
-                    f"bahan. Ukur ulang sebaran keluarganya. premis={p}"
-                )
+                puncak = max(j) if g.besar >= 0 else min(j)
+                mundur_maks = max(mundur_maks, abs(puncak - j[-1]))
+
+        assert mundur_maks > 0.5, mundur_maks
 
     def test_lintasan_tidak_pernah_lari_liar(self) -> None:
         """Batas kewarasan yang sudah dibayar sekali: versi tanpa saturasi
@@ -313,8 +384,21 @@ class TestKaskadeMuncul:
         mengubah gerak biasa menjadi gerak yang menyentuh ambang likuidasi."""
         premis = _premis(a=Absorpsi.NETRAL, k=Kedalaman.TIPIS)
 
-        assert jalankan(premis, NAIK).kaskade
-        assert not jalankan(premis, NAIK, susut=0.0).kaskade
+        dengan = jalankan(premis, NAIK).jejak
+        tanpa = jalankan(premis, NAIK, susut=0.0).jejak
+
+        # **Diubah bentuknya pada internal-3.** Sampai internal-2 test ini
+        # membandingkan `kaskade` langsung: premis ini menyala dengan susut dan
+        # diam tanpanya. Sesudah absorpsi dipusatkan di titik seimbang,
+        # lintasannya lebih kecil - maks 3,28 ATR dari sebelumnya 4,33 - dan
+        # premis ini tidak lagi mencapai `AMBANG_LIKUIDASI`.
+        #
+        # Yang diuji tetap klaim yang sama: penyusutan kedalaman BUKAN sekadar
+        # memperbesar angka, ia mengubah bentuk lintasannya. Mencabutnya harus
+        # terlihat, dan sampai 2026-08-22 tidak terlihat sama sekali - mencabut
+        # penyusutannya meninggalkan seluruh test hijau.
+        assert dengan != tanpa
+        assert max(dengan) > max(tanpa)
 
     def test_rondenya_tercatat(self) -> None:
         """Kaskade yang tidak bisa dilihat per ronde tidak bisa dibantah."""

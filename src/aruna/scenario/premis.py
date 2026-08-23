@@ -77,8 +77,31 @@ class Dorongan(StrEnum):
     NEGATIF = "NEGATIF"
 
 
-#: Pengali kekuatan penyerapan pihak lawan.
-_NILAI_ABSORPSI = {Absorpsi.KUAT: 1.35, Absorpsi.NETRAL: 1.0, Absorpsi.LEMAH: 0.6}
+#: Titik seimbang model: nilai absorpsi di mana aliran bersih tepat NOL.
+#:
+#: Diukur, bukan dipilih. Pada ``mengejar + meredam * absorpsi = 0``, dengan
+#: kohort dan reaktivitas yang ada sekarang, titiknya jatuh di 1,39 sampai 2,15
+#: tergantung keadaan - rata-rata 1,61.
+#:
+#: **Ini yang membuat 1,0 salah sebagai "netral".** Sampai 2026-08-23 sebaran
+#: absorpsi berpusat di 1,0 karena itu terbaca seperti "tanpa penskalaan". Tapi
+#: tanpa penskalaan bukan netral: pada 1,0 peredam KALAH, jadi ketiga premis -
+#: KUAT, NETRAL, LEMAH - menghasilkan aliran bersih yang sama-sama POSITIF
+#: (+0,028 / +0,068 / +0,115 tepat sesudah guncangan). Tidak satu pun lintasan
+#: pernah berbalik, dan kisi premisnya dekoratif: tiga nama untuk satu hasil.
+_SEIMBANG = 1.61
+
+#: Pengali kekuatan penyerapan pihak lawan, berpusat di :data:`_SEIMBANG`.
+#:
+#: Bentuk relatifnya tidak berubah - 1,35x, 1,0x, 0,6x dari pusatnya - yang
+#: berubah pusatnya. Sekarang KUAT benar-benar di atas titik seimbang (peredam
+#: menang, harga berbalik), LEMAH di bawahnya (pengejar menang), dan NETRAL di
+#: titik itu sendiri.
+_NILAI_ABSORPSI = {
+    Absorpsi.KUAT: round(1.35 * _SEIMBANG, 3),
+    Absorpsi.NETRAL: round(1.00 * _SEIMBANG, 3),
+    Absorpsi.LEMAH: round(0.60 * _SEIMBANG, 3),
+}
 
 #: Kedalaman buku pada ronde pertama, 1,0 = normal.
 _NILAI_KEDALAMAN = {Kedalaman.NORMAL: 1.0, Kedalaman.TIPIS: 0.55}
