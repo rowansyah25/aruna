@@ -985,7 +985,124 @@ kedua test MERAH.
 
 ---
 
-## Task 10: Ruff, suite penuh, restart, ukur
+## Task 10: Invalidasi dan adaptasi saat rezim berganti (§17.26, §17.28)
+
+Contoh operator 2026-08-23:
+
+```
+TRENDING UP  ->  Trend Following dipilih
+     ↓
+SIDEWAYS     ->  Trend Following TIDAK LAGI COCOK
+                 Mean Reversion menjadi kandidat
+```
+
+**Dua hal yang harus dipisahkan, dan mencampurnya adalah bug.** Sinyal yang
+SUDAH terbit tetap memegang strateginya (§17.27) - catatan sejarahnya tidak
+pernah ditulis ulang. Yang berubah adalah pilihan untuk sinyal BERIKUTNYA.
+
+**Files:** buat `src/aruna/router/invalidasi.py`,
+`tests/test_router_invalidasi.py`
+
+**Interfaces:**
+- Consumes: `PetaRezim` (Task 1), `PutusanRouter` (Task 5)
+- Produces:
+  - `AlasanInvalid(StrEnum)`: `REZIM_BERGANTI`, `STATUS_BERUBAH`,
+    `KEYAKINAN_JATUH`, `RISIKO_NAIK`
+  - `masih_cocok(kode: str, *, peta: PetaRezim) -> AlasanInvalid | None`
+
+- [ ] **Step 1: Tulis test yang gagal — contoh operator, apa adanya**
+
+```python
+def test_trend_following_gugur_saat_rezim_jadi_sideways() -> None:
+    """Contoh operator 2026-08-23. STR-001 menyukai TRENDING; begitu rezimnya
+    RANGING ia tidak lagi cocok, dan sebabnya harus disebut - bukan sekadar
+    hilang dari daftar."""
+    sideways = PetaRezim("RANGING", 80.0, (), (), ())
+
+    assert masih_cocok("STR-001", peta=sideways) is AlasanInvalid.REZIM_BERGANTI
+    assert masih_cocok("STR-004", peta=sideways) is None
+```
+
+- [ ] **Step 2: Jalankan, pastikan MERAH**
+
+Expected: FAIL — `ModuleNotFoundError: No module named 'aruna.router.invalidasi'`
+
+- [ ] **Step 3: Implementasi**
+
+```python
+def masih_cocok(kode: str, *, peta: PetaRezim) -> AlasanInvalid | None:
+    """``None`` berarti masih cocok. Selain itu, SEBABNYA.
+
+    Memulangkan sebabnya dan bukan sekadar ``False``: sebuah strategi yang
+    gugur karena rezimnya berganti dan sebuah strategi yang gugur karena
+    statusnya diubah operator menuntut tindakan yang berbeda, dan keduanya
+    terlihat sama kalau yang dipulangkan cuma "tidak".
+    """
+    s = by_code(kode)
+    if s is None:
+        return AlasanInvalid.STATUS_BERUBAH
+    if s.status is not StrategyStatus.ACTIVE:
+        return AlasanInvalid.STATUS_BERUBAH
+    if peta.primary_confidence < AMBANG_KEYAKINAN_REZIM:
+        return AlasanInvalid.KEYAKINAN_JATUH
+    # Strategi tanpa preferred_regimes cocok di mana pun - itu bentuk
+    # `Conservative` di §17.2, bukan kelalaian data.
+    if s.preferred_regimes and peta.primary not in s.preferred_regimes:
+        return AlasanInvalid.REZIM_BERGANTI
+    return None
+```
+
+- [ ] **Step 4: Jalankan, pastikan HIJAU**
+
+- [ ] **Step 5: Test bahwa sinyal LAMA tidak ikut berubah — §17.27**
+
+```python
+@pytest.mark.asyncio
+async def test_pilihan_lama_tidak_pernah_ditulis_ulang() -> None:
+    """§17.27. Rezim berganti sesudah sinyal terbit adalah hal biasa;
+    mengubah catatan strateginya membuat seluruh evaluasi Phase 12 mengukur
+    keputusan yang tidak pernah diambil siapa pun."""
+    db = _DbPalsu()
+    repo = RouterRepository(db)
+
+    await repo.simpan(_putusan("STR-001", pada=SAAT))
+    await repo.simpan(_putusan("STR-004", pada=SAAT + timedelta(minutes=15)))
+
+    perintah = [s.strip().upper()[:6] for s, _ in db.sql]
+    assert perintah == ["INSERT", "INSERT"]
+    assert not any("UPDATE" in s.upper() for s, _ in db.sql)
+```
+
+- [ ] **Step 6: Test bahwa gugurnya DICATAT, bukan didiamkan**
+
+```python
+def test_sebab_gugur_ikut_ke_alasan_kosong() -> None:
+    """Router yang memulangkan NONE tanpa menyebut sebabnya tidak bisa
+    dibantah - dan `alasan_kosong` sudah ada kolomnya sejak Task 7."""
+    sideways = PetaRezim("RANGING", 80.0, (), (), ())
+    hasil = pilih_dengan_invalidasi(
+        (Kecocokan("STR-001", 88, (), 900, None),), peta=sideways
+    )
+
+    assert hasil.champion is None
+    assert "REZIM_BERGANTI" in hasil.alasan_kosong
+```
+
+- [ ] **Step 7: Jalankan, pastikan HIJAU**
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add src/aruna/router/invalidasi.py tests/test_router_invalidasi.py
+git commit -m "Router: strategi gugur saat rezim berganti, dan sebabnya disebut"
+```
+
+**Cabut-uji:** buat `masih_cocok` selalu memulangkan `None` → test
+`test_trend_following_gugur_saat_rezim_jadi_sideways` MERAH.
+
+---
+
+## Task 11: Ruff, suite penuh, restart, ukur
 
 - [ ] `.\.venv\Scripts\python.exe -m ruff check src tests`
 - [ ] Suite penuh, sendirian
@@ -1005,6 +1122,7 @@ Task 1 · §17.9 Task 7 (kolom `dipilih_pada`, baris tidak pernah ditimpa) ·
 §17.10 Task 2 · §17.11–17.13 sudah ada + Task 5 (filter DISABLED) · §17.14–17.15
 Task 4 · §17.16 Task 3 · §17.17–17.18 Task 5 · §17.19 Task 8 · **§17.21–17.22
 Task 4 (peringkat) DAN Task 9 (gerbang)** · §17.23 Task 4 · §17.27 Task 7 ·
+**§17.26 Task 10** · §17.27 Task 7 + Task 10 · **§17.28 Task 10** ·
 §17.29–17.30 Task 5 · §17.37 Task 3 · §17.44 Task 7 (`versi_router`) ·
 §17.46 Task 5 · §17.52 Task 7 · §17.53 Task 8.
 
