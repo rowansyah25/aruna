@@ -686,15 +686,42 @@ sampel kecil MERAH. Buang potongan risiko → test risiko ekstrem MERAH.
 
 ## Task 5: Peringkat, champion, challenger, dan NONE (§17.17–17.18, §17.29–17.30)
 
+> **DIKOREKSI 2026-08-23 di dua tempat.**
+>
+> **(a) `AMBANG_KEYAKINAN_REZIM` tidak dipinjam dari `MIN_QUALITY`.** Rencana
+> menyuruh begitu; Global Constraints rencana ini sendiri melarangnya —
+> `MIN_QUALITY` menjawab "berapa skor minimum agar sebuah kandidat SINYAL boleh
+> terbit", pertanyaan yang berbeda. Yang dipakai diturunkan dari bentuk
+> `primary_confidence`: **lebih dari setengah bobot horizon mendukung primary**,
+> yaitu 50. Dengan bobot nyata (15m 1,0 / 1h 1,6 / 1d 2,4), akibatnya satu
+> horizon sendirian (20/32/48) ditolak, ketiganya berselisih (48) ditolak, dan
+> dua horizon apa pun yang sepakat (52+) diterima — persis klaim §17.8.
+>
+> **(b) `StrategyStatus.DISABLED` tidak ada.** Yang ada: ACTIVE, DEGRADED,
+> UNDER_REVIEW, SUSPENDED, RETIRED. Dan `UNDER_REVIEW` bukan "dimatikan" — kata
+> katalognya sendiri: *"lebih buruk dari rata-rata pada 1043 sample; cukup
+> diukur untuk pantas dipertimbangkan dihentikan"*. Membuangnya membuat
+> `BREAKOUT` — rezim TERBANYAK, 2.254 dari 9.437 bacaan — tak punya satu pun
+> kandidat selamanya, karena STR-002 dan STR-005 keduanya berstatus itu.
+> Jalan keluarnya justru slot challenger: **boleh menantang, tidak boleh
+> memimpin.**
+>
+> **(c) `UNCERTAIN` digerbangi sebagai tidak-terbaca**, sejajar Phase 16.
+> 1.860 dari 9.437 bacaan (19,7%). Tanpa gerbang ini router menolak dengan
+> alasan yang salah — "skor tertinggi di bawah ambang" alih-alih "rezim belum
+> terbaca" — dan dua keadaan yang menuntut tindakan berbeda dilaporkan sebagai
+> satu.
+
 **Files:** buat `src/aruna/router/peringkat.py`, `src/aruna/router/putusan.py`,
 `tests/test_router_putusan.py`
 
 **Interfaces:**
-- Consumes: `Kecocokan` (Task 4)
+- Consumes: `Kecocokan` (Task 4), `PetaRezim` (Task 1), `StrategyStatus`
 - Produces:
-  - `PutusanRouter(champion: Kecocokan | None, challenger: Kecocokan | None, alasan_kosong: str)`
+  - `PutusanRouter(champion, challenger, alasan_kosong, regime, alasan)`
   - `pilih(kandidat: tuple[Kecocokan, ...], *, peta) -> PutusanRouter`
   - `AMBANG_LAYAK: int`, `AMBANG_KEYAKINAN_REZIM: float`
+  - `KandidatLayak(champion, challenger)`, `kandidat_layak(strategi)`
 
 - [ ] **Step 1: Tulis test yang gagal — §17.29**
 

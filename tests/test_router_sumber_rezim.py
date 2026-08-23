@@ -112,19 +112,112 @@ class TestKeyakinanPrimaryAdalahKesepakatan:
         boleh dikalikan tanpa menghitung hal yang sama dua kali.
         """
         sepakat = susun_peta((
-            _b("15m", "TRENDING"), _b("1h", "TRENDING"), _b("1d", "TRENDING"),
+            _b("15m", "TRENDING", None),
+            _b("1h", "TRENDING", None),
+            _b("1d", "TRENDING", None),
         ))
         berselisih = susun_peta((
-            _b("15m", "TRENDING"), _b("1h", "RANGING"), _b("1d", "REVERSAL"),
+            _b("15m", "TRENDING", None),
+            _b("1h", "RANGING", None),
+            _b("1d", "REVERSAL", None),
         ))
 
         assert sepakat.primary_confidence == 100.0
         assert berselisih.primary_confidence < sepakat.primary_confidence
 
+    def test_keyakinan_classifier_ikut_menurunkan(self) -> None:
+        """Kalau sumbernya MEMANG menyediakan keyakinan, ia tetap menekan.
+        Tiga horizon yang sepakat tapi masing-masing cuma 80% yakin bukan
+        bukti yang sama dengan tiga yang sepakat penuh."""
+        penuh = susun_peta((
+            _b("15m", "TRENDING", None),
+            _b("1h", "TRENDING", None),
+            _b("1d", "TRENDING", None),
+        ))
+        ragu = susun_peta((
+            _b("15m", "TRENDING", 80.0),
+            _b("1h", "TRENDING", 80.0),
+            _b("1d", "TRENDING", 80.0),
+        ))
+
+        assert ragu.primary_confidence < penuh.primary_confidence
+
     def test_keyakinan_tidak_pernah_melebihi_seratus(self) -> None:
         peta = susun_peta((_b("15m", "TRENDING"), _b("1d", "TRENDING")))
 
         assert 0.0 < peta.primary_confidence <= 100.0
+
+    def test_satu_bacaan_bukan_kesepakatan_bulat(self) -> None:
+        """**Jebakan yang paling mudah terlewat, dan ia kasus yang SERING.**
+
+        Kesepakatan yang dihitung hanya di antara bacaan yang ada akan memberi
+        100% untuk satu bacaan tunggal - ia sepakat dengan dirinya sendiri.
+        Padahal itu justru bukti paling tipis yang mungkin.
+
+        Dan ini bukan kasus pinggir. Terukur 2026-08-23: 15m terbaru
+        00:30 sementara 1h terakhir 2026-08-22 19:00 dan 1d 2026-08-22 00:00.
+        Dengan batas kesegaran seperti Phase 16 (satu jam), yang tersisa
+        sering **hanya 15m**. Kalau itu terbaca sebagai keyakinan penuh,
+        seluruh alasan bagian 17.8 ada - pullback pendek tidak boleh terbaca
+        sebagai perubahan tren - dibatalkan oleh satu angka.
+        """
+        sendirian = susun_peta((_b("15m", "TRENDING", None),))
+        bertiga = susun_peta((
+            _b("15m", "TRENDING", None),
+            _b("1h", "TRENDING", None),
+            _b("1d", "TRENDING", None),
+        ))
+
+        assert sendirian.primary_confidence < 50.0
+        assert bertiga.primary_confidence == 100.0
+
+    def test_horizon_panjang_sendirian_juga_belum_cukup(self) -> None:
+        """1d sendirian lebih berat daripada 15m sendirian, tapi tetap belum
+        mayoritas. Bobotnya 2,4 dari 5,0 total - dan itu memang di bawah
+        setengah."""
+        panjang = susun_peta((_b("1d", "TRENDING"),))
+        pendek = susun_peta((_b("15m", "TRENDING"),))
+
+        assert pendek.primary_confidence < panjang.primary_confidence < 50.0
+
+    def test_cakupan_penuh_tidak_ikut_menghukum_perselisihan(self) -> None:
+        """**Cacat di rumus versi ketiga, ditangkap sebelum dikomit.**
+
+        `cakupan` sempat dihitung sebagai `bobot_primary / bobot_penuh` - dan
+        itu bukan cakupan, itu pangsa primary lagi dengan nama lain. Ketika
+        ketiga interval HADIR tapi satu membantah, kedua faktornya menjadi
+        angka yang sama persis dan perselisihan dihukum **dua kali**: pangsa
+        0,68 terbaca 46,2 alih-alih 68.
+
+        Cakupan menjawab "berapa dari horizon yang mungkin benar-benar ada",
+        dan jawabannya tidak bergantung pada rezim mana yang menang. Tiga
+        interval hadir berarti cakupannya penuh, titik - walau ketiganya
+        berselisih.
+        """
+        lengkap_tapi_terbelah = susun_peta((
+            _b("15m", "RANGING", None),
+            _b("1h", "TRENDING", None),
+            _b("1d", "TRENDING", None),
+        ))
+        tipis_tapi_bulat = susun_peta((
+            _b("1h", "TRENDING", None),
+            _b("1d", "TRENDING", None),
+        ))
+
+        # 1h + 1d mendukung = 4,0 dari 5,0 bobot yang masuk, dan seluruh
+        # interval hadir. Perselisihan dihitung sekali, bukan dikuadratkan.
+        assert lengkap_tapi_terbelah.primary_confidence == 80.0
+        # Bacaan yang sama tanpa 15m sama sekali: bulat, tapi cakupannya cuma
+        # 4,0 dari 5,0. Angkanya kebetulan sama, dan sebabnya berbeda.
+        assert tipis_tapi_bulat.primary_confidence == 80.0
+
+    def test_interval_hilang_tetap_dilaporkan_terpisah(self) -> None:
+        """Cakupan ikut menskalakan keyakinan, tapi tidak menggantikan
+        laporannya. Pembaca yang perlu membedakan "sepakat tapi tipis" dari
+        "berselisih tapi lengkap" tetap bisa."""
+        peta = susun_peta((_b("15m", "TRENDING"),))
+
+        assert set(peta.interval_hilang) == {"1h", "1d"}
 
 
 class TestSatuanDiubahDiSatuTempat:

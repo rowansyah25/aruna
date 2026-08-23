@@ -234,19 +234,77 @@ def susun_peta(bacaan: tuple[BacaanRezim, ...]) -> PetaRezim:
 
     primary = min(skor, key=lambda r: (-skor[r], r))
 
-    # Kesepakatan lintas horizon, bukan rata-rata keyakinan. Penyebutnya
-    # seluruh bobot yang masuk, jadi tiga horizon yang sepakat memberi 100
-    # sementara tiga yang berselisih memberi jauh di bawahnya. Bacaan yang
-    # menyebut rezim lain bukan bukti yang lemah untuk rezim ini - ia bukti
-    # untuk rezim yang lain, dan itulah yang membuatnya mengurangi.
-    total = sum(skor.values())
-    percaya = round(100.0 * skor[primary] / total, 1) if total > 0 else 0.0
+    ada = frozenset(b.interval for b in bacaan)
+    dukung = tuple(b for b in bacaan if b.regime == primary)
+    percaya = _keyakinan(skor, primary, ada, dukung)
 
     sekunder = tuple(sorted({b.regime for b in bacaan if b.regime != primary}))
-    ada = {b.interval for b in bacaan}
     hilang = tuple(i for i in BOBOT_INTERVAL if i not in ada)
 
     return PetaRezim(primary, percaya, sekunder, tuple(bacaan), hilang)
+
+
+def _keyakinan(
+    skor: dict[str, float],
+    primary: str,
+    hadir: frozenset[str],
+    dukung: tuple[BacaanRezim, ...],
+) -> float:
+    """Seberapa kuat bukti untuk ``primary``, dalam persen.
+
+    **Tiga pertanyaan yang berbeda dikalikan di sini**, dan tiap versi
+    sebelumnya kehilangan salah satunya:
+
+    * *cakupan* - berapa horizon yang punya bacaan sama sekali?
+    * *kesepakatan* - dari bukti yang ada, berapa yang mendukung primary?
+    * *keyakinan* - di tempat ia mendukung, seberapa yakin classifier-nya?
+
+    *Cakupan* - berapa dari seluruh horizon yang mungkin benar-benar punya
+    bacaan. **Tidak bergantung pada rezim mana yang menang.** Versi pertama
+    tidak memuatnya sama sekali dan membagi dengan bobot yang KEBETULAN HADIR;
+    akibatnya satu bacaan tunggal terbaca 100% - ia sepakat dengan dirinya
+    sendiri. Itu justru bukti paling tipis yang mungkin, dan ia kasus yang
+    **sering**: 15m diperbarui tiap bar sementara 1h dan 1d tertinggal
+    berjam-jam, jadi dengan batas kesegaran seperti Phase 16 yang tersisa
+    kerap hanya 15m.
+
+    *Kesepakatan* - berapa bagian dari bukti yang benar-benar masuk mendukung
+    primary alih-alih rezim lain. Versi kedua membagi dengan bobot penuh saja,
+    dan akibatnya perselisihan berhenti berbiaya sama sekali: menambahkan
+    bacaan yang membantah tidak mengubah pembilangnya, jadi angkanya diam.
+    Test yang menangkapnya `test_bacaan_yang_berselisih_menurunkan_keyakinan`.
+
+    Versi ketiga memuat keduanya tapi menghitung cakupan sebagai
+    ``bobot_primary / bobot_penuh`` - dan itu bukan cakupan, itu pangsa
+    primary lagi dengan nama lain. Ketika seluruh interval HADIR tapi satu
+    membantah, kedua faktornya menjadi angka yang sama persis dan perselisihan
+    dihukum **dua kali**: 0,68 menjadi 46,2 alih-alih 68.
+
+    Ketiganya harus ada, dan harus mengukur hal yang berbeda. Bukti yang
+    lengkap tapi terbelah, bukti yang bulat tapi tipis, dan bukti yang lengkap
+    dan bulat tapi ragu-ragu sama-sama bukan bukti yang kuat - dan angka yang
+    cuma memuat sebagian akan memberi nilai penuh kepada salah satunya.
+
+    Faktor ketiga dihitung dari bacaan yang **MENDUKUNG** saja. Merata-ratakan
+    seluruh bacaan akan membuat pembantah yang percaya diri MENAIKKAN keyakinan
+    atas rezim yang justru ia bantah - dan `test_bacaan_yang_berselisih_
+    menurunkan_keyakinan` sempat terbalik karena itu.
+
+    Sumber yang hidup tidak menyimpan keyakinan classifier, jadi faktor ketiga
+    hari ini selalu 1,0. Ia tetap ditulis karena ``regimes`` menyimpannya dan
+    akan berarti begitu pengisinya tersambung ke siklus.
+    """
+    masuk = sum(skor.values())
+    if masuk <= 0:
+        return 0.0
+    penuh = sum(BOBOT_INTERVAL.values())
+    cakupan = min(
+        1.0, sum(BOBOT_INTERVAL.get(i, _BOBOT_NETRAL) for i in hadir) / penuh
+    )
+    sepakat = skor[primary] / masuk
+    terukur = [b.keyakinan_persen for b in dukung if b.keyakinan_persen is not None]
+    yakin = (sum(terukur) / len(terukur) / 100) if terukur else _TANPA_KEYAKINAN
+    return round(100.0 * cakupan * sepakat * yakin, 1)
 
 
 def stabilitas(riwayat: tuple[str, ...]) -> float | None:
