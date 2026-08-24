@@ -18,7 +18,6 @@ from types import SimpleNamespace
 import pytest
 
 from aruna.core.enums import Decision
-from aruna.notify.result import render_result
 from aruna.notify.verdict import VoteSplit, render_analysis
 
 SPLIT = VoteSplit(("TECHNICAL",), ("RISK",))
@@ -45,34 +44,6 @@ class TestAnalysisMenyebutVersinya:
             symbol="BTC/USDT", decision=Decision.SELL, split=SPLIT,
             model_version="aruna-v1.4",
         )
-        assert "MODEL:\naruna-v1.4" in teks
-
-
-class TestResultMenyebutVersinya:
-    def _row(self, **kwargs):
-        base = {
-            "symbol": "BTC/USDT",
-            "decision": Decision.BUY,
-            "outcome_class": "TARGET_REACHED",
-            "signal_id": "abc123",
-        }
-        base.update(kwargs)
-        return base
-
-    def test_versinya_dicetak(self) -> None:
-        teks = render_result(**self._row(model_version="aruna-v1.4"))
-        assert "MODEL:\naruna-v1.4" in teks
-
-    def test_tanpa_versi_tidak_mencetak_barisnya(self) -> None:
-        assert "MODEL:" not in render_result(**self._row())
-
-    def test_kalah_juga_menyebutnya(self) -> None:
-        """Kalau hanya kemenangan yang menyebut versinya, versi yang buruk
-        menghilang dari catatan yang dibaca orang."""
-        teks = render_result(**self._row(
-            outcome_class="WRONG_FROM_START", trade_result="LOSS",
-            model_version="aruna-v1.4",
-        ))
         assert "MODEL:\naruna-v1.4" in teks
 
 

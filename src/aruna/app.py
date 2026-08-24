@@ -73,7 +73,6 @@ from aruna.health.ukuran import UkuranDatabaseCheck
 from aruna.health.upkeep import CandleFreshnessCheck, UpkeepCheck
 from aruna.news.rss import RssNewsProvider
 from aruna.news.service import NewsService
-from aruna.notify.result import ResultNotifier, SignalNotifier
 from aruna.notify.telegram import formatting as fmt
 from aruna.notify.telegram.bot import BotDeps, TelegramBot
 from aruna.scanner.service import ScannerService
@@ -366,9 +365,7 @@ class ArunaApplication:
         from aruna.db.repositories.learning12 import (
             LearningRepository as AdaptiveRepository,
         )
-        from aruna.db.repositories.signals import SignalRepository
         from aruna.learning.strategist import Strategist
-        from aruna.signals.service import SignalService
 
         # PASAL 12.6. Dirangkai di sini dan bukan dibiarkan sebagai kemungkinan:
         # sebuah pemilih strategi yang tidak pernah dipanggil jalur hidup adalah
@@ -479,23 +476,6 @@ class ArunaApplication:
             model_version=self.model_version,
         )
 
-        self.signal_store = SignalRepository(self.db)
-        # Bagian 18.4. Tanpa baris ini faktor `historical` - bobot tiga,
-        # terbesar kedua di antara faktor bernilai - tetap tidak terukur pada
-        # SETIAP keputusan spot, seperti yang terukur pada 300 dari 300
-        # snapshot 2026-08-24. Pembacanya menyimpan cache lima menit sendiri,
-        # jadi memanggilnya per sinyal tidak menghasilkan kueri per sinyal.
-        from aruna.memory.korpus import PembacaKorpus
-
-        self.korpus = PembacaKorpus(self.memory_store)
-        self.signals = SignalService(
-            deliberation=self.deliberation,
-            market_data=self.market_data,
-            store=self.signal_store,
-            council_store=self.council_store,
-            model_version=self.model_version,
-            korpus=self.korpus,
-        )
 
     async def _verify_schema(self) -> None:
         status = await Migrator(self.db).status()
@@ -542,8 +522,6 @@ class ArunaApplication:
         self.history = history
         if self.council is not None:
             self.council.use_history(history)
-        if self.signals is not None:
-            self.signals.use_history(history)
 
         if history.measurable:
             log.info(
@@ -697,12 +675,12 @@ class ArunaApplication:
                 ),
             )
             return
-        if self.ingest is None or self.market_data is None or self.signals is None:
+        if self.ingest is None or self.market_data is None:
             log.warning(
                 "upkeep.not_wired",
                 detail=(
                     "no market data provider is configured, so there is nothing "
-                    "to refresh; predictions will not be scored automatically"
+                    "to refresh"
                 ),
             )
             return
@@ -723,14 +701,13 @@ class ArunaApplication:
         )
         self.upkeep = UpkeepLoop(
             refresher=refresher,
-            resolver=self.signals,
-            # The same service, doing the other half of its job. Without this
-            # argument the loop refreshes candles and scores predictions
-            # perfectly while nothing ever makes one: `lock_signals` had
-            # exactly one caller, the `aruna signal` command, so the record
-            # stood still for 37 hours and the paper-trade sample stayed at
-            # nine - all from a single afternoon.
-            locker=self.signals,
+            # `resolver` dan `locker` HILANG sejak jalur spot dicabut
+            # (2026-08-25, keputusan operator). Keduanya dulu `self.signals` -
+            # satu servis yang mengunci prediksi spot dan menilai hasilnya.
+            #
+            # Yang ikut berhenti disebut apa adanya di `docs/`: proyeksi
+            # ingatan, kalibrasi, dan keandalan agen semuanya dihitung dari
+            # hasil spot, dan tidak ada satu pun yang menggantikannya.
             # Pemindai cepat (PASAL 14, 15). Ia TIDAK menggerakkan council -
             # lihat `UpkeepLoop._scan` untuk kenapa, dan untuk apa yang jujur
             # bisa diklaim tentang nilainya pada universe sebesar sekarang.
@@ -761,8 +738,6 @@ class ArunaApplication:
             # perubahan atas dirinya sendiri. Yang didorong ke operator adalah
             # pertanyaan itu, ditambah proposal yang menunggu keputusannya.
             research=self._build_research(),
-            # Screening pra-pembukaan IDX, tiga puluh menit sebelum bel.
-            screening=self._build_screening(),
             # PASAL 14.41. Sama persis dengan `learning` di atas, satu lapis
             # lebih dalam: mesin korelasi ada sejak Phase 4, pembacanya ada di
             # `PembacaPembelajaran`, dan yang MENJALANKANNYA hanya perintah CLI
@@ -816,26 +791,10 @@ class ArunaApplication:
             # `_load_measured_history` hanya jalan saat start; tanpa dua baris
             # ini council memakai angka dari saat proses menyala sampai mati.
             review_council=self.council,
-            review_signals=self.signals,
             # Bagian 23. Tanpa baris ini kalibrasi kembali menimpa dirinya tiap
             # hari tanpa catatan apa yang hilang - dan sejak 2026-08-21 angkanya
             # sampai ke keyakinan yang diterbitkan.
             review_state=self.app_state,
-            # PASAL 11 dan 12. `format_result` punya tepat satu pemanggil -
-            # perintah CLI - jadi prediksi diskor tiap menit dan hasilnya
-            # berhenti di database. Operator diberi tahu setiap kali ARUNA
-            # berpendapat dan tidak pernah diberi tahu saat ARUNA salah.
-            results=ResultNotifier(
-                sender=_LateSender(lambda: self.bot),
-                # Supaya hasil hanya didorong untuk signal yang BENAR-BENAR
-                # sampai, dan supaya ia bisa membalas pesannya.
-                store=self.signal_store,
-            ),
-            signals=SignalNotifier(
-                sender=_LateSender(lambda: self.bot),
-                # Supaya jejak pengirimannya tercatat oleh yang mengirim.
-                store=self.signal_store,
-            ),
             # Denyut. Tanpa ini tidak ada satu pun catatan tentang berapa lama
             # ARUNA mati - terukur: `aruna.stopped` 22 kali dalam sehari dan
             # `telegram.stopped` nol kali, karena proses yang dibunuh paksa
@@ -1060,42 +1019,6 @@ class ArunaApplication:
             health=lambda: self.monitor.latest if self.monitor else None,
             model_version=self.model_version,
             uptime_seconds=lambda: self.state.uptime_seconds,
-        )
-
-    def _build_screening(self) -> Any:
-        """Pemindaian pra-pembukaan IDX (diminta operator).
-
-        **Pemindai IDX-nya dibuat di sini, karena sebelumnya tidak ada.**
-        ``ScannerService`` selalu dibangun dengan ``market`` bawaannya -
-        ``Market.CRYPTO`` - jadi lima simbol yang muncul di ``upkeep.scanned``
-        seluruhnya crypto dan tidak satu pun saham pernah dipindai. Kelasnya
-        sendiri sudah generik; yang tidak ada hanyalah perakitannya.
-
-        Intervalnya ``1d`` dan itu bukan pilihan bebas: pada pukul 08:30 WIB
-        bar tertutup terbaru untuk sebuah saham adalah bar harian kemarin.
-        Meminta 15m di jendela ini akan membandingkan bar terakhir sebelum bel
-        penutup kemarin dengan garis dasarnya - satu bar, bukan satu hari.
-
-        Mengembalikan ``None`` kalau IDX tidak diaktifkan, supaya loop
-        melewatinya alih-alih memindai pasar yang tidak dipakai operator.
-        """
-        if Market.IDX not in self.settings.app.enabled_markets:
-            return None
-
-        from aruna.core.enums import Horizon
-        from aruna.notify.screening import PreOpenScreening
-        from aruna.scanner.service import ScannerService
-
-        return PreOpenScreening(
-            scanner=ScannerService(
-                universe=self.universe,
-                market_data=self.market_data,
-                market=Market.IDX,
-                interval=Horizon.D1,
-            ),
-            sender=_LateSender(lambda: self.bot),
-            state=self.app_state,
-            news=self.news_store,
         )
 
     def _build_research(self) -> Any:

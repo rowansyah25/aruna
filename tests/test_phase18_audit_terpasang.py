@@ -256,12 +256,11 @@ class TestTerpasangDiJalurHidup:
 
         assert "note=note" in inspect.getsource(service.attach_quality)
 
-    def test_jalur_spot_tidak_memakai_katalog_pola(self) -> None:
+    def test_rekam_jejak_tidak_memakai_katalog_pola(self) -> None:
         """**Jalan pintas yang salahnya halus, dan tetap dilarang.**
 
-        Rekam jejak jalur spot sudah dirangkai lewat korpus ingatan Phase 15 -
-        lihat ``tests/test_phase18_rekam_jejak_spot.py``. Yang dijaga di sini
-        alternatif yang terlihat jauh lebih murah dan **bias**:
+        Rekam jejak futures dibaca dari korpus ingatan Phase 15. Yang dijaga di
+        sini alternatif yang terlihat jauh lebih murah dan **bias**:
         ``memory.pola.cocokkan`` hanya memulangkan pola yang ``beats_baseline``
         (57 dari 368) dengan sampel di atas ``SAMPEL_POLA``. Merangkainya
         membuat ``historical`` terukur justru ketika rekam jejaknya bagus dan
@@ -273,9 +272,9 @@ class TestTerpasangDiJalurHidup:
         """
         import inspect
 
-        from aruna.signals import service
+        from aruna.memory import korpus
 
-        sumber = inspect.getsource(service)
+        sumber = inspect.getsource(korpus)
 
         assert "memory.pola" not in sumber
         assert "cocokkan(" not in sumber

@@ -391,7 +391,10 @@ class TestPenandaUjiCoba:
             b.strip() for b in capsys.readouterr().out.split("-" * 40) if b.strip()
         ]
 
-        assert len(blok) >= 5
+        # Empat sejak 2026-08-25: dua contoh ARUNA RESULT hilang bersama jalur
+        # spot. Angkanya tetap dipagari supaya perintahnya tidak diam-diam
+        # berhenti mencetak apa pun.
+        assert len(blok) >= 4
         for b in blok:
             assert b.splitlines()[0] == TEST_BANNER, b.splitlines()[0]
 
@@ -425,7 +428,7 @@ class TestPenandaUjiCoba:
             b for b in keluar.splitlines()
             if "ARUNA FUTURES" in b or "PERPETUAL" in b
         ]
-        assert len(judul) >= 5
+        assert len(judul) >= 4
         for baris in judul:
             for nyata in ("BTC", "ETH", "SOL", "XRP", "BNB"):
                 assert nyata not in baris, baris

@@ -152,21 +152,6 @@ class DailyReport:
     #: dibedakan dari nol, yang berarti sudah dihitung dan tidak ada ingatan
     #: baru hari itu. Alasan yang sama persis dengan ``silence`` di atas.
     memory: Any = None
-    #: Pembalikan keputusan hari itu (bagian 18.52), sebagai
-    #: ``(pembalikan, yang_terkonfirmasi)``.
-    #:
-    #: **Dua angka, bukan satu.** Empat pembalikan yang seluruhnya
-    #: terkonfirmasi adalah pasar yang memang berbalik empat kali; empat yang
-    #: tak satu pun terkonfirmasi adalah ARUNA yang bergoyang. Satu angka
-    #: "pembalikan: 4" tidak membedakan keduanya.
-    #:
-    #: ``None`` berarti belum terhitung - dibedakan dari ``(0, 0)``, yang
-    #: berarti sudah dihitung dan memang tidak ada pembalikan. Alasan yang sama
-    #: persis dengan ``silence`` dan ``memory`` di atas.
-    pembalikan: tuple[int, int] | None = None
-    #: Statistik Phase 18 hari itu (bagian 18.47). ``None`` berarti belum
-    #: terhitung - alasan yang sama dengan ``silence`` dan ``memory`` di atas.
-    mutu: MutuHarian | None = None
 
     @property
     def overall(self) -> Tally:
@@ -277,98 +262,6 @@ def _sampel(agent: AgentScore) -> str:
     return f" (n={agent.sample})" if agent.sample else ""
 
 
-@dataclass(frozen=True, slots=True)
-class MutuHarian:
-    """Statistik Phase 18 satu hari (bagian 18.47, 18.51).
-
-    Setiap bidang ``None`` berarti **belum terhitung**, dan itu berbeda dari
-    nol - alasan yang sama persis dengan ``silence`` dan ``memory`` di
-    :class:`DailyReport`.
-
-    Kalibrasi dibawa sebagai kalimat penuh, bukan satu kata. Bagian 18.47
-    mencontohkan ``Calibration: GOOD``, dan satu kata itu membuang bagian yang
-    bisa ditindaklanjuti: terukur 2026-08-24, vonisnya berbunyi "OVERCONFIDENT
-    in 50-65%, 65-80%, 80-96%" - tiga pita yang spesifik.
-    """
-
-    rata_mutu: float | None = None
-    rata_keyakinan: float | None = None
-    rata_cakupan: float | None = None
-    lolos: int = 0
-    gagal: int = 0
-    kalibrasi: str = ""
-
-    @property
-    def diperiksa(self) -> int:
-        return self.lolos + self.gagal
-
-    @property
-    def ada(self) -> bool:
-        return bool(
-            self.rata_mutu is not None
-            or self.rata_keyakinan is not None
-            or self.diperiksa
-            or self.kalibrasi
-        )
-
-
-def _mutu_lines(mutu: MutuHarian) -> list[str]:
-    """Blok DECISION QUALITY (bagian 18.47).
-
-    **Cakupan dicetak bersama skornya, dan itu bukan hiasan.** Mutu 84 dari
-    tiga faktor terukur dan mutu 84 dari lima belas adalah dua pernyataan yang
-    sangat berbeda, dan tanpa cakupan keduanya mencetak baris yang sama persis.
-
-    Gerbang dilaporkan sebagai pecahan, bukan persen: 2/12 dan 17%
-    membawa angka yang sama, tapi yang pertama menyebut penyebutnya sendiri -
-    dan pembaca yang melihat "17% gagal" tanpa tahu itu dari dua belas
-    keputusan akan menganggapnya tren.
-    """
-    lines = ["🧠 DECISION QUALITY", RULE, ""]
-    if mutu.rata_mutu is not None:
-        lines += ["Rata-rata Decision Quality:", f"{mutu.rata_mutu:.0f}/100", ""]
-    if mutu.rata_cakupan is not None:
-        lines += ["Cakupan faktor:", f"{mutu.rata_cakupan * 100:.0f}%", ""]
-    if mutu.rata_keyakinan is not None:
-        lines += ["Rata-rata Confidence:", f"{mutu.rata_keyakinan * 100:.0f}%", ""]
-    if mutu.diperiksa:
-        lines += [
-            "✅ Quality Gate lolos:",
-            f"{mutu.lolos}/{mutu.diperiksa}",
-            "",
-            "❌ Quality Gate gagal:",
-            f"{mutu.gagal}/{mutu.diperiksa}",
-            "",
-        ]
-    if mutu.kalibrasi:
-        lines += ["Kalibrasi:", mutu.kalibrasi, ""]
-    return lines
-
-
-def _pembalikan_lines(angka: tuple[int, int]) -> list[str]:
-    """Blok pembalikan keputusan (bagian 18.52).
-
-    **Dua angka yang selalu berdampingan**, karena satu di antaranya sendirian
-    menyesatkan: "4 pembalikan" tidak membedakan pasar yang memang berbalik
-    empat kali dari ARUNA yang bergoyang empat kali.
-    """
-    total, terkonfirmasi = angka
-    goyah = total - terkonfirmasi
-    return [
-        "🔄 DECISION REVERSAL",
-        RULE,
-        "",
-        "Total:",
-        f"{total}",
-        "",
-        "✅ Terkonfirmasi:",
-        f"{terkonfirmasi}",
-        "",
-        "⚠️ Tanpa konfirmasi:",
-        f"{goyah}",
-    ]
-
-
 def render_daily(report: DailyReport) -> str:
     """Susun pesan harian, persis seperti template."""
     lines = [
@@ -458,14 +351,7 @@ def render_daily(report: DailyReport) -> str:
     # ARUNA atas "apakah aku konsisten", bukan keterangan mesin. ``None`` tidak
     # dicetak sama sekali - "PEMBALIKAN: 0" yang lahir dari ketiadaan hitungan
     # terbaca persis seperti ARUNA yang tidak pernah berubah pikiran.
-    if report.pembalikan is not None:
-        lines += [RULE, *_pembalikan_lines(report.pembalikan), ""]
 
-    # Bagian 18.47, alasan yang sama sekali lagi: ``None`` berarti belum
-    # terhitung, dan "Decision Quality: 0/100" yang lahir dari ketiadaan
-    # hitungan adalah tuduhan terhadap seluruh hari.
-    if report.mutu is not None and report.mutu.ada:
-        lines += [RULE, *_mutu_lines(report.mutu)]
 
     lines += [RULE, "⚙️ SYSTEM STATUS", RULE, ""]
     for component in report.components:

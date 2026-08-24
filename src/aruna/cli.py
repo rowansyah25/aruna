@@ -932,136 +932,6 @@ async def _council(settings: Settings, args: argparse.Namespace) -> int:
         await app.shutdown()
 
 
-def cmd_signal(args: argparse.Namespace) -> int:
-    """Lock council verdicts as predictions, or score the ones that are due."""
-    settings = _load_settings()
-    _setup_cli_logging(settings)
-    return asyncio.run(_signal(settings, args))
-
-
-async def _signal(settings: Settings, args: argparse.Namespace) -> int:
-    from aruna.signals.outcome import format_result
-    from aruna.signals.report import format_signal
-
-    app = ArunaApplication(settings)
-    try:
-        await app.startup(background=False)
-    except ArunaError as exc:
-        print(f"STARTUP FAILED: {exc}", file=sys.stderr)
-        return EXIT_ERROR
-
-    assert app.signals is not None and app.signal_store is not None
-    try:
-        failures = 0
-
-        if args.resolve or args.resolve_only:
-            _rule("resolving due predictions")
-            result = await app.signals.resolve_due(limit=args.limit)
-            for outcome in result.outcomes:
-                record = await app.signal_store.get(outcome.signal_id)
-                if record is not None:
-                    print(_indent(format_result(record[0], outcome)))
-                    print()
-            print(f"  {result.summary()}")
-            for note in result.notes:
-                print(f"  note: {note}")
-            if result.awaiting_candles:
-                print(
-                    f"  {result.awaiting_candles} sinyal menunggu candle menyusul - "
-                    "belum dinilai, tetap LOCKED.\n"
-                    "  Menilainya sekarang akan mencatat harga tengah-horizon "
-                    "sebagai hasil akhir, dan itu\n"
-                    "  tidak boleh diperbaiki kemudian (SPEC 22)."
-                )
-            if result.unavailable_interval:
-                print(
-                    f"  {result.unavailable_interval} sinyal memakai horizon yang "
-                    "tidak dilayani provider mana pun -\n"
-                    "  bukan menunggu data, datanya memang tidak akan pernah ada."
-                )
-            if result.coarsely_sampled:
-                print(
-                    f"  {result.coarsely_sampled} sinyal dinilai dari interval "
-                    "horizon-nya sendiri - satu titik akhir, bukan\n"
-                    "  jalur, sehingga kelas outcome tidak bisa membedakan "
-                    "pembalikan arah dari panggilan\n"
-                    "  yang memang salah sejak awal."
-                )
-            for problem in result.failures:
-                print(f"  ! {problem}")
-            failures += len(result.failures)
-
-        if not args.resolve_only:
-            horizons = (
-                _parse_intervals(args.horizons)
-                if args.horizons
-                else (Horizon.M15, Horizon.H1, Horizon.D1)
-            )
-            markets = (
-                (Market(args.market.upper()),)
-                if args.market
-                else settings.app.enabled_markets
-            )
-            symbols = (
-                tuple(s.strip() for s in args.symbols.split(","))
-                if args.symbols
-                else None
-            )
-
-            if not app.state.trading_allowed:
-                print(
-                    "  KILL SWITCH ACTIVE: verdicts are recorded, but every one\n"
-                    "  will be a no-trade. That is the switch working, not a bug."
-                )
-
-            for market in markets:
-                _rule(f"{market.value} signals ({', '.join(h.value for h in horizons)})")
-                result = await app.signals.lock_signals(
-                    market,
-                    tuple(horizons),
-                    symbols=symbols,
-                    trading_allowed=app.state.trading_allowed,
-                    persist=not args.dry_run,
-                )
-
-                views = {v.symbol: v for v in result.views}
-                for signal in result.published:
-                    print(_indent(format_signal(signal, view=views.get(signal.symbol))))
-                    print()
-
-                withheld: dict[str, list[str]] = {}
-                for signal, reason in result.withheld:
-                    withheld.setdefault(signal.symbol, []).append(
-                        f"{signal.horizon.value}: {reason}"
-                    )
-
-                for view in result.views:
-                    print(f"  {view.symbol:<10} {view.scope()}   (council view)")
-                    for note in withheld.get(view.symbol, ()):
-                        print(f"      WITHHELD {note}")
-                    if args.verbose:
-                        for horizon_view in view.views:
-                            print(f"      {horizon_view.summary()}")
-
-                print(f"\n  {result.summary()}")
-                for problem in result.failures:
-                    print(f"  ! {problem}")
-                failures += len(result.failures)
-
-        print(
-            "\n  Locked predictions are immutable (SPEC 20) and PAPER ONLY\n"
-            "  (SPEC 46). Outcomes are scored against the original prediction,\n"
-            "  never a revised one. Confidence here is an internal score;\n"
-            "  `aruna autopsy` reports whether it has been calibrated yet."
-        )
-        return EXIT_OK if failures == 0 else EXIT_ERROR
-    except ArunaError as exc:
-        print(f"SIGNAL RUN FAILED: {exc}", file=sys.stderr)
-        return EXIT_ERROR
-    finally:
-        await app.shutdown()
-
-
 def _indent(text: str, prefix: str = "  ") -> str:
     return "\n".join(prefix + line if line else line for line in text.splitlines())
 
@@ -2115,7 +1985,6 @@ def cmd_notify_test(args: argparse.Namespace) -> int:
     bagian tengah pesan, dan yang tersisa di layar kunci adalah kedua ujungnya.
     """
     from aruna.core.enums import Decision
-    from aruna.notify.result import render_result
     from aruna.notify.verdict import VoteSplit, render_analysis
 
     settings = _load_settings()
@@ -2148,18 +2017,9 @@ def cmd_notify_test(args: argparse.Namespace) -> int:
             confidence=0.84, entry="50.00", stop="51.00", target="47.50",
             timeframe="15M", reward_risk="1:2.1", test_mode=True,
         ),
-        render_result(
-            symbol="CONTOH-A/USDT PERPETUAL", decision=Decision.BUY,
-            outcome_class="TARGET_REACHED", signal_id="CONTOH-TES-0001",
-            entry="100.00", target="105.00", stop="98.00", trigger="TP HIT",
-            votes=split, test_mode=True, trade_result="WIN",
-        ),
-        render_result(
-            symbol="CONTOH-B/USDT PERPETUAL", decision=Decision.SELL,
-            outcome_class="WRONG_FROM_START", signal_id="CONTOH-TES-0002",
-            entry="50.00", target="47.50", stop="51.00", trigger="SL HIT",
-            votes=split, test_mode=True, trade_result="LOSS",
-        ),
+        # Dua contoh ARUNA RESULT hilang bersama jalur spot (2026-08-25):
+        # `render_result` melaporkan hasil prediksi spot, dan tidak ada lagi
+        # prediksi spot untuk dilaporkan.
         _contoh_futures(split),
     ]
 
@@ -2551,31 +2411,6 @@ def build_parser() -> argparse.ArgumentParser:
     council.add_argument("--dry-run", action="store_true", help="store nothing")
     council.add_argument("--verbose", action="store_true", help="show every round")
     council.set_defaults(func=cmd_council)
-
-    signal = sub.add_parser(
-        "signal", help="lock council verdicts as predictions, and score due ones"
-    )
-    signal.add_argument("--market", help="CRYPTO or IDX (default: all enabled)")
-    signal.add_argument("--symbols", help="comma separated")
-    signal.add_argument(
-        "--horizons", help="comma separated (default: 15m,1h,1d - SPEC 10)"
-    )
-    signal.add_argument(
-        "--resolve",
-        action="store_true",
-        help="score predictions whose horizon has elapsed, before locking new ones",
-    )
-    signal.add_argument(
-        "--resolve-only",
-        action="store_true",
-        help="score due predictions and lock nothing new",
-    )
-    signal.add_argument("--limit", type=int, default=50, help="max signals to resolve")
-    signal.add_argument("--dry-run", action="store_true", help="store nothing")
-    signal.add_argument(
-        "--verbose", action="store_true", help="show WAIT signals and every horizon"
-    )
-    signal.set_defaults(func=cmd_signal)
 
     autopsy = sub.add_parser(
         "autopsy",

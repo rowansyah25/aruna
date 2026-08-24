@@ -400,21 +400,6 @@ def should_lock(signal: LockedSignal) -> tuple[bool, str]:
     return True, f"directional, confident, evidence fresh, and {note}"
 
 
-def verify_integrity(signal: LockedSignal, stored_fingerprint: str) -> None:
-    """Confirm a stored prediction still matches what was locked (SPEC 20).
-
-    Called before scoring. If a record has been altered, the outcome computed
-    from it is meaningless, so this raises rather than returning a flag that a
-    caller might ignore.
-    """
-    if signal.fingerprint != stored_fingerprint:
-        raise ImmutabilityError(
-            f"signal {signal.signal_id} has been altered since it was locked: "
-            f"fingerprint {signal.fingerprint[:12]} does not match the stored "
-            f"{stored_fingerprint[:12]}. Its outcome cannot be scored."
-        )
-
-
 def supersede(
     original: LockedSignal,
     verdict: CouncilVerdict,
@@ -468,5 +453,4 @@ __all__ = [
     "round_trip_cost_pct",
     "should_lock",
     "supersede",
-    "verify_integrity",
 ]

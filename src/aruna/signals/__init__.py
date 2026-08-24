@@ -20,7 +20,6 @@ from aruna.signals.models import (
     SignalStatus,
     TradeResult,
 )
-from aruna.signals.multihorizon import MultiHorizonView, build_view
 from aruna.signals.outcome import resolve
 from aruna.signals.paper import close_trade, open_trade
 
@@ -28,7 +27,6 @@ __all__ = [
     "ImmutabilityError",
     "LeakageError",
     "LockedSignal",
-    "MultiHorizonView",
     "OutcomeClass",
     "OutcomeSample",
     "PaperTrade",
@@ -36,7 +34,6 @@ __all__ = [
     "SignalStatus",
     "TradeResult",
     "build_signal",
-    "build_view",
     "close_trade",
     "open_trade",
     "resolve",

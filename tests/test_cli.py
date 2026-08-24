@@ -17,7 +17,6 @@ class TestParser:
             "createdb",
             "migrate",
             "seed",
-            "signal",
             "health",
             "run",
         ],
@@ -70,20 +69,19 @@ class TestParser:
         args = build_parser().parse_args(["seed", "--file", "config/universe.json"])
         assert args.file == "config/universe.json"
 
-    def test_signal_defaults_to_locking_without_resolving(self) -> None:
-        args = build_parser().parse_args(["signal"])
-        assert callable(args.func)
-        assert args.resolve is False
-        assert args.resolve_only is False
-        assert args.horizons is None  # the SPEC 10 default set is chosen at runtime
+    def test_perintah_signal_sudah_tidak_ada(self) -> None:
+        """Dicabut 2026-08-25 bersama jalur spot.
 
-    def test_signal_can_score_without_locking(self) -> None:
-        args = build_parser().parse_args(
-            ["signal", "--resolve-only", "--limit", "5", "--horizons", "15m,1h"]
-        )
-        assert args.resolve_only is True
-        assert args.limit == 5
-        assert args.horizons == "15m,1h"
+        Diuji bahwa ia BENAR-BENAR hilang, bukan sekadar tidak disebut: sebuah
+        subperintah yang masih terdaftar tapi menunjuk fungsi yang sudah tiada
+        akan meledak di tangan operator, bukan di sini.
+        """
+        import argparse
+
+        import pytest
+
+        with pytest.raises((SystemExit, argparse.ArgumentError)):
+            build_parser().parse_args(["signal"])
 
 
 class TestExitCodes:

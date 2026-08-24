@@ -317,13 +317,20 @@ class TestIsinya:
         assert awal.astimezone(WIB).day == 17
         assert akhir.astimezone(WIB).day == 18
 
-    async def test_tiga_pasar_selalu_ada(self) -> None:
+    async def test_satu_pasar_sejak_spot_dicabut(self) -> None:
+        """Dulu tiga pasar; sejak 2026-08-25 hanya futures.
+
+        SPOT dan SAHAM INDONESIA dibaca dari ``paper_trades``, dan tabel itu
+        berhenti tumbuh begitu jalur spot dicabut. Blok yang membaca tabel beku
+        akan melaporkan angka kemarin sebagai angka hari ini - jadi yang
+        dihapus bloknya, bukan cuma isinya.
+        """
         sender = _Sender()
         svc = _service(sender=sender)
         await svc.run(LEWAT_TENGAH_MALAM)
 
-        for judul in ("FUTURES / PERPETUAL", "SPOT", "SAHAM INDONESIA"):
-            assert judul in sender.sent[0], judul
+        assert "FUTURES / PERPETUAL" in sender.sent[0]
+        assert "SAHAM INDONESIA" not in sender.sent[0]
 
     async def test_penutup_analis_saja(self) -> None:
         sender = _Sender()

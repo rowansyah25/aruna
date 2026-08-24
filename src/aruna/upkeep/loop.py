@@ -495,17 +495,23 @@ class UpkeepStats:
 class UpkeepLoop:
     """One task, two phases, on a timer.
 
-    ``resolver`` is duck-typed rather than annotated as ``SignalService``, the
-    same way ``FuturesScheduler`` takes its resolver: all this needs is
-    ``resolve_due(reference=..., limit=...)``, and requiring the concrete class
+    ``resolver`` is duck-typed rather than annotated: all this needs is
+    ``resolve_due(reference=..., limit=...)``, and requiring a concrete class
     would make the loop untestable without a database behind it.
+
+    **``resolver`` dan ``locker`` bawaannya ``None`` sejak 2026-08-25.** Sampai
+    hari itu keduanya wajib dan selalu diisi ``SignalService`` - satu servis
+    yang mengunci prediksi spot dan menilai hasilnya. Jalur spot dicabut atas
+    keputusan operator, dan tidak ada penggantinya: rencana futures dinilai
+    ``FuturesScheduler``, bukan loop ini. Loop tetap menyegarkan candle,
+    menjalankan router, skenario, ingatan, korelasi dan laporan harian.
     """
 
     def __init__(
         self,
         *,
         refresher: CandleRefresher,
-        resolver: Any,
+        resolver: Any = None,
         settings: UpkeepSettings,
         stats: UpkeepStats | None = None,
         locker: Any = None,

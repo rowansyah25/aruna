@@ -17,8 +17,8 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from decimal import Decimal
 
-from aruna.core.clock import isoformat, now_utc
-from aruna.core.enums import Decision, Horizon, Market
+from aruna.core.clock import now_utc
+from aruna.core.enums import Decision, Horizon
 from aruna.core.logging import get_logger
 from aruna.signals.models import (
     LockedSignal,
@@ -385,29 +385,6 @@ def _classify(
     return OutcomeClass.WRONG_FROM_START
 
 
-def is_resolvable(
-    signal: LockedSignal, *, market_open: bool | None = None, reference: datetime | None = None
-) -> tuple[bool, str]:
-    """Whether a signal's horizon has genuinely elapsed (SPEC 23).
-
-    For IDX the wall clock is not enough: a horizon that spans an overnight
-    close has not seen the trading time it was predicting over, and scoring it
-    on the same clock as crypto would systematically misjudge it.
-    """
-    moment = reference or now_utc()
-    if not signal.is_due(reference=moment):
-        remaining = (signal.resolves_at - moment).total_seconds()
-        return False, f"{remaining / 60:.0f} minute(s) of the horizon remain"
-
-    if signal.market is Market.IDX and market_open is False:
-        return (
-            True,
-            "horizon elapsed, but the exchange was closed for part of it - "
-            "treat the elapsed time as approximate",
-        )
-    return True, "horizon elapsed"
-
-
 def summarise(outcomes: list[SignalOutcome]) -> dict[str, object]:
     """Aggregate resolved outcomes for the SPEC 41 report."""
     directional = [o for o in outcomes if o.original_direction.is_directional]
@@ -443,72 +420,3 @@ def summarise(outcomes: list[SignalOutcome]) -> dict[str, object]:
     }
 
 
-def format_result(signal: LockedSignal, outcome: SignalOutcome) -> str:
-    """The SPEC 22 result block, comparing against the original prediction.
-
-    A WAIT is never labelled CORRECT or WRONG. There was no position to be
-    either, and printing a verdict on one would make every decision to stand
-    aside look like a mistake in the record.
-    """
-    predicted = (
-        f"{outcome.predicted_move_pct:+.2f}%"
-        if outcome.predicted_move_pct is not None
-        else "n/a"
-    )
-    lines = [
-        "ARUNA RESULT",
-        signal.symbol,
-        "",
-        f"ORIGINAL:         {signal.direction.value}",
-        f"REFERENCE:        {signal.reference_price}",
-        f"PREDICTED:        {predicted}",
-        f"ACTUAL:           {outcome.actual_move_pct:+.2f}%",
-    ]
-    if signal.is_directional:
-        lines.append(
-            f"DIRECTION:        {'CORRECT' if outcome.direction_correct else 'WRONG'}"
-        )
-    else:
-        lines.append(
-            "DIRECTION:        N/A - no position was taken (SPEC 28 judges "
-            "these in PHASE 8)"
-        )
-    lines.append(f"RESULT:           {outcome.outcome_class.value}")
-
-    if outcome.prediction_error is not None:
-        lines.append(f"PREDICTION ERROR: {outcome.prediction_error:+.2f}%")
-    if signal.is_directional:
-        lines += [
-            f"MAX ADVERSE:      {outcome.max_adverse_pct:+.2f}%",
-            f"MAX FAVOURABLE:   {outcome.max_favourable_pct:+.2f}%",
-        ]
-    else:
-        lines.append(
-            f"MARKET RANGE:     {outcome.max_adverse_pct:+.2f}% to "
-            f"{outcome.max_favourable_pct:+.2f}% (what standing aside passed up)"
-        )
-    lines += [
-        f"LOCKED AT:        {isoformat(signal.locked_at)}",
-        f"RESOLVED AT:      {isoformat(outcome.resolved_at)}",
-        "",
-        "The locked prediction above is unedited (SPEC 22).",
-        "PAPER TRADE - no real position was taken.",
-    ]
-    return "\n".join(lines)
-
-
-__all__ = [
-    "FLAT_THRESHOLD_PCT",
-    "MIN_OBSERVATIONS",
-    "SAMPLE_FRACTIONS",
-    "STORED_INTERVALS",
-    "build_samples",
-    "exit_point",
-    "format_result",
-    "is_resolvable",
-    "resolve",
-    "sample_offsets",
-    "sampling_intervals",
-    "stop_price",
-    "summarise",
-]

@@ -366,6 +366,22 @@ class _FakeDb:
     async def close(self) -> None:
         return None
 
+    async def execute(self, *_args: object, **_kwargs: object) -> int:
+        """Fase retensi menyapu lewat `execute`.
+
+        Dulu tidak pernah sampai ke sini: fase resolusi berjalan lebih dulu dan
+        palsu ini cukup. Sejak jalur spot dicabut, resolusi tidak ada lagi dan
+        siklusnya berjalan sampai retensi - bentuk palsu yang kurang lengkap
+        baru terlihat sekarang.
+        """
+        return 0
+
+    async def fetch(self, *_args: object, **_kwargs: object) -> list:
+        return []
+
+    async def fetchrow(self, *_args: object, **_kwargs: object) -> None:
+        return None
+
 
 class _FakeCache:
     async def connect(self) -> bool:
@@ -438,19 +454,24 @@ class TestKabelKeAppStartup:
     ``UpkeepLoop`` in isolation would reproduce that mistake exactly.
     """
 
-    async def test_startup_background_benar_benar_menggerakkan_ingestor_dan_resolver(
+    async def test_startup_background_benar_benar_menggerakkan_ingestor(
         self,
     ) -> None:
-        """``aruna run`` must really pull candles and really score signals.
+        """``aruna run`` must really pull candles.
 
         Driven through the real ``startup()``, so removing ``_start_upkeep()``
         from it - or the ``await self.upkeep.start()`` inside it - fails here.
+
+        **Bagian resolusinya hilang 2026-08-25**, bersama jalur spot: yang dulu
+        diperiksa di sini ``resolver.calls``, dan penilainya adalah
+        ``SignalService``. Rencana futures dinilai ``FuturesScheduler``, bukan
+        loop ini - jadi yang tersisa untuk dibuktikan loop ini benar-benar
+        berdetak adalah candle-nya.
         """
         ingestor = _Ingestor(Market.CRYPTO)
-        resolver = _Resolver(_Resolved(resolved=2))
         app = _wired_app(
             _Ingest(ingestor),
-            resolver,
+            _Resolver(_Resolved(resolved=2)),
             tick_sec=0.01,
             # A 1m bar is not due during the first `candle_settle_sec` of any
             # minute, so against the real clock a settle delay would make this
@@ -462,13 +483,12 @@ class TestKabelKeAppStartup:
         await app.startup(background=True)
         try:
             await _wait_until(
-                lambda: bool(ingestor.calls) and bool(resolver.calls),
-                what="the upkeep loop to refresh candles and resolve signals",
+                lambda: bool(ingestor.calls),
+                what="the upkeep loop to refresh candles",
             )
             assert app.upkeep is not None
             assert app.upkeep.running
             assert Horizon.M1 in ingestor.intervals_called()
-            assert resolver.calls[0][1] == app.settings.upkeep.resolve_limit
         finally:
             await app.shutdown()
 
@@ -511,7 +531,6 @@ class TestKabelKeAppStartup:
             stats = await app.upkeep.cycle()
             assert stats.cycles == 1
             assert ingestor.calls, "a hand-driven cycle must still refresh candles"
-            assert resolver.calls, "a hand-driven cycle must still score what is due"
         finally:
             await app.shutdown()
 

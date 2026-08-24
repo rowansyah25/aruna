@@ -493,37 +493,6 @@ def futures_factor(name: str, value: Any, *, weight: float = 1.0) -> Factor:
     return Factor(name, _clamp(float(value)), weight, detail=f"{float(value):.3f}")
 
 
-def anomaly_factor(report: Any) -> Factor:
-    """Kondisi abnormal sebagai gerbang (PASAL 11.8).
-
-    Gerbang, bukan bobot: setup yang lahir dari volume lima belas kali garis
-    dasarnya tidak menjadi lebih baik karena spread-nya kebetulan sempit.
-    Indikatornya dihitung dari garis dasar yang sudah tidak berlaku, dan skor
-    tinggi di atas angka-angka itu adalah keyakinan yang dibangun di atas
-    pengukuran yang kehilangan artinya.
-
-    ``None`` kalau pemeriksaannya tidak dijalankan sama sekali - dan itu
-    memblokir, sama seperti gerbang lain. Tapi laporan yang berjalan dan tidak
-    menemukan apa-apa **lulus**, meski sebagian pemeriksaannya tidak bisa
-    dilakukan: PASAL 11.8 bertanya "apakah kami mendeteksi sesuatu", bukan
-    "buktikan tidak ada apa-apa" (lihat ``aruna.signals.anomaly``).
-    """
-    if report is None:
-        return Factor(
-            "anomaly", None, 3.0,
-            detail="tidak diperiksa", blocking=True, graded=False,
-        )
-    if report.detected:
-        return Factor(
-            "anomaly", 0.0, 3.0,
-            detail=report.summary(), blocking=True, graded=False,
-        )
-    detail = "bersih"
-    if report.unchecked:
-        detail += f" ({len(report.unchecked)} pemeriksaan tidak bisa dijalankan)"
-    return Factor("anomaly", 1.0, 3.0, detail=detail, blocking=True, graded=False)
-
-
 def strategy_factor(pilihan: Any) -> Factor:
     """Mutu strategi yang router pilih untuk keadaan ini (bagian 18.14).
 
@@ -674,14 +643,12 @@ def score_signal(
     funding: float | None = None,
     open_interest: float | None = None,
     liquidation: float | None = None,
-    anomalies: Any = None,
 ) -> QualityScore:
     """Susun faktor PASAL 11.1 dan gerbang PASAL 11.8 dari bukti yang ada."""
     state = context.state
     return QualityScore(factors=(
         data_quality_factor(state),
         freshness_factor(state, context.as_of, now, horizon_sec=horizon_sec),
-        anomaly_factor(anomalies),
         structure_factor(getattr(context, "structure", None)),
         _reading_factor(context, ("macd", "vwap"), label="trend", weight=2.0),
         _reading_factor(context, ("rsi", "momentum"), label="momentum", weight=2.0),

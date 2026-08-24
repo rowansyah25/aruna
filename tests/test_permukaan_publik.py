@@ -71,6 +71,29 @@ DISENGAJA: dict[str, str] = {
         "disediakan KEMAMPUANNYA, bukan pemakaiannya."
     ),
     "idx_tick_size": "Fraksi harga IDX. Dipakai saat menyemai universe, bukan tiap siklus.",
+    "Kalibrator": (
+        "**Kalibrasi masih DIHITUNG, tapi sejak 2026-08-25 tidak lagi "
+        "DITERAPKAN - dan itu keadaan yang harus terlihat, bukan disembunyikan.** "
+        "Satu-satunya yang memakai kelas ini `SignalService`, dan jalur spot "
+        "dicabut atas keputusan operator. `Terkalibrasi` dari modul yang sama "
+        "tetap terpakai lewat `signals.lock`, jadi modulnya tidak boleh dihapus. "
+        "Akibat nyata yang terukur: atap keyakinan 0,573 - yang menekan klaim "
+        "91% menjadi 47% sesuai akurasi terukurnya - hilang, dan keyakinan "
+        "kembali ke nilai mentah beratap 0,95."
+    ),
+    "gate": (
+        "**Gerbang mutu bagian 18.42 - dan ketiadaan pemanggilnya adalah CELAH "
+        "yang sengaja dibiarkan terlihat, bukan kode mati.** Sampai 2026-08-25 "
+        "satu-satunya pemanggilnya `SignalService`, dan jalur spot dicabut atas "
+        "keputusan operator. Jalur futures menghitung `score_signal` tapi TIDAK "
+        "pernah menjalankan gerbangnya: rencana ditolak `build_plan` atas alasan "
+        "posisi (R:R, buffer likuidasi, council tak mengambil sisi), bukan atas "
+        "mutu buktinya. "
+        "Menghapus fungsi ini akan membuat celah itu tidak terlihat lagi; "
+        "merangkainya ke futures akan MENAMBAH penolakan pada jalur yang sudah "
+        "nol PLAN sejak 2026-08-22, jadi itu keputusan operator - bukan "
+        "keputusan yang diambil diam-diam saat merapikan."
+    ),
     # -- 5. Sedang dibangun: sudah lahir, pemanggilnya belum -----------------
     #
     # Baris di golongan ini WAJIB hilang lagi. `test_daftar_alasan_tidak_
@@ -132,12 +155,6 @@ DISENGAJA: dict[str, str] = {
         "Bahannya `perkembangan_terjadi`, satu boolean per langkah, dan "
         "**tidak ada yang menghitungnya**: itu menuntut memeriksa tiap kalimat "
         "rantai terhadap candle. Kemampuannya ada, pemasok buktinya belum."
-    ),
-    "tally": (
-        "PASAL 11: menjawab 'kenapa NO SIGNAL sebanyak ini' sebagai daftar "
-        "pendek per kelompok. `classify_withheld` yang dipakai jalur produksi "
-        "untuk melabeli satu penahanan; yang meringkas BANYAK penahanan belum "
-        "punya pembaca - laporan harian menghitung sendiri lewat SQL."
     ),
 }
 

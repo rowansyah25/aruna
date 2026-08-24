@@ -337,60 +337,6 @@ class TestFaktorSatuan:
         assert evidence_factor(()).score is None
 
 
-class TestGerbangAnomali:
-    """PASAL 11.8. Setup yang lahir dari volume lima belas kali garis dasarnya
-    tidak menjadi lebih baik karena spread-nya kebetulan sempit."""
-
-    def _bagus(self, anomalies) -> object:
-        return score_signal(
-            context=_context(values={
-                "macd": 1.0, "vwap": 1.0, "rsi": 55.0, "momentum": 1.0,
-                "atr": 2.0, "realised_volatility": 1.0, "bollinger": 1.0,
-                "volume_trend": 1.1, "volume_anomaly": 1.0,
-            }),
-            now=NOW, horizon_sec=JAM,
-            split=NS(setuju=("a", "b", "c"), kontra=()),
-            opinions=(NS(evidence=tuple(range(30))),),
-            entry=100, stop=95, target=130,
-            accuracy=0.9, sample=40,
-            anomalies=anomalies,
-        )
-
-    def test_anomali_menolak_meski_skor_tinggi(self) -> None:
-        from aruna.signals.anomaly import Anomaly, AnomalyKind, AnomalyReport
-
-        buruk = AnomalyReport((Anomaly(AnomalyKind.VOLUME_SPIKE, 14.0, 10.0),))
-        putusan = gate(self._bagus(buruk))
-
-        assert putusan.quality.score >= MIN_QUALITY
-        assert putusan.passed is False
-        assert "anomaly" in putusan.quality.blocked_by
-
-    def test_bersih_lolos(self) -> None:
-        from aruna.signals.anomaly import AnomalyReport
-
-        assert gate(self._bagus(AnomalyReport())).passed is True
-
-    def test_tidak_diperiksa_memblokir(self) -> None:
-        """Gerbang yang tidak dijalankan tidak membuktikan pasarnya normal."""
-        assert "anomaly" in gate(self._bagus(None)).quality.blocked_by
-
-    def test_sebagian_tak_terperiksa_tetap_lolos(self) -> None:
-        """Berbeda dari 11.7: pasal ini bertanya "apakah kami mendeteksi
-        sesuatu", bukan "buktikan tidak ada apa-apa"."""
-        from aruna.signals.anomaly import AnomalyReport
-
-        sebagian = AnomalyReport((), ("spread", "volume"))
-        assert gate(self._bagus(sebagian)).passed is True
-
-    def test_anomali_tidak_menaikkan_maupun_menurunkan_skor(self) -> None:
-        """Gerbang, bukan bobot: ia menolak atau meloloskan, tidak menawar."""
-        from aruna.signals.anomaly import AnomalyReport
-
-        bersih = self._bagus(AnomalyReport())
-        assert all(not f.graded for f in bersih.factors if f.name == "anomaly")
-
-
 class TestSkorLengkap:
     #: Tujuh belas butir daftar PASAL 11.1, dieja supaya sebuah faktor yang
     #: hilang terlihat namanya - bukan sekadar hitungan yang meleset satu.
@@ -416,7 +362,6 @@ class TestSkorLengkap:
     #: Dieja terpisah supaya jelas bahwa daftar 11.1 tidak diam-diam tumbuh:
     #: tiap tambahan harus menyebut dari mana ia datang.
     DI_LUAR_11_1: ClassVar[dict[str, str]] = {
-        "anomaly": "PASAL 11.8 - gerbang, bukan bobot",
         "strategy": "bagian 18.14 - mutu strategi pilihan router Phase 17",
         "scenario": "bagian 18.15 - kekokohan skenario Phase 16",
     }
