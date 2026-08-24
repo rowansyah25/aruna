@@ -479,6 +479,105 @@ def anomaly_factor(report: Any) -> Factor:
     return Factor("anomaly", 1.0, 3.0, detail=detail, blocking=True, graded=False)
 
 
+def strategy_factor(pilihan: Any) -> Factor:
+    """Mutu strategi yang router pilih untuk keadaan ini (bagian 18.14).
+
+    **Bedanya "menolak" dari "tidak ditanya" yang paling menentukan di sini.**
+
+    Router yang MENOLAK memilih sudah mengukur dan sudah menjawab: rezim ini
+    tidak punya strategi yang cocok, atau yang cocok sedang ditimbang. Itu
+    keterangan, dan keterangan yang menurunkan mutu keputusan - jadi ia nilai
+    rendah yang **terukur**.
+
+    Router yang tidak pernah dijalankan belum menjawab apa pun. Itu ``None``,
+    dan :class:`Factor` mengeluarkannya dari penyebut. Menyamakan keduanya
+    menghukum aset atas kegagalan kita sendiri.
+
+    **Tidak memblokir.** Strategi yang tidak cocok bukan alasan menolak sinyal;
+    ia satu bukti di antara banyak, dan council memang dibangun untuk
+    membantah bukti. Yang memblokir hanya faktor yang kegagalannya membuat
+    seluruh penilaian tidak berarti - mutu data, anomali.
+    """
+    if pilihan is None:
+        return Factor(
+            "strategy", None, 2.0, detail="router tidak dijalankan"
+        )
+
+    champion = getattr(pilihan, "champion", None)
+    if champion is None:
+        sebab = getattr(pilihan, "kode_kosong", None) or "tidak memilih"
+        return Factor(
+            "strategy",
+            _SKOR_ROUTER_MENOLAK,
+            2.0,
+            detail=f"router tidak memilih strategi ({sebab})",
+        )
+
+    skor = _clamp(float(getattr(champion, "skor", 0)) / 100)
+    # Konsensus ikut MENSKALAKAN, tidak menambah - dua strategi yang sama-sama
+    # cocok adalah pilihan yang lebih goyah daripada satu yang unggul telak,
+    # walau championnya berskor sama (bagian 18.14: strategy stability).
+    sepakat = _clamp(float(getattr(pilihan, "konsensus", 100.0)) / 100)
+    return Factor(
+        "strategy",
+        _clamp(skor * sepakat),
+        2.0,
+        detail=(
+            f"{champion.kode} skor {champion.skor}, "
+            f"konsensus {sepakat * 100:.0f}%"
+        ),
+    )
+
+
+#: Nilai faktor ketika router MENOLAK memilih.
+#:
+#: Rendah, tapi bukan nol: penolakan router berarti "tidak ada strategi yang
+#: cocok untuk rezim ini", dan itu memang keadaan yang lebih buruk daripada
+#: punya strategi lemah. Nol akan menjadikannya setara dengan data yang rusak,
+#: dan keduanya menuntut tindakan yang berbeda.
+_SKOR_ROUTER_MENOLAK = 0.25
+
+
+def scenario_factor(skenario: Any) -> Factor:
+    """Kekokohan skenario yang Phase 16 hasilkan (bagian 18.15).
+
+    Yang diukur bagian bobot yang dipegang skenario **KOKOH**. ``RAPUH``
+    berarti seluruh skenario runtuh oleh satu syarat yang hilang (bagian
+    16.10), dan sekumpulan skenario yang seluruhnya rapuh adalah bukti yang
+    jauh lebih tipis daripada yang bersyarat banyak.
+
+    **Ditimbang bobotnya, bukan dihitung kepalanya.** Skenario berbobot
+    sembilan puluh yang kokoh dan satu berbobot sepuluh yang rapuh bukan
+    "setengah kokoh" - yang menentukan skenario yang benar-benar
+    dipertimbangkan.
+
+    ``None`` ketika tidak ada skenario sama sekali, dan itu bukan kelemahan
+    bukti: fase skenario hanya berjalan ketika pemicunya menyala (bagian
+    16.2), jadi aset yang pemicunya diam memang tidak punya pertanyaan untuk
+    dijawab.
+    """
+    daftar = list(skenario or ())
+    if not daftar:
+        return Factor("scenario", None, 2.0, detail="tidak ada skenario")
+
+    total = sum(max(0, int(getattr(s, "bobot", 0))) for s in daftar)
+    if total <= 0:
+        return Factor(
+            "scenario", None, 2.0, detail=f"{len(daftar)} skenario tanpa bobot"
+        )
+    kokoh = sum(
+        max(0, int(getattr(s, "bobot", 0)))
+        for s in daftar
+        if str(getattr(s, "kerapuhan", "")).upper().endswith("KOKOH")
+    )
+    return Factor(
+        "scenario",
+        _clamp(kokoh / total),
+        2.0,
+        detail=f"{len(daftar)} skenario, {kokoh}/{total} bobot kokoh",
+    )
+
+
 def score_signal(
     *,
     context: Any,
@@ -519,6 +618,19 @@ def score_signal(
         agreement_factor(split),
         evidence_factor(opinions),
         historical_factor(accuracy, sample),
+        # Bagian 18.14 dan 18.15, ditambahkan 2026-08-24. Sebelum ini Phase 16
+        # dan Phase 17 berjalan sebagai PENGAMAT: keduanya menulis baris yang
+        # tak seorang pun di jalur keputusan baca. Diverifikasi lewat impor -
+        # tidak ada satu berkas pun di `signals/`, `council/`, atau `agents/`
+        # yang menyentuh `aruna.router` maupun `aruna.scenario`.
+        #
+        # Dibaca dari KONTEKS, bukan dioper lewat jalur samping: konteks
+        # menyebut dirinya "kolam bukti yang beku dan lengkap untuk satu
+        # keputusan", dan bukti yang masuk lewat pintu lain membuat klaim itu
+        # tidak benar - lalu membuat replay Phase 9 menilai keputusan dengan
+        # bahan yang tidak tercatat di konteksnya.
+        strategy_factor(getattr(context, "router", None)),
+        scenario_factor(getattr(context, "scenario", None)),
         futures_factor("funding", funding),
         futures_factor("open_interest", open_interest),
         futures_factor("liquidation", liquidation),

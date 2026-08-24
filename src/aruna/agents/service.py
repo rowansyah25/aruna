@@ -63,6 +63,8 @@ class DeliberationService:
         store: DeliberationRepository,
         engine: DeliberationEngine | None = None,
         strategist: Any = None,
+        router: Any = None,
+        scenario: Any = None,
     ) -> None:
         self._universe = universe
         self._market_data = market_data
@@ -79,6 +81,15 @@ class DeliberationService:
         #: agar council bisa memutuskan akan mengubah kegagalan pembelajaran
         #: menjadi kegagalan analisis.
         self._strategist = strategist
+        #: Pembaca pilihan router Phase 17, atau None kalau tidak dirangkai.
+        #:
+        #: Opsional dengan alasan yang sama seperti `strategist`: seluruh jalur
+        #: keputusan harus tetap berjalan tanpa dia. Yang hilang tanpanya adalah
+        #: faktor `strategy` di skor mutu - dan `Factor` memulangkan
+        #: "tidak terukur", bukan nol.
+        self._router = router
+        #: Pembaca skenario Phase 16, dengan alasan yang sama.
+        self._scenario = scenario
 
     async def assets_for(
         self, market: Market, symbols: tuple[str, ...] | None = None
@@ -241,6 +252,24 @@ class DeliberationService:
             except Exception:
                 log.exception("agents.strategy_suggest_failed", symbol=asset.symbol)
 
+        # Bagian 18.14 dan 18.15. Sebelum ini Phase 16 dan 17 berjalan sebagai
+        # PENGAMAT - keduanya menulis baris yang tak seorang pun di jalur
+        # keputusan baca. Keduanya masuk ke kolam bukti yang sama dengan
+        # indikator dan berita, dan agent boleh membantahnya seperti membantah
+        # yang lain.
+        #
+        # Kegagalannya diisolasi dengan alasan yang sama seperti `strategi`:
+        # yang hilang saat ia gagal adalah satu baris keterangan, bukan
+        # analisisnya.
+        pilihan = await self._baca(
+            self._router, "agents.router_read_failed", asset.symbol,
+            market=market, symbol=asset.symbol, as_of=technical.as_of,
+        )
+        skenario = await self._baca(
+            self._scenario, "agents.scenario_read_failed", asset.symbol,
+            market=market, symbol=asset.symbol, as_of=technical.as_of,
+        )
+
         return DecisionContext(
             market=market,
             symbol=asset.symbol,
@@ -253,7 +282,25 @@ class DeliberationService:
             valuation=valuation,
             trading_allowed=trading_allowed,
             strategy=strategi,
+            router=pilihan,
+            scenario=skenario,
         )
+
+    @staticmethod
+    async def _baca(sumber: Any, peristiwa: str, simbol: str, **kw: Any) -> Any:
+        """Baca satu sumber bukti opsional, atau ``None`` kalau ia gagal.
+
+        Satu tempat untuk pola yang sama: sumber bukti yang tidak dirangkai
+        bukan kegagalan, dan sumber yang meledak tidak boleh menghentikan
+        analisis. Yang hilang saat ia gagal adalah satu baris keterangan.
+        """
+        if sumber is None:
+            return None
+        try:
+            return await sumber.untuk_keputusan(**kw)
+        except Exception:
+            log.exception(peristiwa, symbol=simbol)
+            return None
 
     @staticmethod
     def _to_state(snapshot: dict | None, *, fallback_price: Decimal) -> MarketState:

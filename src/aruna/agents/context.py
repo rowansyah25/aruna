@@ -85,6 +85,28 @@ class DecisionContext:
     #: ia keterangan yang berbunyi "sejarah belum bisa menyarankan apa pun",
     #: dan itu berbeda dari "tidak ada yang bertanya".
     strategy: Any = None
+    #: Pilihan router Phase 17 untuk keadaan ini
+    #: (:class:`~aruna.router.putusan.PutusanRouter`), atau ``None`` kalau
+    #: fasenya tidak dirangkai.
+    #:
+    #: **Berdampingan dengan** :attr:`strategy`, **bukan menggantikannya**, dan
+    #: itu keputusan yang disengaja. Keduanya menjawab pertanyaan yang berbeda:
+    #: `strategy` menjawab "strategi mana yang SEJARAH sarankan untuk kondisi
+    #: seperti ini" (PASAL 12.6); `router` menjawab "strategi mana yang cocok
+    #: dengan PETA REZIM sekarang, diskalakan keyakinan dan stabilitasnya".
+    #:
+    #: Keduanya boleh berbeda, dan perbedaannya justru keterangan - bukan
+    #: pertentangan yang harus dilenyapkan dengan memilih salah satu.
+    #:
+    #: Bukti, bukan perintah - alasannya sama dengan :attr:`strategy`.
+    router: Any = None
+    #: Skenario Phase 16 untuk bar ini, atau ``None``.
+    #:
+    #: ``None`` dan tuple kosong berarti hal yang sama di sini dan keduanya
+    #: sah: fase skenario hanya berjalan ketika pemicunya menyala (bagian
+    #: 16.2), jadi aset yang pemicunya diam memang tidak punya skenario -
+    #: bukan skenario yang lemah.
+    scenario: Any = None
 
     # ---- convenience accessors ------------------------------------------
 

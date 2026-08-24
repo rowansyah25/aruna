@@ -162,6 +162,12 @@ class TestKehadiranBukanKualitas:
             "liquidity", "regime_clarity", "risk_reward", "agent_agreement",
             "evidence_strength", "historical",
             "funding", "open_interest", "liquidation",
+            # Bagian 18.14 dan 18.15, ditambahkan 2026-08-24. Keduanya
+            # BERNILAI - bukan sekadar penanda kehadiran data - karena "router
+            # memilih STR-001 berskor 92" dan "router tidak menemukan strategi"
+            # menjawab pertanyaan yang sama dengan faktor lain di daftar ini:
+            # apakah setup ini bagus, bukan apakah datanya ada.
+            "strategy", "scenario",
         }
 
 
@@ -405,10 +411,26 @@ class TestSkorLengkap:
     def test_setiap_butir_pasal_11_1_ada(self) -> None:
         assert self._semua() >= self.PASAL_11_1
 
-    def test_gerbang_anomali_menyusul_pasal_11_8(self) -> None:
-        """Bukan bagian dari daftar 11.1 - ia pasal tersendiri, dan gerbang
-        bukan bobot."""
-        assert self.PASAL_11_1 | {"anomaly"} == self._semua()
+    #: Faktor di luar PASAL 11.1, masing-masing dengan pasalnya sendiri.
+    #:
+    #: Dieja terpisah supaya jelas bahwa daftar 11.1 tidak diam-diam tumbuh:
+    #: tiap tambahan harus menyebut dari mana ia datang.
+    DI_LUAR_11_1: ClassVar[dict[str, str]] = {
+        "anomaly": "PASAL 11.8 - gerbang, bukan bobot",
+        "strategy": "bagian 18.14 - mutu strategi pilihan router Phase 17",
+        "scenario": "bagian 18.15 - kekokohan skenario Phase 16",
+    }
+
+    def test_tidak_ada_faktor_tanpa_pasal(self) -> None:
+        """**Yang sebenarnya dijaga.** Sebuah faktor yang muncul di skor tanpa
+        pasal yang memintanya adalah bobot yang tidak bisa dibantah siapa pun -
+        dan skor mutu yang memuatnya berhenti bisa dijelaskan.
+
+        Versi sebelumnya menuntut daftarnya PERSIS 11.1 + anomaly, dan itu
+        MERAH begitu bagian 18.14 dan 18.15 masuk. Yang benar bukan
+        melonggarkannya melainkan menuntut tiap tambahan menyebut sumbernya.
+        """
+        assert self.PASAL_11_1 | set(self.DI_LUAR_11_1) == self._semua()
 
     def test_spot_tetap_bisa_dinilai(self) -> None:
         """Funding, open interest dan likuidasi memang tidak ada di spot, dan

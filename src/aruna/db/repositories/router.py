@@ -24,6 +24,7 @@ bar yang sama tidak menghasilkan dua baris, dan yang **pertama** yang bertahan.
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -143,6 +144,30 @@ _TIDAK_TERBACA = frozenset({"UNCERTAIN"})
 def umur_maksimum(interval: str) -> timedelta:
     """Berapa lama sebuah bacaan pada ``interval`` masih dianggap sekarang."""
     return Horizon(interval).duration * UMUR_MAKSIMUM_BAR
+
+
+@dataclass(frozen=True, slots=True)
+class _ChampionRingkas:
+    """Champion seperlunya untuk `strategy_factor` - kode dan skornya."""
+
+    kode: str
+    skor: int
+
+
+@dataclass(frozen=True, slots=True)
+class _PilihanUntukMutu:
+    """Pilihan router dalam bentuk yang `DecisionContext` bawa.
+
+    Beku, dan bentuknya sengaja **bukan** :class:`~aruna.router.putusan.
+    PutusanRouter`: yang itu memuat `Kecocokan` lengkap dengan alasan per
+    faktor, dan menyeretnya ke dalam tiap konteks keputusan berarti menyalin
+    puluhan kalimat yang tidak seorang pun di jalur ini baca.
+    """
+
+    champion: _ChampionRingkas | None
+    konsensus: float
+    kode_kosong: str | None
+    regime: str | None
 
 
 def _terlalu_tua(locked_at: Any, interval: str, sekarang: datetime) -> bool:
@@ -268,6 +293,55 @@ class RouterRepository:
         for r in rows:
             keluar.setdefault(str(r["symbol"]), str(r["risk_level"]))
         return keluar
+
+    async def untuk_keputusan(
+        self, *, market: Market, symbol: str, as_of: datetime
+    ) -> Any:
+        """Pilihan router yang berlaku saat sebuah keputusan dibuat.
+
+        Untuk :attr:`~aruna.agents.context.DecisionContext.router` (bagian
+        18.14). Yang dipulangkan bentuk seperlunya - kode champion, skornya,
+        konsensusnya - bukan seluruh baris.
+
+        **Hanya yang tercatat SEBELUM ``as_of``**, dan itu bukan kerapian:
+        memakai pilihan yang dicatat sesudah keputusannya dibuat adalah
+        look-ahead yang bagian 18.40 larang keras. Sebuah keputusan tidak boleh
+        dinilai dengan bahan yang belum ada saat ia dibuat.
+
+        ``None`` ketika belum ada pilihan sama sekali untuk aset itu - dan
+        `strategy_factor` menerjemahkannya menjadi "tidak terukur", bukan nol.
+        """
+        row = await self._db.fetchrow(
+            "SELECT champion, champion_skor, konsensus, kode_kosong, "
+            "       regime_primary "
+            "FROM router_pilihan "
+            "WHERE symbol = %s AND market_code = %s AND dipilih_pada <= %s "
+            "ORDER BY dipilih_pada DESC LIMIT 1",
+            symbol,
+            market.value,
+            to_mysql_datetime(as_of),
+        )
+        if not row:
+            return None
+        return _PilihanUntukMutu(
+            champion=(
+                None
+                if row["champion"] is None
+                else _ChampionRingkas(
+                    kode=str(row["champion"]),
+                    skor=int(row["champion_skor"] or 0),
+                )
+            ),
+            konsensus=float(row["konsensus"] or 0.0),
+            kode_kosong=(
+                None if row["kode_kosong"] is None else str(row["kode_kosong"])
+            ),
+            regime=(
+                None
+                if row["regime_primary"] is None
+                else str(row["regime_primary"])
+            ),
+        )
 
     async def identitas(self) -> dict[str, tuple[int, Market]]:
         """``asset_id`` dan pasar per simbol, dari tabel ``assets``.

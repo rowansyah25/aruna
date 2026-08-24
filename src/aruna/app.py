@@ -383,6 +383,9 @@ class ArunaApplication:
         self.strategist = Strategist(store=self.adaptive_store)
 
         self.deliberation_store = DeliberationRepository(self.db, phase=self.phase)
+        from aruna.db.repositories.router import RouterRepository
+        from aruna.db.repositories.scenario import ScenarioRepository
+
         self.deliberation = DeliberationService(
             universe=self.universe,
             market_data=self.market_data,
@@ -390,6 +393,19 @@ class ArunaApplication:
             fundamental=self.fundamental_store,
             store=self.deliberation_store,
             strategist=self.strategist,
+            # Bagian 18.14 dan 18.15. Tanpa dua baris ini, Phase 16 dan Phase
+            # 17 tetap berjalan sebagai PENGAMAT: keduanya menulis
+            # `scenario_evidence` dan `router_pilihan` yang tak seorang pun di
+            # jalur keputusan baca, dan skor mutu menyusun delapan belas faktor
+            # tanpa satu pun dari keduanya.
+            #
+            # Diverifikasi 2026-08-24 lewat impor: tidak ada satu berkas pun di
+            # `signals/`, `council/`, atau `agents/` yang menyentuh
+            # `aruna.router` maupun `aruna.scenario`. Penjaganya di
+            # `tests/test_phase18_terpasang.py`, berbasis AST karena komentar
+            # ini sendiri menyebut `router=` dan `scenario=`.
+            router=RouterRepository(self.db),
+            scenario=ScenarioRepository(self.db),
         )
         self.council_store = CouncilRepository(self.db, phase=self.phase)
         self.council = CouncilService(

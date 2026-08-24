@@ -20,14 +20,36 @@ di kode alih-alih diserahkan ke niat pemanggil:
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from aruna.core.logging import get_logger
 from aruna.db.pool import Database
-from aruna.db.types import as_utc, to_mysql_datetime
-from aruna.scenario.models import HasilSkenario, Skenario
+from aruna.db.types import as_utc, load_json, to_mysql_datetime
+from aruna.scenario.models import (
+    HasilSkenario,
+    Invalidasi,
+    Kerapuhan,
+    Skenario,
+)
 
 log = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class _SkenarioUntukMutu:
+    """Skenario seperlunya untuk :func:`~aruna.signals.quality.scenario_factor`.
+
+    Bukan :class:`~aruna.scenario.models.Skenario` yang penuh: yang itu memuat
+    perkembangan, bukti, pemicu, dan kondisi awal - puluhan kalimat yang tidak
+    seorang pun di jalur keputusan baca, disalin ke tiap konteks tiap bar.
+    """
+
+    nama: str
+    bobot: int
+    keyakinan: float
+    kerapuhan: Kerapuhan
+
 
 __all__ = [
     "BATAS_PER_SIMULASI",
@@ -187,6 +209,63 @@ class ScenarioRepository:
         for r in baris:
             r["dibuat_pada"] = as_utc(r["dibuat_pada"])
         return baris
+
+    # ---- untuk skor mutu (bagian 18.15) ---------------------------------
+
+    async def untuk_keputusan(
+        self, *, market: Any, symbol: str, as_of: Any, limit: int = 8
+    ) -> list[dict[str, Any]]:
+        """Skenario yang berlaku saat sebuah keputusan dibuat (bagian 18.15).
+
+        Untuk :attr:`~aruna.agents.context.DecisionContext.scenario`. Yang
+        dipulangkan skenario dari **simulasi terakhir sebelum ``as_of``** -
+        bukan gabungan beberapa simulasi, karena bobot skenario bersifat
+        relatif terhadap simulasi yang sama (lihat ``CATATAN_BOBOT``) dan
+        mencampur dua simulasi menghasilkan bobot yang tidak berarti apa-apa.
+
+        **Hanya yang dibuat SEBELUM ``as_of``.** Skenario yang lahir sesudah
+        keputusannya tidak menjelaskan keputusan itu, dan memakainya adalah
+        look-ahead yang bagian 18.40 larang keras.
+
+        Daftar kosong ketika pemicunya tidak pernah menyala untuk aset ini -
+        dan `scenario_factor` menerjemahkannya menjadi "tidak terukur", bukan
+        skenario yang lemah.
+        """
+        pasar = getattr(market, "value", market)
+        terakhir = await self._db.fetchrow(
+            "SELECT MAX(dibuat_pada) AS pada FROM scenario_evidence "
+            "WHERE asset = %s AND market_code = %s AND dibuat_pada <= %s",
+            symbol,
+            pasar,
+            to_mysql_datetime(as_of),
+        )
+        if not terakhir or terakhir["pada"] is None:
+            return []
+        baris = await self._db.fetch(
+            "SELECT scenario_id, nama, bobot, keyakinan, invalidasi "
+            "FROM scenario_evidence "
+            "WHERE asset = %s AND market_code = %s AND dibuat_pada = %s "
+            "ORDER BY bobot DESC LIMIT %s",
+            symbol,
+            pasar,
+            terakhir["pada"],
+            limit,
+        )
+        return [
+            _SkenarioUntukMutu(
+                nama=str(r["nama"]),
+                bobot=int(r["bobot"] or 0),
+                keyakinan=float(r["keyakinan"] or 0.0),
+                # Aturan kerapuhannya DIPINJAM, bukan ditulis ulang. `RAPUH`
+                # berarti seluruh skenario runtuh oleh satu syarat yang hilang
+                # (bagian 16.10), dan menyalin ambangnya ke sini berarti dua
+                # tempat yang harus tetap sepakat selamanya.
+                kerapuhan=Invalidasi(
+                    syarat=tuple(load_json(r["invalidasi"]) or ())
+                ).kerapuhan,
+            )
+            for r in baris
+        ]
 
     async def catat_hasil(
         self,
