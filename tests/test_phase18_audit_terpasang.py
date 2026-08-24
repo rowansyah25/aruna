@@ -13,6 +13,9 @@ Bukan karena datanya tidak ada. ``note.memory`` sudah memuat ringkasan Phase 15
 beberapa ratus baris sebelum mutu dihitung; ``plan.buffer`` sudah memuat skor
 buffer likuidasi dan sudah dicetak di pesan. Yang tidak ada pemanggilnya - cacat
 yang sama untuk kedelapan kalinya di proyek ini.
+
+Berkas ini menjaga sisi **futures**. Rekam jejak jalur spot dirangkai belakangan
+lewat korpus ingatan bersama - lihat ``test_phase18_rekam_jejak_spot.py``.
 """
 
 from __future__ import annotations
@@ -253,33 +256,34 @@ class TestTerpasangDiJalurHidup:
 
         assert "note=note" in inspect.getsource(service.attach_quality)
 
-    def test_jalur_spot_menyebutkan_kenapa_rekam_jejaknya_kosong(self) -> None:
-        """Keputusan untuk TIDAK merangkai sesuatu harus berubah dengan
-        sengaja, bukan dengan tidak sengaja.
+    def test_jalur_spot_tidak_memakai_katalog_pola(self) -> None:
+        """**Jalan pintas yang salahnya halus, dan tetap dilarang.**
 
-        Jalur spot mengoper ``accuracy=None, sample=0`` secara harfiah, dan itu
-        keputusan - bukan baris yang terlupakan. Dua jalan pintas menuju
-        perangkaiannya keduanya salah, dan yang kedua salahnya halus: katalog
-        pola Phase 12 hanya memuat yang ``beats_baseline``, jadi faktornya akan
-        terukur justru ketika rekam jejaknya bagus.
+        Rekam jejak jalur spot sudah dirangkai lewat korpus ingatan Phase 15 -
+        lihat ``tests/test_phase18_rekam_jejak_spot.py``. Yang dijaga di sini
+        alternatif yang terlihat jauh lebih murah dan **bias**:
+        ``memory.pola.cocokkan`` hanya memulangkan pola yang ``beats_baseline``
+        (57 dari 368) dengan sampel di atas ``SAMPEL_POLA``. Merangkainya
+        membuat ``historical`` terukur justru ketika rekam jejaknya bagus dan
+        tidak terukur ketika buruk - pengukuran satu arah yang hanya bisa
+        menaikkan skor.
+
+        Korpus ingatan tidak menyaring apa pun, dan itu yang membuatnya boleh
+        dipakai menilai.
         """
         import inspect
 
-        from aruna.signals.service import SignalService
+        from aruna.signals import service
 
-        sumber = inspect.getsource(SignalService._score_quality)
+        sumber = inspect.getsource(service)
 
-        assert "accuracy=None" in sumber
-        assert "beats_baseline" in sumber, (
-            "alasan kenapa katalog pola TIDAK dipakai harus tertulis di tempat "
-            "keputusannya; tanpa itu pemeliharaan berikutnya akan merangkainya "
-            "karena terlihat murah"
-        )
+        assert "memory.pola" not in sumber
+        assert "cocokkan(" not in sumber
 
     def test_katalog_pola_memang_menyaring_baseline(self) -> None:
-        """Alasan di atas hanya berlaku selama penyaringnya memang ada. Kalau
+        """Larangan di atas hanya berlaku selama penyaringnya memang ada. Kalau
         `cocokkan` berhenti menyaring, jalan pintas itu berhenti bias - dan
-        catatan yang melarangnya jadi usang tanpa ada yang tahu."""
+        larangannya jadi usang tanpa ada yang tahu."""
         import inspect
 
         from aruna.memory import pola

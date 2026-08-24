@@ -35,6 +35,7 @@ from aruna.futures.debate import CouncilNote, note_of
 from aruna.futures.discipline import review
 from aruna.futures.models import PositionSide, side_of
 from aruna.futures.plan import FuturesPlan, PlanVerdict, build_plan
+from aruna.memory.korpus import MEMORY_KANDIDAT as _MEMORY_KANDIDAT
 
 log = get_logger("aruna.futures.service")
 
@@ -1397,11 +1398,13 @@ def attach_explanation(note: Any, verdict: Any, context: Any, plan: Any) -> Any:
         return note
 
 
-#: Berapa kandidat ingatan dibaca per tick. Terukur 2026-08-21: 5.377 ingatan
-#: 15m dan 2.189 di 1h, jadi enam ribu memuat seluruhnya hari ini. Kalau suatu
-#: saat tercapai, `cari_terhitung` mencatat `memory.cari_terpotong` dan
-#: catatannya sampai ke jejak audit - tidak ada pemotongan yang diam.
-MEMORY_KANDIDAT = 6000
+#: Berapa kandidat ingatan dibaca per tick.
+#:
+#: **Dipinjam, bukan ditetapkan di sini** sejak 2026-08-24: jalur spot membaca
+#: korpus yang sama, dan batas yang berbeda di keduanya berarti dua ukuran
+#: sampel di bawah satu nama "rekam jejak". Alasan angkanya ada di
+#: :data:`~aruna.memory.korpus.MEMORY_KANDIDAT`.
+MEMORY_KANDIDAT = _MEMORY_KANDIDAT
 
 
 @dataclass(frozen=True, slots=True)
@@ -1644,45 +1647,21 @@ def _rekam_jejak(note: Any, verdict: Any) -> tuple[float | None, int]:
     """Akurasi kasus serupa untuk ARAH yang diambil, dan sampelnya.
 
     Bagian 18.4 menyebut "Historical Similarity" di antara dua belas bahan
-    Decision Quality, dan faktor ``historical`` - bobot tiga, yang terbesar
-    kedua di antara faktor bernilai - **tidak pernah terukur di jalur mana
-    pun**: jalur spot mengoper ``accuracy=None, sample=0`` secara harfiah, dan
-    jalur futures tidak menyebutnya sama sekali. Bahannya ada sejak lama:
-    Phase 15 sudah meringkas kasus serupa dan menempelkannya di
-    ``note.memory`` beberapa ratus baris sebelum mutu dihitung.
+    Decision Quality. Bahannya ada sejak lama: Phase 15 sudah meringkas kasus
+    serupa dan menempelkannya di ``note.memory`` beberapa ratus baris sebelum
+    mutu dihitung.
 
-    **Per arah, bukan keseluruhan.** Rekam jejak LONG di kondisi ini tidak
-    mengatakan apa pun tentang SHORT, dan meratakannya menghasilkan angka yang
-    bukan rekam jejak salah satunya.
-
-    **Sampelnya yang DINILAI, bukan yang cocok.** ``per_arah`` menghitung
-    seluruh kasus di arah itu termasuk yang hasilnya NEUTRAL - memakainya akan
-    melaporkan rekam jejak lebih tebal daripada yang benar-benar ada.
-
-    Gerbang :attr:`~aruna.memory.outcome.Ringkasan.cukup` dihormati lebih dulu:
-    Phase 15 menolak mengubah korpus setipis itu menjadi persen, dan mutu yang
-    memakainya diam-diam akan menerbitkan angka yang pemiliknya sendiri tolak
-    cetak. Ambang kedua - ``needed`` milik ``historical_factor`` - menjawab
-    pertanyaan yang berbeda: bukan "boleh disebut?" melainkan "cukup untuk
-    dinilai?".
+    Aturannya **dipinjam** dari :func:`~aruna.memory.korpus.rekam_jejak`, tempat
+    jalur spot mengambil aturan yang sama. Dua jalur yang menjawab "rekam jejak
+    berapa" dengan dua hitungan berbeda akan melaporkan dua angka di bawah satu
+    nama - dan yang salah adalah yang tidak diuji.
     """
-    ringkasan = getattr(getattr(note, "memory", None), "ringkasan", None)
-    if ringkasan is None or not getattr(ringkasan, "cukup", False):
-        return None, 0
-    from aruna.memory.outcome import EJAAN_ARAH
+    from aruna.memory.korpus import rekam_jejak
 
-    arah = EJAAN_ARAH.get(
-        str(
-            getattr(getattr(verdict, "decision", None), "value", "")
-            or getattr(verdict, "decision", "")
-            or ""
-        ).strip().upper()
+    return rekam_jejak(
+        getattr(getattr(note, "memory", None), "ringkasan", None),
+        getattr(verdict, "decision", None),
     )
-    if arah is None:
-        return None, 0
-    persen = (getattr(ringkasan, "win_rate", None) or {}).get(arah)
-    sampel = int((getattr(ringkasan, "dinilai", None) or {}).get(arah, 0))
-    return (None if persen is None else float(persen) / 100.0), sampel
 
 
 def _mutu_futures(plan: Any) -> dict[str, float | None]:

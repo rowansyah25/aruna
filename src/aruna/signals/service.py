@@ -123,6 +123,63 @@ def maintained_intervals(market: Market) -> tuple[Horizon, ...]:
     return refresh_intervals(market, STORED_INTERVALS)
 
 
+def _sidik_sekarang(signal: Any, context: Any, korpus: Any) -> Any:
+    """Sidik jari kondisi sekarang, sebentuk dengan yang tersimpan.
+
+    **Disusun dari SIGNAL, bukan dari konteks**, lewat
+    :meth:`~aruna.memory.fingerprint.Sidik.dari_snapshot` - pembangun yang sama
+    yang dipakai ketika keputusan ini nanti menjadi ingatan. Sidik yang dibangun
+    dua cara akan membandingkan dua hal yang tidak sebanding, dan skornya tetap
+    keluar tanpa ada yang melihat.
+
+    **Versi pertama membangunnya dari konteks, dan dua dimensi rusak diam-diam
+    karenanya** - terlihat saat mencetak sidiknya berdampingan dengan sidik
+    ingatan yang sungguhan, bukan dari satu pun test:
+
+    * ``REGIME`` berisi ``RegimeVerdict(regime=<Regime.RANGING...>, ...)`` -
+      seluruh repr objeknya - sementara ingatan menyimpan ``RANGING``. Itu
+      lebih buruk daripada ``UNKNOWN``: nilai yang terbaca ikut penyebut dan
+      **selalu** tidak cocok, jadi kemiripan setiap kasus turun karena satu
+      dimensi yang tidak pernah bisa sama.
+    * ``RISK_LEVEL`` dan ``NEWS`` seluruhnya ``UNKNOWN`` karena
+      ``DecisionContext`` memang tidak punya bidang itu - sementara ingatan
+      menyimpan ``MODERATE`` dan ``NO_NEWS``. ``LockedSignal`` membawa
+      keduanya, dan dari sanalah kolom snapshot-nya diisi.
+
+    ``QUALITY`` tetap ``UNKNOWN``, dan itu benar: ia justru yang sedang
+    dihitung. Mengarang nilainya akan membuat sidik jari mengandung jawaban
+    dari pertanyaan yang belum ditanyakan.
+
+    **Timeframe-nya milik KORPUS, bukan milik horizonnya.** Phase 15 boleh
+    meminjam timeframe lain ketika yang diminta belum punya cukup ingatan
+    (lihat :func:`~aruna.memory.lookup.horizon_ingatan`), dan sidik yang tetap
+    mengeja horizon aslinya tidak akan cocok dengan satu pun ingatan yang
+    barusan dipinjam - nol kecocokan tanpa satu pun error.
+    """
+    from aruna.memory.fingerprint import Sidik
+    from aruna.memory.lookup import simbol_pasar
+    from aruna.memory.teknikal import dimensi_dari_bacaan
+
+    sidik = Sidik.dari_snapshot({
+        "symbol": simbol_pasar(signal.symbol),
+        "market_code": signal.market.value,
+        "horizon_code": korpus.timeframe,
+        "regime": signal.regime,
+        "risk_level": signal.risk_level,
+        "news_state": signal.news_state,
+        "signal_quality": None,
+        "spread_bps": signal.spread_bps,
+    })
+    return sidik.dengan(
+        dimensi_dari_bacaan(
+            volatility=context.value("realised_volatility"),
+            momentum=context.value("momentum"),
+            volume=context.value("volume_anomaly"),
+            structure=getattr(getattr(context, "structure", None), "trend", None),
+        )
+    )
+
+
 def _pct(sebelum: Any, sesudah: Any) -> float | None:
     """Perubahan harga dalam persen, atau ``None`` kalau tak bisa dihitung.
 
@@ -404,12 +461,20 @@ class SignalService:
         council: Council | None = None,
         council_store: Any = None,
         model_version: str = "",
+        korpus: Any = None,
     ) -> None:
         self._deliberation = deliberation
         self._market_data = market_data
         self._store = store
         self._council = council or Council()
         self._council_store = council_store
+        #: Pembaca korpus ingatan Phase 15 (bagian 18.4), atau ``None``.
+        #:
+        #: Opsional dengan alasan yang sama seperti kolaborator lain di sini:
+        #: seluruh jalur keputusan harus tetap berjalan tanpa dia. Yang hilang
+        #: tanpanya adalah faktor `historical` di skor mutu - dan `Factor`
+        #: memulangkan "tidak terukur", bukan nol.
+        self._korpus = korpus
         #: Peta keyakinan mentah -> keyakinan terbukti (bagian 9). Kosong
         #: sampai `use_history` memberinya laporan; kalibrator kosong tidak
         #: menyesuaikan apa pun, dan itu perilaku yang benar untuk sistem yang
@@ -843,38 +908,63 @@ class SignalService:
             target=signal.target_price,
             now=context.as_of,
             horizon_sec=horizon.duration.total_seconds(),
-            # **Rekam jejak belum terangkai di jalur spot, dan itu keputusan -
-            # bukan baris yang terlupakan.** Bobotnya tiga, yang terbesar kedua
-            # di antara faktor bernilai, dan terukur 2026-08-24 atas 300
-            # snapshot terakhir: `historical` tidak terukur pada 300 dari 300.
-            #
-            # Jalur futures sudah merangkainya (lihat `_rekam_jejak` di
-            # `aruna.futures.service`) karena di sana ingatan Phase 15 sudah
-            # dibaca **sekali per tick** dan dibagikan ke seluruh simbol.
-            # `SignalService` tidak punya pembaca itu, dan dua jalan pintas
-            # menuju ke sana keduanya salah:
-            #
-            # * membaca ingatan per sinyal - `cari_terhitung` memulangkan
-            #   sampai 5.000 baris, dan jalur ini mengunci dua puluh aset kali
-            #   tiga horizon tiap bar. Enam puluh pemindaian 5.000 baris per
-            #   bar adalah biaya yang harus diputuskan operator, bukan
-            #   diselundupkan lewat satu argumen.
-            # * memakai katalog pola Phase 12 lewat `memory.pola.cocokkan` -
-            #   terlihat murah, dan **bias**. `cocokkan` hanya memulangkan pola
-            #   yang `beats_baseline` (57 dari 368) dengan sampel di atas
-            #   `SAMPEL_POLA`. Faktornya akan terukur justru ketika rekam
-            #   jejaknya bagus dan tidak terukur ketika buruk - pengukuran satu
-            #   arah yang hanya bisa menaikkan skor. Itu confirmation bias
-            #   dengan angka di belakangnya.
-            #
-            # Yang benar adalah pembaca ingatan ber-TTL yang dibagikan kedua
-            # jalur, dan itu pemindahan plumbing Phase 15 yang berdiri sendiri.
-            # Sampai itu ada, `None` adalah laporan yang benar: `Factor`
-            # mengeluarkannya dari penyebut, dan cakupan yang lebih rendah
-            # mengatakan apa adanya bahwa bagian ini belum diukur.
-            accuracy=None,
-            sample=0,
+            **await self._rekam_jejak(asset, context, signal, horizon),
         )
+
+    async def _rekam_jejak(
+        self, asset: Any, context: Any, signal: Any, horizon: Horizon
+    ) -> dict[str, Any]:
+        """Rekam jejak kasus serupa untuk faktor ``historical`` (bagian 18.4).
+
+        Bobotnya tiga - terbesar kedua di antara faktor bernilai - dan sampai
+        2026-08-24 jalur ini mengoper ``accuracy=None, sample=0`` secara
+        harfiah: tidak terukur pada 300 dari 300 snapshot terakhir.
+
+        **Korpusnya dibaca sekali per lima menit, bukan sekali per sinyal.**
+        Yang berbeda per sinyal hanya kemiripannya, dan itu perhitungan murni
+        tanpa database - lihat :class:`~aruna.memory.korpus.PembacaKorpus`.
+        Terukur: kueri 63 ms sekali per TTL, ``bandingkan`` 99 ms per sinyal,
+        ~5,9 detik per bar lima belas menit untuk dua puluh aset kali tiga
+        horizon.
+
+        **Sidik jarinya disusun dari konteks, bukan dari kueri candle kedua.**
+        Konteks sudah membawa volatilitas, momentum, volume dan strukturnya;
+        menghitungnya lagi dari 200 bar per simbol per horizon adalah kueri
+        yang jawabannya sudah ada di tangan. Pemetaan angka ke band tetap milik
+        :func:`~aruna.memory.teknikal.dimensi_dari_bacaan` - satu tempat, supaya
+        ingatan yang ditulis dan kondisi yang dibandingkan memakai band yang
+        sama.
+
+        **Sering memulangkan "tidak terukur", dan itu jawaban yang benar.**
+        Terukur atas tiga puluh sidik nyata: sampel yang benar-benar dinilai di
+        arah yang diambil mencapai ambang ``historical_factor`` hanya pada 4
+        dari 30 untuk LONG dan 0 dari 30 untuk SHORT - 72% korpusnya berhasil
+        NEUTRAL, karena keputusan tak berarah tidak punya menang atau kalah.
+        Menurunkan ambangnya supaya angkanya lebih sering muncul adalah menukar
+        kejujuran dengan tampilan.
+        """
+        kosong: dict[str, Any] = {"accuracy": None, "sample": 0}
+        pembaca = getattr(self, "_korpus", None)
+        if pembaca is None:
+            return kosong
+        try:
+            from aruna.memory.korpus import rekam_jejak, serupa
+
+            korpus = await pembaca.baca(
+                market=context.market, horizon=horizon, as_of=context.as_of
+            )
+            if korpus is None or not korpus.daftar:
+                return kosong
+            akurasi, sampel = rekam_jejak(
+                serupa(korpus, _sidik_sekarang(signal, context, korpus)),
+                signal.direction,
+            )
+            return {"accuracy": akurasi, "sample": sampel}
+        except Exception:
+            # Rekam jejak adalah satu faktor di antara dua puluh; kegagalan
+            # membacanya tidak boleh menghapus prediksinya.
+            log.exception("signal.rekam_jejak_failed", symbol=asset.symbol)
+            return kosong
 
     @staticmethod
     def _skor_risiko(context: Any) -> float | None:

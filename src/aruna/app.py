@@ -480,12 +480,21 @@ class ArunaApplication:
         )
 
         self.signal_store = SignalRepository(self.db)
+        # Bagian 18.4. Tanpa baris ini faktor `historical` - bobot tiga,
+        # terbesar kedua di antara faktor bernilai - tetap tidak terukur pada
+        # SETIAP keputusan spot, seperti yang terukur pada 300 dari 300
+        # snapshot 2026-08-24. Pembacanya menyimpan cache lima menit sendiri,
+        # jadi memanggilnya per sinyal tidak menghasilkan kueri per sinyal.
+        from aruna.memory.korpus import PembacaKorpus
+
+        self.korpus = PembacaKorpus(self.memory_store)
         self.signals = SignalService(
             deliberation=self.deliberation,
             market_data=self.market_data,
             store=self.signal_store,
             council_store=self.council_store,
             model_version=self.model_version,
+            korpus=self.korpus,
         )
 
     async def _verify_schema(self) -> None:

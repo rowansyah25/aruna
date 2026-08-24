@@ -165,6 +165,61 @@ def band_struktur(nilai: object) -> str:
     return teks if teks in _STRUKTUR else UNKNOWN
 
 
+#: Kelima dimensi yang modul ini isi. Dieja sekali supaya "kosong" dan "terisi"
+#: tidak bisa berbeda isinya.
+DIMENSI_TEKNIKAL = (
+    Dimensi.VOLATILITY, Dimensi.MOMENTUM, Dimensi.VOLUME,
+    Dimensi.TREND, Dimensi.STRUCTURE,
+)
+
+
+def kosong_teknikal() -> dict[Dimensi, str]:
+    return dict.fromkeys(DIMENSI_TEKNIKAL, UNKNOWN)
+
+
+def dimensi_dari_bacaan(
+    *,
+    volatility: object = None,
+    momentum: object = None,
+    volume: object = None,
+    structure: object = None,
+) -> dict[Dimensi, str]:
+    """Lima dimensi dari empat bacaan yang **sudah** dihitung.
+
+    Dipisahkan dari :func:`dimensi_teknikal` pada 2026-08-24 supaya jalur spot
+    bisa memakainya tanpa kueri candle kedua. Konteks keputusan sudah membawa
+    ``realised_volatility``, ``momentum``, ``volume_anomaly`` dan strukturnya -
+    menghitungnya lagi dari 200 bar per simbol per horizon adalah kueri yang
+    jawabannya sudah ada di tangan.
+
+    **Pemetaannya satu tempat, dan ini tempatnya.** Kalau jalur spot memetakan
+    angka ke band sendiri, dua ingatan dengan volatilitas yang sama bisa
+    tercatat LOW di satu jalur dan MEDIUM di jalur lain - dan kemiripan yang
+    dihitung di antara keduanya membandingkan dua hal yang kebetulan bernama
+    sama.
+
+    **TREND dan STRUCTURE dari sumber yang berbeda dengan sengaja.** STRUCTURE
+    adalah urutan swing (higher-high / lower-low); TREND adalah arah momentum
+    yang sama diringkas sebagai naik/turun/datar. Keduanya sering sejalan dan
+    kadang tidak - dan justru ketidaksejalanan itu yang menerangkan sesuatu.
+    """
+    hasil = kosong_teknikal()
+    hasil[Dimensi.VOLATILITY] = band_volatilitas(volatility)
+    hasil[Dimensi.MOMENTUM] = band_momentum(momentum)
+    hasil[Dimensi.VOLUME] = band_volume(volume)
+    hasil[Dimensi.STRUCTURE] = band_struktur(structure)
+    # TREND: arah, bukan besarnya. Momentum yang FLAT tetap punya arah nol -
+    # dan itu keterangan, bukan ketiadaan.
+    angka = _angka(momentum)
+    hasil[Dimensi.TREND] = (
+        UNKNOWN if angka is None
+        else "BULLISH" if angka > 0
+        else "BEARISH" if angka < 0
+        else "SIDEWAYS"
+    )
+    return hasil
+
+
 def dimensi_teknikal(series: Any) -> dict[Dimensi, str]:
     """Lima dimensi teknikal dari satu seri candle.
 
@@ -172,19 +227,12 @@ def dimensi_teknikal(series: Any) -> dict[Dimensi, str]:
     pengecualian: sebuah ingatan tanpa candle yang tersedia tetap ingatan yang
     sah, hanya lebih tipis.
 
-    **TREND dan STRUCTURE dibaca dari sumber yang berbeda dengan sengaja.**
-    STRUCTURE adalah urutan swing (higher-high / lower-low); TREND adalah arah
-    momentum yang sama diringkas sebagai naik/turun/datar. Keduanya sering
-    sejalan dan kadang tidak - dan justru ketidaksejalanan itu yang menerangkan
-    sesuatu.
+    Menghitung keempat bacaannya lalu menyerahkan pemetaannya ke
+    :func:`dimensi_dari_bacaan` - satu tempat yang memutuskan angka mana jadi
+    band mana.
     """
-    kosong = {
-        d: UNKNOWN
-        for d in (Dimensi.VOLATILITY, Dimensi.MOMENTUM, Dimensi.VOLUME,
-                  Dimensi.TREND, Dimensi.STRUCTURE)
-    }
     if series is None:
-        return kosong
+        return kosong_teknikal()
 
     try:
         from aruna.analysis import indicators as ind
@@ -193,31 +241,18 @@ def dimensi_teknikal(series: Any) -> dict[Dimensi, str]:
         def _baca(reading: Any) -> object:
             return reading.value if getattr(reading, "available", False) else None
 
-        hasil = dict(kosong)
-        hasil[Dimensi.VOLATILITY] = band_volatilitas(
-            _baca(ind.realised_volatility(series))
+        return dimensi_dari_bacaan(
+            volatility=_baca(ind.realised_volatility(series)),
+            momentum=_baca(ind.momentum(series)),
+            volume=_baca(ind.volume_anomaly(series)),
+            structure=getattr(analyse_structure(series), "trend", None),
         )
-        momentum = _baca(ind.momentum(series))
-        hasil[Dimensi.MOMENTUM] = band_momentum(momentum)
-        hasil[Dimensi.VOLUME] = band_volume(_baca(ind.volume_anomaly(series)))
-        hasil[Dimensi.STRUCTURE] = band_struktur(
-            getattr(analyse_structure(series), "trend", None)
-        )
-        # TREND: arah, bukan besarnya. Momentum yang FLAT tetap punya arah
-        # nol - dan itu keterangan, bukan ketiadaan.
-        angka = _angka(momentum)
-        hasil[Dimensi.TREND] = (
-            UNKNOWN if angka is None
-            else "BULLISH" if angka > 0
-            else "BEARISH" if angka < 0
-            else "SIDEWAYS"
-        )
-        return hasil
     except Exception:  # noqa: BLE001 - ingatan yang lebih tipis, bukan gagal
-        return kosong
+        return kosong_teknikal()
 
 
 __all__ = [
+    "DIMENSI_TEKNIKAL",
     "MOMENTUM_P33",
     "MOMENTUM_P67",
     "OI_FLAT_PCT",
@@ -231,5 +266,7 @@ __all__ = [
     "band_struktur",
     "band_volatilitas",
     "band_volume",
+    "dimensi_dari_bacaan",
     "dimensi_teknikal",
+    "kosong_teknikal",
 ]
