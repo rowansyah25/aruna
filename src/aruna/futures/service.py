@@ -1640,9 +1640,7 @@ async def attach_pembelajaran(
         return note
 
 
-def _mutu_signal(
-    *, context: Any, verdict: Any, plan: Any, now: Any
-) -> float | None:
+def _mutu_signal(*, context: Any, verdict: Any, plan: Any, now: Any) -> Any:
     """Signal quality PASAL 11.1 untuk rencana futures ini, atau ``None``.
 
     Memakai penilai yang **sama** dengan jalur spot - bukan salinan. Dua penilai
@@ -1652,6 +1650,11 @@ def _mutu_signal(
     ``None`` kalau tidak bisa dihitung, dan itu bukan kegagalan: mutu yang
     dihitung dari ketiadaan bukti adalah angka yang dikarang (§13.26), dan ia
     akan tercetak seolah-olah ARUNA mengukurnya.
+
+    **Memulangkan laporannya, bukan skornya.** Versi sebelumnya berakhir dengan
+    ``float(skor.score)`` - dua puluh faktor dihitung, satu angka disimpan,
+    sembilan belas dibuang di baris terakhir. Lima di antaranya adalah keyakinan
+    yang bagian 18.17 wajibkan disebut terpisah.
     """
     if context is None:
         return None
@@ -1659,7 +1662,7 @@ def _mutu_signal(
         from aruna.signals.quality import score_signal
 
         jam = float(getattr(plan, "horizon_hours", 0) or 0)
-        skor = score_signal(
+        return score_signal(
             context=context,
             split=getattr(verdict, "split", None),
             opinions=getattr(verdict, "opinions", None),
@@ -1669,8 +1672,6 @@ def _mutu_signal(
             now=now,
             horizon_sec=jam * 3600 if jam else 3600.0,
         )
-        nilai = getattr(skor, "score", None)
-        return float(nilai) if nilai is not None else None
     except Exception:
         log.exception("futures.quality_failed")
         return None
@@ -1683,7 +1684,7 @@ def attach_quality(
     try:
         return replace(
             note,
-            quality=_mutu_signal(
+            mutu=_mutu_signal(
                 context=context, verdict=verdict, plan=plan, now=now
             ),
         )

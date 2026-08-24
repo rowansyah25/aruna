@@ -96,6 +96,18 @@ class Pembelajaran:
     #: berubah antar tick, dan menyuapkannya per keputusan akan membuat pesan
     #: membawa angka yang terlihat relevan padahal tidak.
     backtest: dict[str, Any] | None = None
+    #: Vonis kalibrasi terakhir (bagian 18.45), atau kalimat kosong.
+    #:
+    #: Kalimat penuh, bukan satu kata. Bagian 18.45 mencontohkan
+    #: ``Calibration: GOOD``, dan satu kata itu membuang justru bagian yang
+    #: bisa ditindaklanjuti: terukur pada 2026-08-24, vonisnya berbunyi
+    #: "OVERCONFIDENT in 50-65%, 65-80%, 80-96%" - tiga pita yang **spesifik**,
+    #: dan pembaca yang keyakinannya jatuh di 70% berhak tahu bahwa pitanya
+    #: termasuk yang terlalu percaya diri.
+    #:
+    #: Dibaca sekali per jendela lima menit bersama lapisan lain di atas, bukan
+    #: per simbol: kalibrasi adalah sifat sistem, bukan sifat BTCUSDT.
+    kalibrasi: str = ""
 
     @property
     def ada(self) -> bool:
@@ -108,6 +120,7 @@ class Pembelajaran:
             or self.drift
             or self.correlation
             or self.backtest
+            or self.kalibrasi
         )
 
 
@@ -164,7 +177,24 @@ class PembacaPembelajaran:
             drift=await self._drift(),
             correlation=await self._correlation(market, interval),
             backtest=await self._backtest(),
+            kalibrasi=await self._kalibrasi(),
         )
+
+    async def _kalibrasi(self) -> str:
+        """Vonis kalibrasi terakhir (bagian 18.45), atau kalimat kosong.
+
+        Kalimat kosong berarti **belum pernah diukur**, dan itu yang dicetak
+        pemanggilnya - bukan "GOOD". Sebuah sistem yang belum pernah memeriksa
+        kejujurannya sendiri bukan sistem yang terkalibrasi baik.
+        """
+        if self.learning12 is None:
+            return ""
+        try:
+            baris = await self.learning12.latest_calibration()
+        except Exception:
+            log.exception("snapshot.kalibrasi_unavailable")
+            return ""
+        return str((baris or {}).get("verdict") or "")
 
     async def _backtest(self) -> dict[str, Any] | None:
         """Lintasan backtest terakhir (PASAL 14.40), atau ``None``.

@@ -887,7 +887,14 @@ class TestSignalQualityDihitungUntukFutures:
         )
 
         assert mutu is not None
-        assert 0 <= mutu <= 100
+        assert 0 <= mutu.score <= 100
+        # Yang dipulangkan adalah LAPORANNYA, bukan skornya. Bagian 18.17
+        # menuntut lima keyakinan yang masing-masing sebuah faktor di dalam
+        # laporan ini; versi yang berakhir di `float(skor.score)` membuang
+        # kelimanya di baris terakhir.
+        assert {f.name for f in mutu.factors} >= {
+            "scenario", "strategy", "regime_clarity", "data_quality"
+        }
 
     def test_konteks_kosong_tidak_mengarang_nilai(self, monkeypatch) -> None:
         """§13.26: mutu yang dihitung dari ketiadaan bukti adalah angka yang

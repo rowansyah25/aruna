@@ -147,7 +147,13 @@ class TestPenyambunganRezim:
 
 
 class TestDecisionScoreDiPesan:
-    """PASAL 14.16 di jalur hidup - sebagai keterangan, bukan gerbang."""
+    """PASAL 14.16 di jalur hidup - sebagai keterangan, bukan gerbang.
+
+    **Labelnya pindah pada 2026-08-24, angkanya tidak.** Bagian 18.17 menuntut
+    tujuh keyakinan disebut terpisah, dan Decision Score adalah yang kedua di
+    daftar itu. Mencetaknya sekali di barisnya sendiri DAN sekali lagi di dalam
+    blok keyakinan akan menampilkan angka yang sama dua kali dengan dua nama.
+    """
 
     #: Komponen berarah penuh: cukup untuk melewati ambang cakupan.
     PENUH: ClassVar[dict[str, float]] = {
@@ -158,7 +164,8 @@ class TestDecisionScoreDiPesan:
     def test_skor_dicetak_kalau_bisa_dinilai(self) -> None:
         teks = _alert(FakePlan(), NOW, note=note(decision_readings=self.PENUH))
 
-        assert "DECISION SCORE:" in teks
+        assert "Decision Confidence" in teks
+        assert "TIDAK TERUKUR" not in teks.split("Decision Confidence")[1][:40]
 
     def test_angkanya_tidak_pernah_berdiri_sebagai_persen(self) -> None:
         """PASAL 14.16: skor bukan probabilitas profit."""
@@ -167,12 +174,23 @@ class TestDecisionScoreDiPesan:
         assert "bukan peluang profit" in teks
         assert "dari 81" in teks
 
-    def test_tanpa_bacaan_barisnya_tidak_dicetak(self) -> None:
-        """Sebuah "DECISION SCORE: tidak bisa dinilai" di antara angka
-        keputusan hanya menambah baris tanpa menambah apa pun yang dipakai."""
+    def test_tanpa_bacaan_angkanya_tidak_dikarang(self) -> None:
+        """Barisnya tetap ada, angkanya tidak.
+
+        Bentuk pertama aturan ini menghilangkan seluruh barisnya, dan itu benar
+        selama ia berdiri sendiri: satu baris "tidak bisa dinilai" di antara
+        angka keputusan tidak menambah apa pun. Di dalam blok tujuh keyakinan
+        ia berhenti benar - baris yang hilang dari daftar bernomor membuat
+        lapisan yang mati tidak bisa dibedakan dari lapisan yang tidak pernah
+        ada (bagian 18.17).
+
+        Yang tetap dijaga adalah yang sebenarnya penting: tidak ada angka yang
+        dikarang untuk mengisi tempatnya.
+        """
         teks = _alert(FakePlan(), NOW, note=note())
 
-        assert "DECISION SCORE" not in teks
+        assert "Decision Confidence" in teks
+        assert "bukan peluang profit" not in teks
 
     def test_bacaan_tipis_tidak_dicetak(self, monkeypatch) -> None:
         """Dan tidak lewat jalan memutar lewat pengecualian.

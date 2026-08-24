@@ -52,6 +52,7 @@ from aruna.notify.verdict import (
     TEST_BANNER,
     render_votes,
 )
+from aruna.signals.pemisahan import pisahkan, render_terpisah
 
 #: Sisi posisi futures ke kosakata publik PASAL 1. Dieja, bukan ditebak dari
 #: namanya: ``PositionSide`` kebetulan mengeja LONG dan SHORT sama, dan
@@ -1098,6 +1099,28 @@ def _kenapa(note: Any) -> list[str]:
         return []
 
 
+def _kalibrasi(note: Any) -> list[str]:
+    """Vonis kalibrasi Phase 12 (bagian 18.45), atau tidak ada baris.
+
+    **Kalibrasi menjawab pertanyaan yang tidak dijawab angka mana pun di
+    atasnya:** apakah keyakinan yang barusan dicetak berarti apa yang
+    dikatakannya. Terukur pada 2026-08-24 atas 491 prediksi yang sudah selesai:
+    ARUNA terlalu percaya diri di pita 50-65%, 65-80%, dan 80-96% - yang berarti
+    "CONFIDENCE 81%" di pesan ini secara historis menghasilkan akurasi yang
+    lebih rendah dari 81%.
+
+    Menyembunyikan itu sambil tetap mencetak angkanya adalah bentuk kebohongan
+    yang paling mudah dipertahankan: setiap angkanya benar, dan gabungannya
+    menyesatkan.
+
+    Baris ini hilang kalau vonisnya belum pernah diukur. Yang tidak dicetak
+    adalah ketiadaannya - bukan "GOOD", yang akan menjadi klaim tentang sesuatu
+    yang belum pernah diperiksa.
+    """
+    vonis = str(getattr(getattr(note, "pembelajaran", None), "kalibrasi", "") or "")
+    return [f"  KALIBRASI:        {vonis}"] if vonis else []
+
+
 def _penilaian(plan: Any, note: Any) -> list[str]:
     """Seberapa kuat dasar plan ini, dan seberapa sepakat yang memutuskannya.
 
@@ -1126,8 +1149,6 @@ def _penilaian(plan: Any, note: Any) -> list[str]:
         lines.append(f"  REZIM PASAR:      {rezim}")
 
     skor = _decision_score(note, _potongan(plan, note))
-    if skor:
-        lines.append(f"  DECISION SCORE:   {skor}")
 
     buffer = getattr(plan, "buffer", None)
     if buffer is not None:
@@ -1136,8 +1157,20 @@ def _penilaian(plan: Any, note: Any) -> list[str]:
         lines.append("  Penilaian council tidak tersedia untuk plan ini.")
         return lines
 
-    lines.append(f"  CONFIDENCE:       {note.confidence:.0%}")
     lines.append(f"  DISAGREEMENT:     {note.disagreement:.2f}")
+    lines += _kalibrasi(note)
+
+    # Bagian 18.17. Menggantikan baris CONFIDENCE dan DECISION SCORE yang
+    # dulu berdiri sendiri di sini - keduanya ada di dalam blok ini sekarang,
+    # bersama lima keyakinan lain yang sudah dihitung sejak lama dan tidak
+    # pernah sampai ke pembacanya.
+    lines += render_terpisah(
+        pisahkan(
+            mutu=getattr(note, "mutu", None),
+            confidence=note.confidence,
+            decision=skor,
+        )
+    )
     if note.high_disagreement:
         lines.append(
             "  Para agent membaca pasar yang sama dengan cara yang sangat "

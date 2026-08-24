@@ -211,14 +211,22 @@ class CouncilNote:
     #: seluruh simbol pada tick itu, karena pattern discovery dan drift tidak
     #: berubah antara BTCUSDT dan ETHUSDT.
     pembelajaran: Any = None
-    #: Signal quality PASAL 11.1 untuk rencana ini, 0-100, atau ``None``.
+    #: :class:`~aruna.signals.quality.QualityScore` PASAL 11.1 untuk rencana
+    #: ini, atau ``None``.
     #:
     #: Sepanjang 2026-08-20 ia dilaporkan hilang dari Phase 11, dan sempat
     #: disebut "tidak berlaku untuk futures" - kesimpulan yang salah.
     #: ``score_signal`` menerima konteks, opini agent, entry, stop, target dan
     #: horizon; jalur futures memegang kelimanya. Yang tidak ada bukan datanya,
     #: melainkan pemanggilnya.
-    quality: float | None = None
+    #:
+    #: **Yang disimpan adalah laporannya, bukan skornya.** Sampai 2026-08-24
+    #: bidang ini bertipe ``float``: ``score_signal`` menghitung dua puluh
+    #: faktor, dan pemanggilnya membuang sembilan belas di baris berikutnya.
+    #: Bagian 18.17 menuntut tujuh keyakinan disebut terpisah, dan lima di
+    #: antaranya adalah faktor yang dibuang di sana - jadi kepatuhannya mustahil
+    #: selama bidang ini hanya membawa satu angka.
+    mutu: Any = None
     #: Jatah risiko hari ini (PASAL 14.41), atau ``None`` kalau tidak terbaca.
     #:
     #: Menumpang jalur yang sama dengan penumpang lain di atas, dan seperti
@@ -234,6 +242,16 @@ class CouncilNote:
     #: Phase 14, dan :class:`~aruna.memory.context.KonteksHistoris` sengaja
     #: tidak punya satu pun bidang yang bisa dibaca sebagai arah.
     memory: Any = None
+
+    @property
+    def quality(self) -> float | None:
+        """Skor 0-100 dari :attr:`mutu`, atau ``None``.
+
+        Turunan, bukan bidang tersimpan - supaya "skor mutu" dan "laporan mutu"
+        tidak bisa berselisih. Yang membacanya: sidik jari ingatan (PASAL
+        15.32), jejak keputusan, dan gerbang kelengkapan masukan.
+        """
+        return None if self.mutu is None else getattr(self.mutu, "score", None)
 
     @property
     def debated(self) -> bool:
