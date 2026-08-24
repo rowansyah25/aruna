@@ -141,6 +141,18 @@ class DailyReport:
     #: dibedakan dari nol, yang berarti sudah dihitung dan tidak ada ingatan
     #: baru hari itu. Alasan yang sama persis dengan ``silence`` di atas.
     memory: Any = None
+    #: Pembalikan keputusan hari itu (bagian 18.52), sebagai
+    #: ``(pembalikan, yang_terkonfirmasi)``.
+    #:
+    #: **Dua angka, bukan satu.** Empat pembalikan yang seluruhnya
+    #: terkonfirmasi adalah pasar yang memang berbalik empat kali; empat yang
+    #: tak satu pun terkonfirmasi adalah ARUNA yang bergoyang. Satu angka
+    #: "pembalikan: 4" tidak membedakan keduanya.
+    #:
+    #: ``None`` berarti belum terhitung - dibedakan dari ``(0, 0)``, yang
+    #: berarti sudah dihitung dan memang tidak ada pembalikan. Alasan yang sama
+    #: persis dengan ``silence`` dan ``memory`` di atas.
+    pembalikan: tuple[int, int] | None = None
 
     @property
     def overall(self) -> Tally:
@@ -238,6 +250,30 @@ def _agent_lines(agents: tuple[AgentScore, ...]) -> list[str]:
     return lines
 
 
+def _pembalikan_lines(angka: tuple[int, int]) -> list[str]:
+    """Blok pembalikan keputusan (bagian 18.52).
+
+    **Dua angka yang selalu berdampingan**, karena satu di antaranya sendirian
+    menyesatkan: "4 pembalikan" tidak membedakan pasar yang memang berbalik
+    empat kali dari ARUNA yang bergoyang empat kali.
+    """
+    total, terkonfirmasi = angka
+    goyah = total - terkonfirmasi
+    return [
+        "🔄 DECISION REVERSAL",
+        RULE,
+        "",
+        "Total:",
+        f"{total}",
+        "",
+        "✅ Terkonfirmasi:",
+        f"{terkonfirmasi}",
+        "",
+        "⚠️ Tanpa konfirmasi:",
+        f"{goyah}",
+    ]
+
+
 def render_daily(report: DailyReport) -> str:
     """Susun pesan harian, persis seperti template."""
     lines = [
@@ -322,6 +358,13 @@ def render_daily(report: DailyReport) -> str:
     # mesin. ``None`` tidak dicetak sama sekali - lihat catatan di bidangnya.
     if report.memory is not None:
         lines += [RULE, *report.memory.report()]
+
+    # Bagian 18.52, dan alasannya sama dengan dua blok di atas: ini jawaban
+    # ARUNA atas "apakah aku konsisten", bukan keterangan mesin. ``None`` tidak
+    # dicetak sama sekali - "PEMBALIKAN: 0" yang lahir dari ketiadaan hitungan
+    # terbaca persis seperti ARUNA yang tidak pernah berubah pikiran.
+    if report.pembalikan is not None:
+        lines += [RULE, *_pembalikan_lines(report.pembalikan), ""]
 
     lines += [RULE, "⚙️ SYSTEM STATUS", RULE, ""]
     for component in report.components:

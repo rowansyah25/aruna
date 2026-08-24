@@ -50,6 +50,7 @@ from aruna.signals.repetition import (
     cooldown_overridden,
     is_duplicate,
 )
+from aruna.signals.stabilitas import perlu_konfirmasi
 from aruna.signals.withheld import PERLU_PERHATIAN, Withheld
 from aruna.signals.withheld import classify as classify_withheld
 from aruna.upkeep.candles import refresh_intervals
@@ -120,6 +121,24 @@ def maintained_intervals(market: Market) -> tuple[Horizon, ...]:
     way - and SPEC 22 forbids correcting that afterwards.
     """
     return refresh_intervals(market, STORED_INTERVALS)
+
+
+def _pct(sebelum: Any, sesudah: Any) -> float | None:
+    """Perubahan harga dalam persen, atau ``None`` kalau tak bisa dihitung.
+
+    ``None`` MENAHAN pembalikan, bukan meloloskannya - lihat
+    :func:`~aruna.signals.stabilitas.perlu_konfirmasi`. Sebuah pembalikan yang
+    tidak bisa dibuktikan terkonfirmasi tidak boleh lewat hanya karena
+    pengukurannya gagal.
+    """
+    try:
+        awal = Decimal(str(sebelum))
+        akhir = Decimal(str(sesudah))
+    except (TypeError, ValueError, ArithmeticError):
+        return None
+    if awal == 0:
+        return None
+    return float((akhir - awal) / awal * 100)
 
 
 def _nama_pita(skor: Any) -> str | None:
@@ -679,6 +698,28 @@ class SignalService:
         )
         if ulang.duplicate:
             return "duplikat prediksi terbuka: " + "; ".join(ulang.reasons)
+
+        # Bagian 18.25 - 18.27. Sebuah PEMBALIKAN bukan duplikat - LONG lalu
+        # SHORT punya arah yang berbeda, jadi ia lolos seluruh pemeriksaan di
+        # atas. Sampai baris ini ada, urutan yang bagian 18.25 larang bisa
+        # terjadi tanpa satu pun penjaga:
+        #
+        #     10:00 LONG  10:01 NO SIGNAL  10:02 LONG  10:03 SHORT  10:04 LONG
+        #
+        # Menahan pembalikannya, bukan membalik keputusannya: yang tertahan
+        # menjadi NO SIGNAL, tidak menjadi "tetap LONG". Yang kedua berarti
+        # memaksakan pandangan lama atas bukti yang sudah goyah, dan bagian
+        # 18.43 melarang gerbang mengubah arah.
+        if terbuka:
+            belum = perlu_konfirmasi(
+                _AsSignal(terbuka),
+                signal,
+                gerak_pct=_pct(
+                    terbuka.get("reference_price"), signal.reference_price
+                ),
+            )
+            if belum:
+                return "; ".join(belum)
         return None
 
     def _note_interval_unavailable(self, signal: LockedSignal, detail: Any) -> None:

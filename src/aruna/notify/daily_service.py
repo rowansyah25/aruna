@@ -29,6 +29,7 @@ from typing import Any
 from aruna.core.clock import JAKARTA
 from aruna.core.logging import get_logger
 from aruna.notify.daily import Component, DailyReport, render_daily
+from aruna.signals.stabilitas import hitung_pembalikan
 
 log = get_logger("aruna.notify.daily")
 
@@ -153,6 +154,11 @@ class DailyReportService:
             # benar oleh `render_daily`, testnya hijau, dan bloknya **tidak
             # pernah muncul** - karena tidak ada yang mengisinya.
             memory=await self._memory_harian(awal, akhir),
+            # Bagian 18.52. Tanpa baris ini `_pembalikan_lines` dirender dengan
+            # benar oleh `render_daily`, testnya hijau, dan bloknya TIDAK
+            # PERNAH MUNCUL - persis catatan `memory` di atas, yang ditulis
+            # sesudah cacat yang sama terjadi.
+            pembalikan=await self._pembalikan(awal, akhir),
             agents=await self.repo.agents(),
             council=await self.repo.council(start=awal, end=akhir),
             correction=await self.repo.correction(
@@ -165,6 +171,24 @@ class DailyReportService:
                 else "-"
             ),
         )
+
+    async def _pembalikan(self, awal: datetime, akhir: datetime):
+        """Pembalikan keputusan hari itu (bagian 18.52), atau ``None``.
+
+        ``None`` berarti belum terhitung - dibedakan dari ``(0, 0)``, yang
+        berarti sudah dihitung dan memang tidak ada pembalikan. Blok yang
+        mencetak "PEMBALIKAN: 0" dari ketiadaan hitungan terbaca persis seperti
+        ARUNA yang tidak pernah berubah pikiran.
+
+        Kegagalannya tidak menjatuhkan laporan: satu blok yang hilang jauh
+        lebih murah daripada laporan harian yang tidak terkirim sama sekali.
+        """
+        try:
+            baris = await self.repo.pembalikan(start=awal, end=akhir)
+        except Exception:
+            log.exception("daily.pembalikan_gagal")
+            return None
+        return hitung_pembalikan(baris)
 
     async def _memory_harian(self, awal: datetime, akhir: datetime):
         """Keadaan ingatan pasar hari itu (PASAL 15.43), atau ``None``.

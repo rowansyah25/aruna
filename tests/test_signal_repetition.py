@@ -270,9 +270,17 @@ class TestPenjagaDiJalurHidup:
         assert "duplikat" in alasan
 
     async def test_setup_berbeda_lolos(self) -> None:
+        """Setup yang berbeda, arah yang sama.
+
+        Versi pertama test ini memakai SELL sebagai contoh "setup berbeda", dan
+        itu bukan setup berbeda - itu PEMBALIKAN, yang sejak bagian 18.25 punya
+        penjaganya sendiri. Yang hendak dibuktikan di sini adalah penjaga
+        DUPLIKAT meloloskan keadaan yang sudah berubah, jadi contohnya tidak
+        boleh sekaligus memicu penjaga yang lain.
+        """
         store = _Store(open_row={
-            "direction": "SELL", "reference_price": 100.0,
-            "target_price": 90.0, "regime": "SIDEWAYS",
+            "direction": "BUY", "reference_price": 90.0,
+            "target_price": 99.0, "regime": "SIDEWAYS",
         })
         assert await self._alasan(store) is None
 

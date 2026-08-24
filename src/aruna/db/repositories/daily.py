@@ -20,9 +20,11 @@ daripada stop.
 from __future__ import annotations
 
 from datetime import datetime
+from decimal import Decimal
+from types import SimpleNamespace
 from typing import Any
 
-from aruna.db.types import to_mysql_datetime
+from aruna.db.types import as_utc, to_mysql_datetime
 from aruna.notify.daily import (
     AgentScore,
     CouncilScore,
@@ -30,6 +32,7 @@ from aruna.notify.daily import (
     SelfCorrection,
     Tally,
 )
+from aruna.signals.stabilitas import Peralihan, perlu_konfirmasi
 
 #: Bagaimana satu hasil futures dibaca sebagai menang atau kalah (PASAL 4).
 #:
@@ -45,6 +48,30 @@ FUTURES_ACTIVE = ("OPEN",)
 def _int(value: Any) -> int:
     """``COUNT`` selalu angka; ``SUM`` bisa ``NULL`` kalau tidak ada baris."""
     return 0 if value is None else int(value)
+
+
+def _gerak(sebelum: Any, sesudah: Any) -> float | None:
+    """Perubahan harga antara dua keputusan, dalam persen."""
+    try:
+        awal, akhir = Decimal(str(sebelum)), Decimal(str(sesudah))
+    except (TypeError, ValueError, ArithmeticError):
+        return None
+    return None if awal == 0 else float((akhir - awal) / awal * 100)
+
+
+def _belum_terkonfirmasi(row: Any) -> tuple[str, ...]:
+    """Alasan pembalikan ini belum terkonfirmasi, lewat aturan yang sama.
+
+    **Dipinjam dari** :func:`~aruna.signals.stabilitas.perlu_konfirmasi`, bukan
+    ditulis ulang: laporan yang memakai definisi "terkonfirmasi" yang berbeda
+    dari penjaganya akan menghitung pembalikan yang justru lolos penjaga
+    sebagai tidak terkonfirmasi, dan sebaliknya.
+    """
+    lama = SimpleNamespace(direction=str(row["arah_lama"]))
+    baru = SimpleNamespace(direction=str(row["direction"]))
+    return perlu_konfirmasi(
+        lama, baru, gerak_pct=_gerak(row["harga_lama"], row["reference_price"])
+    )
 
 
 class DailyRepository:
@@ -158,6 +185,59 @@ class DailyRepository:
             # ditiru ulang di sini.
             for record in laporan.measured
         )
+
+    async def pembalikan(
+        self, *, start: datetime, end: datetime
+    ) -> list[Peralihan]:
+        """Pembalikan arah keputusan pada hari itu (bagian 18.52).
+
+        Dua sinyal berurutan untuk aset dan horizon yang sama, keduanya
+        berarah, dan arahnya berlawanan. ``LAG`` menyusunnya di SQL alih-alih
+        di Python karena yang dibandingkan tetangga berurutan - dan mengambil
+        seluruh baris hari itu untuk memasangkannya di sini akan membaca jauh
+        lebih banyak daripada yang dipakai.
+
+        Sinyal tak berarah dilewati: berhenti berpendapat bukan pembalikan.
+
+        **Yang dipulangkan seluruh pembalikan, terkonfirmasi maupun tidak.**
+        Yang memisahkannya :func:`~aruna.signals.stabilitas.hitung_pembalikan`,
+        dan pemisahan itu justru isi laporannya - menyaring di sini akan
+        membuang separuh pertanyaannya.
+        """
+        rows = await self._db.fetch(
+            """
+            SELECT symbol, horizon_code, arah_lama, direction, locked_at,
+                   harga_lama, reference_price
+            FROM (
+                SELECT s.symbol, s.horizon_code, s.direction, s.locked_at,
+                       s.reference_price,
+                       LAG(s.direction)       OVER w AS arah_lama,
+                       LAG(s.reference_price) OVER w AS harga_lama
+                FROM signal_snapshots s
+                WHERE s.locked_at >= %s AND s.locked_at < %s
+                  AND s.direction IN ('BUY', 'SELL')
+                WINDOW w AS (
+                    PARTITION BY s.symbol, s.horizon_code ORDER BY s.locked_at
+                )
+            ) t
+            WHERE arah_lama IS NOT NULL AND arah_lama <> direction
+            ORDER BY locked_at
+            """,
+            to_mysql_datetime(start),
+            to_mysql_datetime(end),
+        )
+        return [
+            Peralihan(
+                symbol=str(r["symbol"]),
+                horizon=str(r["horizon_code"]),
+                sebelum=str(r["arah_lama"]),
+                sesudah=str(r["direction"]),
+                pada=as_utc(r["locked_at"]),
+                gerak_pct=_gerak(r["harga_lama"], r["reference_price"]),
+                alasan=_belum_terkonfirmasi(r),
+            )
+            for r in rows
+        ]
 
     async def council(self, *, start: datetime, end: datetime) -> CouncilScore:
         row = await self._db.fetchrow(
