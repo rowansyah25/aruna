@@ -1112,7 +1112,22 @@ class ArunaApplication:
         try:
             await self.bot.start()
         except TelegramError as exc:
-            self._note_telegram_failure(exc)
+            # `await`, dan kata itu sempat hilang di sini sementara cabang
+            # `ArunaError` di bawah memilikinya. Ditemukan 2026-08-24 dari
+            # layar operator: pemeriksaan health mencetak "a bot token is
+            # configured but the bot did not start - see the telegram
+            # START_FAILED event for the reason", dan event itu TIDAK ADA.
+            #
+            # Coroutine yang tidak ditunggu tidak pernah dijadwalkan, jadi
+            # tidak ada log `telegram.start_failed` dan tidak ada baris
+            # `system_events`. Python cuma menggumamkan RuntimeWarning yang
+            # tenggelam di antara ribuan baris. Dan `TelegramError` justru yang
+            # dilempar `bot.start()` untuk kegagalan paling umum - termasuk
+            # `Conflict` ketika dua instance memakai satu token.
+            #
+            # Yang hilang karena itu bukan sembarang catatan, melainkan
+            # catatan kegagalan yang pesan health-nya sendiri suruh cari.
+            await self._note_telegram_failure(exc)
             if not exc.permanent and self._background:
                 # Jaringan yang tersumbat pulih; ARUNA harus menyusul sendiri.
                 self._telegram_retry = asyncio.create_task(
