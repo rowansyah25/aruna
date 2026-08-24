@@ -29,10 +29,20 @@ from aruna.notify.daily import (
     AgentScore,
     CouncilScore,
     MarketBlock,
+    MutuHarian,
     SelfCorrection,
     Tally,
 )
 from aruna.signals.stabilitas import Peralihan, perlu_konfirmasi
+from aruna.signals.withheld import WithheldCode
+
+#: Kode yang berarti "ditahan gerbang mutu" (bagian 18.47).
+#:
+#: Dipinjam dari :class:`~aruna.signals.withheld.WithheldCode`, bukan ditulis
+#: sebagai string: kode yang berganti ejaan akan membuat hitungan gerbang
+#: menjadi nol tanpa satu pun error - laporan yang berbunyi "gerbang mutu tidak
+#: pernah gagal" persis pada hari ia paling sering gagal.
+KODE_GERBANG_MUTU = WithheldCode.QUALITY_GATE.value
 
 #: Bagaimana satu hasil futures dibaca sebagai menang atau kalah (PASAL 4).
 #:
@@ -48,6 +58,16 @@ FUTURES_ACTIVE = ("OPEN",)
 def _int(value: Any) -> int:
     """``COUNT`` selalu angka; ``SUM`` bisa ``NULL`` kalau tidak ada baris."""
     return 0 if value is None else int(value)
+
+
+def _float(value: Any) -> float | None:
+    """``AVG`` atas nol baris adalah ``NULL``, dan itu **bukan** nol.
+
+    Hari tanpa satu pun keputusan bukan hari bermutu nol; baris yang mencetak
+    "Rata-rata Decision Quality: 0/100" untuknya adalah tuduhan terhadap sistem
+    yang kebetulan tidak ditanya apa-apa.
+    """
+    return None if value is None else float(value)
 
 
 def _gerak(sebelum: Any, sesudah: Any) -> float | None:
@@ -179,12 +199,75 @@ class DailyRepository:
             await LearningRepository(self._db).agent_outcomes()
         )
         return tuple(
-            AgentScore(name=record.role.value, win_rate=(record.accuracy or 0.0) * 100)
+            AgentScore(
+                name=record.role.value,
+                win_rate=(record.accuracy or 0.0) * 100,
+                # Bagian 18.48: *"Namun selalu tampilkan sample size."*
+                # Penyebutnya sudah dihitung mesin keandalan dan dulu dibuang
+                # di baris ini - papan peringkat tanpa penyebut mengurutkan
+                # 95%-dari-empat di atas 82%-dari-1.500 tanpa satu pun tanda
+                # bahwa yang pertama bukan pengukuran (bagian 18.38).
+                sample=record.scored,
+            )
             # `measured` sudah menyaring yang sampelnya kurang; disiplin
             # INSUFFICIENT_SAMPLE tetap dipegang mesin keandalan, bukan
             # ditiru ulang di sini.
             for record in laporan.measured
         )
+
+    async def mutu(self, *, start: datetime, end: datetime) -> MutuHarian:
+        """Statistik Phase 18 satu hari (bagian 18.47).
+
+        Dibaca dari baris yang **sudah tersimpan** - ``signal_snapshots``
+        menyimpan ``signal_quality`` dan ``quality_coverage`` di tiap keputusan
+        sejak lama, dan ``signals.withheld_code`` mencatat yang ditahan gerbang
+        mutu. Tidak ada satu pun angka di sini yang dihitung ulang: menilai
+        ulang mutu hari kemarin dengan penilai hari ini akan melaporkan angka
+        yang tidak pernah dilihat siapa pun (bagian 18.35).
+
+        **Gerbangnya dihitung dari kodenya, bukan dari terbit atau tidak.**
+        Sebuah keputusan bisa tidak terbit karena duplikat, cooldown, atau
+        tidak berarah - tidak satu pun berarti mutunya gagal, dan memasukkannya
+        ke ``gagal`` akan melaporkan gerbang mutu yang jauh lebih galak
+        daripada yang sebenarnya.
+        """
+        baris = await self._db.fetchrow(
+            "SELECT avg(signal_quality) mutu, avg(confidence) yakin, "
+            "       avg(quality_coverage) cakupan "
+            "FROM signal_snapshots WHERE locked_at >= %s AND locked_at < %s",
+            to_mysql_datetime(start),
+            to_mysql_datetime(end),
+        ) or {}
+        gerbang = await self._db.fetchrow(
+            "SELECT count(*) diperiksa, "
+            "       sum(withheld_code = %s) gagal "
+            "FROM signals WHERE locked_at >= %s AND locked_at < %s",
+            KODE_GERBANG_MUTU,
+            to_mysql_datetime(start),
+            to_mysql_datetime(end),
+        ) or {}
+        diperiksa = _int(gerbang.get("diperiksa"))
+        gagal = _int(gerbang.get("gagal"))
+        return MutuHarian(
+            rata_mutu=_float(baris.get("mutu")),
+            rata_keyakinan=_float(baris.get("yakin")),
+            rata_cakupan=_float(baris.get("cakupan")),
+            lolos=max(0, diperiksa - gagal),
+            gagal=gagal,
+            kalibrasi=await self._kalibrasi(),
+        )
+
+    async def _kalibrasi(self) -> str:
+        """Vonis kalibrasi terakhir (bagian 18.51), atau kalimat kosong.
+
+        Kalimat kosong berarti belum pernah diukur, dan barisnya hilang - bukan
+        dicetak "GOOD". Sistem yang belum pernah memeriksa kejujurannya sendiri
+        bukan sistem yang terkalibrasi baik.
+        """
+        from aruna.db.repositories.learning import LearningRepository
+
+        baris = await LearningRepository(self._db).latest_calibration()
+        return str((baris or {}).get("verdict") or "")
 
     async def pembalikan(
         self, *, start: datetime, end: datetime

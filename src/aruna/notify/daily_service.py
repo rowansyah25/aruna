@@ -159,6 +159,9 @@ class DailyReportService:
             # PERNAH MUNCUL - persis catatan `memory` di atas, yang ditulis
             # sesudah cacat yang sama terjadi.
             pembalikan=await self._pembalikan(awal, akhir),
+            # Bagian 18.47, dan catatan yang sama untuk ketiga kalinya di
+            # fungsi ini - karena cacatnya sudah terjadi dua kali.
+            mutu=await self._mutu(awal, akhir),
             agents=await self.repo.agents(),
             council=await self.repo.council(start=awal, end=akhir),
             correction=await self.repo.correction(
@@ -189,6 +192,21 @@ class DailyReportService:
             log.exception("daily.pembalikan_gagal")
             return None
         return hitung_pembalikan(baris)
+
+    async def _mutu(self, awal: datetime, akhir: datetime):
+        """Statistik Phase 18 hari itu (bagian 18.47), atau ``None``.
+
+        Alasan ``None`` dan alasan menangkap kegagalannya sama persis dengan
+        :meth:`_pembalikan` di atas: satu blok yang hilang jauh lebih murah
+        daripada laporan harian yang tidak terkirim sama sekali, dan
+        "Decision Quality 0/100" yang lahir dari kueri gagal adalah tuduhan
+        terhadap seluruh hari.
+        """
+        try:
+            return await self.repo.mutu(start=awal, end=akhir)
+        except Exception:
+            log.exception("daily.mutu_gagal")
+            return None
 
     async def _memory_harian(self, awal: datetime, akhir: datetime):
         """Keadaan ingatan pasar hari itu (PASAL 15.43), atau ``None``.

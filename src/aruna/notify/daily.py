@@ -91,6 +91,17 @@ class MarketBlock:
 class AgentScore:
     name: str
     win_rate: float
+    #: Berapa opini terskor di belakang angka itu (bagian 18.48).
+    #:
+    #: *"Namun selalu tampilkan sample size."* Bagian 18.48 mengejanya sebagai
+    #: kewajiban, dan bagian 18.38 menjelaskan kenapa: 95% dari empat kasus dan
+    #: 82% dari 1.500 mencetak baris yang mirip dan berarti hal yang sangat
+    #: berbeda. Papan peringkat yang mengurutkan keduanya berdampingan tanpa
+    #: penyebutnya mengundang pembacanya percaya yang pertama.
+    #:
+    #: Nol berarti tidak sampai ke sini - dan barisnya berhenti menyebut ``n``
+    #: daripada mencetak ``n=0`` di sebelah persen yang jelas-jelas terhitung.
+    sample: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +164,9 @@ class DailyReport:
     #: berarti sudah dihitung dan memang tidak ada pembalikan. Alasan yang sama
     #: persis dengan ``silence`` dan ``memory`` di atas.
     pembalikan: tuple[int, int] | None = None
+    #: Statistik Phase 18 hari itu (bagian 18.47). ``None`` berarti belum
+    #: terhitung - alasan yang sama dengan ``silence`` dan ``memory`` di atas.
+    mutu: MutuHarian | None = None
 
     @property
     def overall(self) -> Tally:
@@ -239,14 +253,95 @@ def _agent_lines(agents: tuple[AgentScore, ...]) -> list[str]:
 
     ranked = sorted(agents, key=lambda a: a.win_rate, reverse=True)
     for medal, agent in zip(_MEDALS, ranked, strict=False):
-        lines += [f"{medal} {agent.name}:", f"{agent.win_rate:.2f}% Win Rate", ""]
+        lines += [
+            f"{medal} {agent.name}:",
+            f"{agent.win_rate:.2f}% Win Rate{_sampel(agent)}",
+            "",
+        ]
 
     # Yang terbawah disebut hanya kalau ia bukan salah satu yang barusan
     # dipuji. Dengan dua agent, "terbaik" dan "terburuk" adalah orang yang
     # sama disebut dua kali, dan itu bukan informasi.
     if len(ranked) > len(_MEDALS):
         lowest = ranked[-1]
-        lines += ["⚠️ Lowest:", f"{lowest.name} — {lowest.win_rate:.2f}%", ""]
+        lines += [
+            "⚠️ Lowest:",
+            f"{lowest.name} — {lowest.win_rate:.2f}%{_sampel(lowest)}",
+            "",
+        ]
+    return lines
+
+
+def _sampel(agent: AgentScore) -> str:
+    """``n=312`` di sebelah persennya (bagian 18.48), atau tidak sama sekali."""
+    return f" (n={agent.sample})" if agent.sample else ""
+
+
+@dataclass(frozen=True, slots=True)
+class MutuHarian:
+    """Statistik Phase 18 satu hari (bagian 18.47, 18.51).
+
+    Setiap bidang ``None`` berarti **belum terhitung**, dan itu berbeda dari
+    nol - alasan yang sama persis dengan ``silence`` dan ``memory`` di
+    :class:`DailyReport`.
+
+    Kalibrasi dibawa sebagai kalimat penuh, bukan satu kata. Bagian 18.47
+    mencontohkan ``Calibration: GOOD``, dan satu kata itu membuang bagian yang
+    bisa ditindaklanjuti: terukur 2026-08-24, vonisnya berbunyi "OVERCONFIDENT
+    in 50-65%, 65-80%, 80-96%" - tiga pita yang spesifik.
+    """
+
+    rata_mutu: float | None = None
+    rata_keyakinan: float | None = None
+    rata_cakupan: float | None = None
+    lolos: int = 0
+    gagal: int = 0
+    kalibrasi: str = ""
+
+    @property
+    def diperiksa(self) -> int:
+        return self.lolos + self.gagal
+
+    @property
+    def ada(self) -> bool:
+        return bool(
+            self.rata_mutu is not None
+            or self.rata_keyakinan is not None
+            or self.diperiksa
+            or self.kalibrasi
+        )
+
+
+def _mutu_lines(mutu: MutuHarian) -> list[str]:
+    """Blok DECISION QUALITY (bagian 18.47).
+
+    **Cakupan dicetak bersama skornya, dan itu bukan hiasan.** Mutu 84 dari
+    tiga faktor terukur dan mutu 84 dari lima belas adalah dua pernyataan yang
+    sangat berbeda, dan tanpa cakupan keduanya mencetak baris yang sama persis.
+
+    Gerbang dilaporkan sebagai pecahan, bukan persen: 2/12 dan 17%
+    membawa angka yang sama, tapi yang pertama menyebut penyebutnya sendiri -
+    dan pembaca yang melihat "17% gagal" tanpa tahu itu dari dua belas
+    keputusan akan menganggapnya tren.
+    """
+    lines = ["🧠 DECISION QUALITY", RULE, ""]
+    if mutu.rata_mutu is not None:
+        lines += ["Rata-rata Decision Quality:", f"{mutu.rata_mutu:.0f}/100", ""]
+    if mutu.rata_cakupan is not None:
+        lines += ["Cakupan faktor:", f"{mutu.rata_cakupan * 100:.0f}%", ""]
+    if mutu.rata_keyakinan is not None:
+        lines += ["Rata-rata Confidence:", f"{mutu.rata_keyakinan * 100:.0f}%", ""]
+    if mutu.diperiksa:
+        lines += [
+            "✅ Quality Gate lolos:",
+            f"{mutu.lolos}/{mutu.diperiksa}",
+            "",
+            "❌ Quality Gate gagal:",
+            f"{mutu.gagal}/{mutu.diperiksa}",
+            "",
+        ]
+    if mutu.kalibrasi:
+        lines += ["Kalibrasi:", mutu.kalibrasi, ""]
     return lines
 
 
@@ -365,6 +460,12 @@ def render_daily(report: DailyReport) -> str:
     # terbaca persis seperti ARUNA yang tidak pernah berubah pikiran.
     if report.pembalikan is not None:
         lines += [RULE, *_pembalikan_lines(report.pembalikan), ""]
+
+    # Bagian 18.47, alasan yang sama sekali lagi: ``None`` berarti belum
+    # terhitung, dan "Decision Quality: 0/100" yang lahir dari ketiadaan
+    # hitungan adalah tuduhan terhadap seluruh hari.
+    if report.mutu is not None and report.mutu.ada:
+        lines += [RULE, *_mutu_lines(report.mutu)]
 
     lines += [RULE, "⚙️ SYSTEM STATUS", RULE, ""]
     for component in report.components:
