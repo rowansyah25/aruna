@@ -29,6 +29,7 @@ __all__ = [
     "AlasanKosong",
     "PutusanRouter",
     "VonisTingkat",
+    "konsensus",
     "lolos_gerbang",
     "pilih",
 ]
@@ -149,6 +150,52 @@ class PutusanRouter:
     #: sesudah rezimnya berganti (bagian 17.27).
     regime: str | None = None
     alasan: tuple[str, ...] = field(default_factory=tuple)
+    #: Seberapa bulat pilihannya, 0-100 (bagian 17.31 - 17.32).
+    #:
+    #: Dicatat, **tidak menggerbangi**. Dua strategi yang sama-sama cocok bukan
+    #: bukti yang lemah - ia dua jawaban yang sama baiknya, dan menahan pilihan
+    #: karenanya berarti menghukum katalog yang lengkap. Yang dituntut bagian
+    #: 17.32 adalah konfliknya TERLIHAT, dan kolomnya di `router_pilihan` yang
+    #: membuatnya bisa ditanyakan: apakah pilihan yang terbelah berakhir lebih
+    #: buruk? Itu pertanyaan yang hanya bisa dijawab data, bukan kebijakan yang
+    #: ditebak sekarang.
+    konsensus: float = 0.0
+    #: Berapa kandidat yang lolos ambang layak. Konsensus 100 dari satu
+    #: kandidat dan dari lima kandidat berarti hal yang sangat berbeda.
+    kandidat_layak: int = 0
+
+
+def konsensus(layak: tuple[Kecocokan, ...]) -> float:
+    """Seberapa bulat pilihannya, 0-100 (bagian 17.31 - 17.32).
+
+    Bagian dari seluruh skor yang layak yang dipegang pemenangnya. Dua kandidat
+    berskor sama memberi 50 - koin yang dilempar. Satu kandidat sendirian
+    memberi 100: tidak ada yang membantahnya.
+
+    **Bentuknya dipinjam dari** :func:`~aruna.council.protest.measure_disagreement`
+    - "seberapa terbagi pendapat yang percaya diri, ditimbang keyakinannya" -
+    karena pertanyaannya memang sama, hanya obyeknya yang berbeda: di sana
+    agent tentang arah, di sini kandidat tentang kecocokan.
+
+    **Yang TIDAK bisa dipinjam adalah mesin protesnya**, dan sebabnya bukan
+    kemalasan. :func:`~aruna.council.protest.run_protest` bekerja atas
+    ``OpinionPool`` berisi ``AgentOpinion`` - tiap agent memegang ``decision``
+    BUY/SELL/WAIT beserta keyakinannya, lalu saling menuduh dan menjawab.
+    **Agent ARUNA tidak punya pendapat tentang strategi sama sekali.** Membuat
+    STR-004 "menuduh" STR-001 lalu STR-001 "menjawab" berarti mengarang
+    percakapan antara dua baris katalog; yang dihasilkan bukan bukti melainkan
+    teater yang berbentuk bukti. Lihat catatan modul.
+
+    **Satu kandidat memberi 100, dan itu memang benar** walau bukti tipis:
+    yang diukur di sini KEBULATAN, bukan kekuatan. Tipisnya sudah terbaca di
+    tempat lain - skornya sendiri, sampelnya, dan keyakinan rezimnya.
+    Meleburkan keduanya menjadi satu angka menghasilkan nilai yang tidak
+    menjawab satu pun dari kedua pertanyaan.
+    """
+    total = sum(k.skor for k in layak)
+    if not layak or total <= 0:
+        return 0.0
+    return round(100.0 * max(k.skor for k in layak) / total, 1)
 
 
 def _kosong(
@@ -215,6 +262,7 @@ def pilih(
     juara = next((k for k in layak if k.boleh_memimpin), None)
     penantang = next((k for k in layak if k is not juara), None)
 
+    sepakat = konsensus(tuple(layak))
     if juara is None:
         # Ada yang cocok, tapi seluruhnya sedang ditimbang. Sebab yang BERBEDA
         # dari "katalognya berlubang", dan tindakannya pun berbeda: menunggu
@@ -229,6 +277,8 @@ def pilih(
             kode_kosong=AlasanKosong.HANYA_PENANTANG,
             regime=peta.primary,
             alasan=layak[0].alasan,
+            konsensus=sepakat,
+            kandidat_layak=len(layak),
         )
 
     return PutusanRouter(
@@ -237,8 +287,18 @@ def pilih(
         alasan_kosong="",
         kode_kosong=None,
         regime=peta.primary,
-        alasan=juara.alasan,
+        alasan=(*juara.alasan, _kalimat_konsensus(sepakat, layak)),
+        konsensus=sepakat,
+        kandidat_layak=len(layak),
     )
+
+
+def _kalimat_konsensus(sepakat: float, layak: list[Kecocokan]) -> str:
+    """Bagian 17.32 menuntut konfliknya TERLIHAT, bukan cuma terhitung."""
+    if len(layak) < 2:
+        return f"tidak ada kandidat lain yang lolos ambang (konsensus {sepakat:.0f}%)"
+    lawan = ", ".join(f"{k.kode} {k.skor}" for k in layak[1:3])
+    return f"konsensus {sepakat:.0f}% atas {len(layak)} kandidat (lawan: {lawan})"
 
 
 #: Ditulis ke ``alasan`` ketika gerbang risiko tidak pernah berjalan.

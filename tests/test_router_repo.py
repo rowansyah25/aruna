@@ -95,6 +95,23 @@ async def _simpan(
     )
 
 
+def _kolom(db: _DbPalsu, nama: str) -> Any:
+    """Nilai yang dikirim untuk satu kolom, dicari MENURUT NAMANYA.
+
+    **Koreksi 2026-08-24.** Versi pertama test stabilitas berbunyi
+    ``assert 0.0 not in args`` - melarang nol di mana pun dalam argumen. Itu
+    lolos selama tidak ada kolom lain yang sah bernilai nol, lalu MERAH begitu
+    `konsensus` lahir dengan bawaan 0,0.
+
+    Assertion yang menjaring seluruh tuple bukan cuma rapuh; ia juga tidak
+    menyebutkan kolom mana yang sedang diuji, jadi kegagalannya tidak
+    memberitahu apa pun.
+    """
+    sql, args = db.sql[0]
+    kolom = [k.strip() for k in sql[sql.index("(") + 1 : sql.index(")")].split(",")]
+    return args[kolom.index(nama)]
+
+
 def _snap(
     interval: str, regime: str, *, umur: timedelta = timedelta(), simbol: str = "BTC/USDT"
 ) -> dict[str, Any]:
@@ -343,9 +360,18 @@ class TestYangIkutTersimpan:
         db = _DbPalsu()
         await _simpan(db, _terisi(), peta=_peta(hilang=("1h", "1d")))
 
-        _, args = db.sql[0]
+        assert _kolom(db, "interval_hilang") == "1h,1d"
 
-        assert any(a == "1h,1d" for a in args)
+    @pytest.mark.asyncio
+    async def test_konsensus_dan_jumlah_kandidat_ikut(self) -> None:
+        """Bagian 17.31 - 17.32. Kolom, bukan kalimat di `alasan`, justru
+        supaya "apakah pilihan yang terbelah berakhir lebih buruk" bisa
+        ditanyakan kepada data alih-alih ditebak."""
+        db = _DbPalsu()
+        await _simpan(db, _terisi())
+
+        assert _kolom(db, "konsensus") is not None
+        assert _kolom(db, "kandidat_layak") is not None
 
     @pytest.mark.asyncio
     async def test_stabilitas_belum_terukur_disimpan_null(self) -> None:
@@ -355,10 +381,7 @@ class TestYangIkutTersimpan:
         db = _DbPalsu()
         await _simpan(db, _terisi(), stabil=None)
 
-        _, args = db.sql[0]
-
-        assert 0.0 not in args
-        assert None in args
+        assert _kolom(db, "regime_stability") is None
 
     @pytest.mark.asyncio
     async def test_jumlah_kolom_sama_dengan_jumlah_nilai(self) -> None:

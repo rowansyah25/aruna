@@ -31,6 +31,7 @@ from aruna.router.putusan import (
     AMBANG_LAYAK,
     AlasanKosong,
     PutusanRouter,
+    lolos_gerbang,
     pilih,
 )
 from aruna.router.rezim import PetaRezim
@@ -318,6 +319,107 @@ class TestStatusMenyaringDiHulu:
 
         assert layak.champion == ()
         assert layak.challenger == ()
+
+
+class TestKonsensusDanKonflik:
+    """Bagian 17.31 - 17.32, dan batas yang jujur atas 17.33 - 17.35."""
+
+    def test_dua_kandidat_seimbang_adalah_koin_yang_dilempar(self) -> None:
+        hasil = pilih((_k("STR-001", 70), _k("STR-004", 70)), peta=_peta())
+
+        assert hasil.konsensus == 50.0
+        assert hasil.kandidat_layak == 2
+
+    def test_satu_kandidat_sendirian_tidak_dibantah(self) -> None:
+        """**Seratus, dan itu memang benar** walau buktinya tipis: yang diukur
+        KEBULATAN, bukan kekuatan. Tipisnya sudah terbaca di skornya sendiri,
+        sampelnya, dan keyakinan rezimnya - meleburkannya jadi satu angka
+        menghasilkan nilai yang tidak menjawab satu pun dari keduanya."""
+        hasil = pilih((_k("STR-001", 61),), peta=_peta())
+
+        assert hasil.konsensus == 100.0
+        assert hasil.kandidat_layak == 1
+
+    def test_pilihan_telak_lebih_bulat_daripada_yang_terbelah(self) -> None:
+        telak = pilih((_k("STR-001", 95), _k("STR-004", 61)), peta=_peta())
+        terbelah = pilih((_k("STR-001", 70), _k("STR-004", 69)), peta=_peta())
+
+        assert telak.konsensus > terbelah.konsensus
+
+    def test_kandidat_di_bawah_ambang_tidak_ikut_menghitung(self) -> None:
+        """Yang tidak layak bukan lawan. Menghitungnya membuat konsensus turun
+        karena kandidat yang tidak pernah punya peluang."""
+        tanpa = pilih((_k("STR-001", 80),), peta=_peta())
+        dengan = pilih((_k("STR-001", 80), _k("STR-004", 20)), peta=_peta())
+
+        assert tanpa.konsensus == dengan.konsensus == 100.0
+
+    def test_konfliknya_disebut_bukan_cuma_dihitung(self) -> None:
+        """Bagian 17.32 menuntut konfliknya TERLIHAT. Angka di kolom yang tidak
+        pernah dibaca siapa pun bukan "terlihat"."""
+        hasil = pilih((_k("STR-001", 70), _k("STR-004", 69)), peta=_peta())
+
+        assert any("konsensus" in a for a in hasil.alasan)
+        assert any("STR-004" in a for a in hasil.alasan)
+
+    def test_konsensus_tidak_menggerbangi(self) -> None:
+        """**Dicatat, tidak menahan.** Dua strategi yang sama-sama cocok bukan
+        bukti yang lemah - ia dua jawaban yang sama baiknya, dan menahan
+        pilihan karenanya berarti menghukum katalog yang lengkap.
+
+        Apakah pilihan terbelah berakhir lebih buruk adalah pertanyaan yang
+        hanya boleh dijawab data - dan kolomnya di `router_pilihan` yang
+        membuatnya bisa ditanyakan.
+        """
+        terbelah = pilih((_k("STR-001", 70), _k("STR-004", 70)), peta=_peta())
+
+        assert terbelah.champion is not None
+
+    def test_bentuknya_dipinjam_dari_council(self) -> None:
+        """Pertanyaannya sama - "seberapa terbagi pendapat yang percaya diri" -
+        hanya obyeknya berbeda: di sana agent tentang arah, di sini kandidat
+        tentang kecocokan. Yang TIDAK bisa dipinjam mesin protesnya, dan test
+        berikutnya yang menjelaskan kenapa."""
+        from aruna.council.protest import measure_disagreement
+
+        assert callable(measure_disagreement)
+
+    def test_agent_tidak_punya_pendapat_tentang_strategi(self) -> None:
+        """**Ini alasan bagian 17.33 - 17.34 tidak dibangun, dan bukan karena
+        malas.**
+
+        `run_protest` bekerja atas `OpinionPool` berisi `AgentOpinion` - tiap
+        agent memegang `decision` BUY/SELL/WAIT beserta keyakinannya, lalu
+        saling menuduh dan menjawab. Tidak ada satu pun bidang tentang
+        strategi.
+
+        Membuat STR-004 "menuduh" STR-001 lalu STR-001 "menjawab" berarti
+        mengarang percakapan antara dua baris katalog. Yang dihasilkan bukan
+        bukti melainkan teater yang berbentuk bukti - dan teater semacam itu
+        justru paling berbahaya karena ia terlihat seperti alasan.
+
+        Test ini gagal kalau agent SUATU HARI punya pendapat tentang strategi;
+        saat itu bagian 17.33 - 17.34 menjadi bisa dibangun dengan jujur.
+        """
+        import dataclasses
+
+        from aruna.agents.analyst import AgentOpinion
+
+        bidang = {f.name for f in dataclasses.fields(AgentOpinion)}
+
+        assert not any("strateg" in b.lower() for b in bidang), (
+            f"agent kini punya bidang strategi ({bidang}) - bagian 17.33-17.34 "
+            "bisa dibangun tanpa mengarang"
+        )
+
+    def test_veto_sudah_ada_dua_kali_tidak_perlu_ketiga(self) -> None:
+        """Bagian 17.35. `lolos_gerbang` menahan rencana berisiko ekstrem
+        TERBIT; `kandidat_layak` menahan strategi yang sedang ditimbang
+        MEMIMPIN. Veto ketiga berarti tiga aturan yang harus tetap sepakat."""
+        from aruna.router.peringkat import kandidat_layak
+
+        assert callable(lolos_gerbang)
+        assert callable(kandidat_layak)
 
 
 class TestBentuknya:

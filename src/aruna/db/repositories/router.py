@@ -514,10 +514,11 @@ class RouterRepository:
             "INSERT IGNORE INTO router_pilihan "
             "(asset_id, market_code, symbol, dipilih_pada, regime_primary, "
             " regime_confidence, regime_stability, interval_hilang, champion, "
-            " champion_skor, challenger, challenger_skor, alasan_kosong, "
-            " kode_kosong, alasan, versi_router) "
+            " champion_skor, challenger, challenger_skor, konsensus, "
+            " kandidat_layak, alasan_kosong, kode_kosong, alasan, "
+            " versi_router) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, "
-            "%s, %s)",
+            "%s, %s, %s, %s)",
             asset_id,
             market.value,
             symbol,
@@ -530,6 +531,8 @@ class RouterRepository:
             None if champion is None else champion.skor,
             None if challenger is None else challenger.kode,
             None if challenger is None else challenger.skor,
+            round(putusan.konsensus, 3),
+            putusan.kandidat_layak,
             _potong(putusan.alasan_kosong, LEBAR_ALASAN_KOSONG) or None,
             None if putusan.kode_kosong is None else str(putusan.kode_kosong),
             json.dumps(list(putusan.alasan), ensure_ascii=False)
