@@ -227,30 +227,84 @@ class TestPembacanyaAdaDiSnapshot:
 
         dipanggil: list[str] = []
 
-        class _Repo:
+        class _Kalibrasi:
             async def latest_calibration(self) -> dict[str, str]:
                 dipanggil.append("kalibrasi")
                 return {"verdict": "CALIBRATED within 10 points"}
 
+        class _Adaptive:
             async def notable_patterns(self, **kw: object) -> list[dict]:
                 return []
 
             async def agent_votes(self) -> list[dict]:
                 return []
 
-        hasil = await PembacaPembelajaran(learning12=_Repo()).baca(
-            market=Market.CRYPTO, interval=Horizon.M15
-        )
+        hasil = await PembacaPembelajaran(
+            learning12=_Adaptive(), kalibrasi_store=_Kalibrasi()
+        ).baca(market=Market.CRYPTO, interval=Horizon.M15)
 
         assert dipanggil == ["kalibrasi"]
         assert hasil.kalibrasi == "CALIBRATED within 10 points"
 
-    def test_bidangnya_ada_di_repositori_sungguhan(self) -> None:
-        """Palsu di atas menerima apa pun; yang sungguhan harus punya metode
-        dengan nama yang sama."""
+    async def test_tidak_ditanyakan_ke_repositori_pola(self) -> None:
+        """**Cacat yang benar-benar terjadi di produksi, 2026-08-24.**
+
+        ``latest_calibration`` dibaca dari ``learning12`` dan meledak pada tick
+        pertama: ``AttributeError: 'LearningRepository' object has no attribute
+        'latest_calibration'``. Ada DUA kelas bernama ``LearningRepository`` -
+        satu memegang pola dan suara agent, satu memegang autopsi dan
+        kalibrasi - dan yang dirangkai sebagai ``learning12`` adalah yang
+        pertama.
+
+        Test lamanya hijau karena palsunya punya kedua metode sekaligus, jadi
+        bentuk yang salah tidak pernah terlihat. Palsu di sini sengaja
+        dipisah: yang memegang pola TIDAK punya ``latest_calibration``, persis
+        seperti yang sungguhan.
+        """
+        from aruna.core.enums import Horizon, Market
+        from aruna.learning.snapshot import PembacaPembelajaran
+
+        class _HanyaPola:
+            async def notable_patterns(self, **kw: object) -> list[dict]:
+                return []
+
+            async def agent_votes(self) -> list[dict]:
+                return []
+
+        hasil = await PembacaPembelajaran(learning12=_HanyaPola()).baca(
+            market=Market.CRYPTO, interval=Horizon.M15
+        )
+
+        assert hasil.kalibrasi == ""
+
+    def test_dirangkai_ke_kelas_yang_benar(self) -> None:
+        """Penjaga lamanya memeriksa kelas yang SALAH - ia mengimpor
+        ``db.repositories.learning.LearningRepository`` dan bertanya apakah ia
+        punya ``latest_calibration``. Jawabannya ya, dan itu tidak pernah
+        menjadi pertanyaannya: yang dirangkai ``app.py`` adalah kelas yang
+        lain.
+
+        Yang diperiksa sekarang keduanya - kelas mana yang punya metodenya, dan
+        kelas mana yang TIDAK.
+        """
         from aruna.db.repositories.learning import LearningRepository
+        from aruna.db.repositories.learning12 import (
+            LearningRepository as AdaptiveRepository,
+        )
 
         assert hasattr(LearningRepository, "latest_calibration")
+        assert not hasattr(AdaptiveRepository, "latest_calibration"), (
+            "kalau kelas pola akhirnya punya metode ini juga, dua repositori "
+            "menjawab satu pertanyaan dan tidak ada yang tahu mana yang dibaca"
+        )
+
+    def test_app_mengoper_repositori_kalibrasi(self) -> None:
+        """Bidang yang ada tapi tak pernah diisi adalah celah yang sama."""
+        import inspect
+
+        from aruna import app
+
+        assert "kalibrasi_store=self.learning_store" in inspect.getsource(app)
 
 
 class TestSkorTurunanBukanBidangKedua:

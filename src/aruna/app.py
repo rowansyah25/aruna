@@ -469,6 +469,13 @@ class ArunaApplication:
             # mesinnya lengkap, perintahnya mencetak hasilnya lalu membuangnya,
             # dan WALK_FORWARD/OUT_OF_SAMPLE hilang dari tiap keputusan.
             backtest=self.backtest_store,
+            # Bagian 18.45. **Bukan `self.adaptive_store`**, walau bidang di
+            # sebelahnya bernama `learning12` dan kelasnya juga bernama
+            # `LearningRepository`: ada dua kelas dengan nama itu, dan yang
+            # memegang `latest_calibration` adalah yang ini. Impor di atas
+            # sengaja menamainya `AdaptiveRepository` untuk memisahkan
+            # keduanya - dan versi pertama baris ini tetap tertukar.
+            kalibrasi_store=self.learning_store,
             model_version=self.model_version,
         )
 

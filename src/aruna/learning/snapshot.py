@@ -134,6 +134,13 @@ class PembacaPembelajaran:
     #: Repositori backtest (PASAL 14.40). Opsional: pemanggil tanpa dia
     #: menghasilkan snapshot tanpa bagian validasi, bukan snapshot yang gagal.
     backtest: Any = None
+    #: Repositori kalibrasi (bagian 18.45) -
+    #: :class:`aruna.db.repositories.learning.LearningRepository`.
+    #:
+    #: **Bidang sendiri, bukan menumpang** :attr:`learning12`. Keduanya bernama
+    #: ``LearningRepository`` dan keduanya bukan kelas yang sama - yang satu
+    #: memegang pola dan suara agent, yang lain autopsi dan kalibrasi.
+    kalibrasi_store: Any = None
     model_version: str = ""
     ttl_sec: float = CACHE_TTL_SEC
     _cache: dict[tuple[str, str], tuple[float, Any]] = field(
@@ -186,11 +193,24 @@ class PembacaPembelajaran:
         Kalimat kosong berarti **belum pernah diukur**, dan itu yang dicetak
         pemanggilnya - bukan "GOOD". Sebuah sistem yang belum pernah memeriksa
         kejujurannya sendiri bukan sistem yang terkalibrasi baik.
+
+        **Dari :attr:`kalibrasi_store`, bukan dari :attr:`learning12`.** Versi
+        pertama membaca yang kedua dan gagal pada tick pertama di produksi -
+        ``AttributeError: 'LearningRepository' object has no attribute
+        'latest_calibration'`` - karena ada **dua kelas berbeda dengan nama
+        yang sama**: ``db.repositories.learning12.LearningRepository`` memegang
+        pola dan suara agent, ``db.repositories.learning.LearningRepository``
+        memegang autopsi dan kalibrasi. ``app.py`` mengimpor yang pertama
+        sebagai ``AdaptiveRepository`` justru untuk membedakannya.
+
+        Testnya hijau karena palsunya menerima apa pun, dan penjaganya hijau
+        karena ia memeriksa kelas yang **salah** - keduanya cacat yang sama:
+        bentuk yang tidak pernah dibandingkan dengan yang sungguhan.
         """
-        if self.learning12 is None:
+        if self.kalibrasi_store is None:
             return ""
         try:
-            baris = await self.learning12.latest_calibration()
+            baris = await self.kalibrasi_store.latest_calibration()
         except Exception:
             log.exception("snapshot.kalibrasi_unavailable")
             return ""
