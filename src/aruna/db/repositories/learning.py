@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from aruna.core.clock import now_utc
-from aruna.core.enums import Stance
+from aruna.core.enums import Stance, VetoReviewOutcome
 from aruna.db.pool import Database
 from aruna.db.types import as_utc, dump_json, load_json, to_mysql_datetime
 from aruna.learning.autopsy import Autopsy
@@ -306,6 +306,58 @@ class LearningRepository:
             f"WHERE o.stance IN ({stances}) AND s.direction IN ('BUY', 'SELL') "
             "LIMIT %s",
             *OBJECTING_STANCES,
+            limit,
+        )
+
+    async def rejected_vetoes(self, *, limit: int = 2000) -> list[dict[str, Any]]:
+        """Veto yang ditolak atas keputusan yang tetap dibuat (bagian 18.13).
+
+        Sejajar dengan :meth:`overruled_objections`, dan sengaja: sebuah
+        keberatan yang dikesampingkan lalu ternyata benar adalah titik buta,
+        entah ia datang sebagai objection atau sebagai veto.
+
+        **Hanya yang ``VETO_REJECTED``.** Veto yang ditegakkan menghentikan
+        sinyalnya, jadi tidak ada ``paper_results`` untuk dibandingkan - dan
+        JOIN ini memang tidak akan menemukannya. Batas itu bukan kelalaian
+        kueri melainkan kenyataan: kita tidak akan pernah tahu apa yang akan
+        terjadi kalau vetonya tidak ada.
+        """
+        return await self._db.fetch(
+            "SELECT v.reason, r.direction_correct "
+            "FROM signal_snapshots s "
+            "JOIN paper_results r ON r.signal_id = s.signal_id "
+            "JOIN veto_events v ON v.session_id = s.council_session_id "
+            "JOIN veto_reviews w ON w.veto_id = v.id "
+            "WHERE w.outcome = %s AND s.direction IN ('BUY', 'SELL') "
+            "LIMIT %s",
+            VetoReviewOutcome.VETO_REJECTED.value,
+            limit,
+        )
+
+    async def upheld_vetoes(self, *, limit: int = 2000) -> list[dict[str, Any]]:
+        """Veto yang DITEGAKKAN, berikut jangkauan pasar sesudahnya (18.13).
+
+        Pasangan :meth:`rejected_vetoes`, dan keduanya perlu karena keduanya
+        menjawab pertanyaan yang berbeda. Terukur 2026-08-24: dari 279 veto di
+        ARUNA, nol pernah ditolak - jadi ukuran "ditolak lalu benar" benar dan
+        tidak akan pernah menyala.
+
+        Yang ini menjawab contoh bagian 18.13 apa adanya: veto atas volatilitas
+        ekstrem, lalu pasar bergejolak.
+
+        Keputusannya WAIT karena vetonya menahan, jadi jangkauannya datang dari
+        ``max_favourable_pct`` dan ``max_adverse_pct`` - dua ujung terjauh yang
+        pasar capai selama horizon, sama dengan yang dipakai ghost signal.
+        """
+        return await self._db.fetch(
+            "SELECT v.reason, r.max_favourable_pct, r.max_adverse_pct "
+            "FROM signal_snapshots s "
+            "JOIN paper_results r ON r.signal_id = s.signal_id "
+            "JOIN veto_events v ON v.session_id = s.council_session_id "
+            "JOIN veto_reviews w ON w.veto_id = v.id "
+            "WHERE w.outcome <> %s AND s.direction NOT IN ('BUY', 'SELL') "
+            "LIMIT %s",
+            VetoReviewOutcome.VETO_REJECTED.value,
             limit,
         )
 

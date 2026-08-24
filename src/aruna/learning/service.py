@@ -23,8 +23,12 @@ from aruna.db.repositories.learning import LearningRepository
 from aruna.learning.autopsy import (
     Autopsy,
     ObjectionRecord,
+    VetoDitegakkan,
+    VetoRecord,
     perform_autopsy,
     successful_objections,
+    veto_ditegakkan,
+    vindicated_vetoes,
 )
 from aruna.learning.calibration import CalibrationReport, calibrate
 from aruna.learning.counterfactual import (
@@ -57,6 +61,17 @@ class LearningResult:
     counterfactuals: list[Counterfactual] = field(default_factory=list)
     ghosts: list[GhostSignal] = field(default_factory=list)
     objections: list[ObjectionRecord] = field(default_factory=list)
+    #: Veto yang ditolak lalu ternyata benar (bagian 18.13).
+    #:
+    #: Hanya yang DITOLAK bisa diukur: veto yang ditegakkan menghentikan
+    #: sinyalnya, jadi tidak ada hasil untuk dibandingkan.
+    vetoes: list[VetoRecord] = field(default_factory=list)
+    #: Gejolak yang menyusul tiap jenis veto yang DITEGAKKAN (bagian 18.13).
+    #:
+    #: Korelasi, bukan sebab-akibat: ARUNA menganalisis saja, jadi tidak ada
+    #: posisi yang terhindar. Yang terukur cuma bahwa keadaan yang veto sebut
+    #: berbahaya memang berakhir bergejolak.
+    veto_gejolak: list[VetoDitegakkan] = field(default_factory=list)
     calibration: CalibrationReport | None = None
     reliability: ReliabilityReport | None = None
     failures: list[str] = field(default_factory=list)
@@ -119,6 +134,20 @@ class LearningService:
         result.objections = successful_objections(
             await self._store.overruled_objections()
         )
+        # Bagian 18.13 dan 18.50. Sejajar dengan objections di atas, dan
+        # pertanyaannya memang sejajar: sebuah keberatan yang dikesampingkan
+        # lalu ternyata benar adalah titik buta, entah ia datang sebagai
+        # objection atau sebagai veto.
+        #
+        # Sampai sekarang veto cuma tercatat per-sinyal di autopsy
+        # (`rejected_vetoes`) dan tidak pernah dijumlahkan - jadi veto yang
+        # selalu benar dan veto yang selalu berlebihan terlihat sama.
+        result.vetoes = vindicated_vetoes(await self._store.rejected_vetoes())
+        # Pasangannya, dan keduanya perlu. Terukur 2026-08-24: dari 279 veto di
+        # ARUNA, NOL pernah ditolak - jadi ukuran di atas benar dan tidak akan
+        # pernah menyala. Yang ini menjawab contoh bagian 18.13 apa adanya:
+        # veto atas volatilitas ekstrem, lalu pasar bergejolak.
+        result.veto_gejolak = veto_ditegakkan(await self._store.upheld_vetoes())
         # Calibration measures the claims ARUNA published. A verdict the lock
         # declined to stand behind was never a claim, and scoring it would
         # measure the system against something it explicitly refused to say.

@@ -22,6 +22,7 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from aruna.core.enums import Decision, Stance, VetoReviewOutcome
+from aruna.learning.counterfactual import GHOST_THRESHOLD_PCT
 from aruna.signals.models import OutcomeClass
 
 #: Stance yang berarti menentang - lawan dari SUPPORT. Sama seperti
@@ -308,6 +309,165 @@ def successful_objections(rows: list[dict[str, Any]]) -> list[ObjectionRecord]:
         for (accuser, ground), (raised, won) in tallies.items()
     ]
     records.sort(key=lambda r: (r.vindicated, r.raised), reverse=True)
+    return records
+
+
+@dataclass(frozen=True, slots=True)
+class VetoRecord:
+    """Bagaimana satu jenis veto berakhir ketika ia DITOLAK (bagian 18.13).
+
+    Bentuknya sengaja kembar dengan :class:`ObjectionRecord`, dan pertanyaannya
+    memang kembar: sebuah keberatan yang dikesampingkan lalu ternyata benar
+    adalah titik buta, entah keberatan itu datang sebagai objection atau
+    sebagai veto.
+
+    Dua bentuk yang berbeda untuk satu pertanyaan akan membuat laporannya tidak
+    bisa disandingkan - dan operator yang harus mengingat mana yang mana.
+    """
+
+    reason: str
+    raised: int = 0
+    #: Ditolak, lalu keputusan yang ia lawan ternyata salah.
+    vindicated: int = 0
+
+    @property
+    def vindication_rate(self) -> float | None:
+        return round(self.vindicated / self.raised, 4) if self.raised else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reason": self.reason,
+            "raised_and_rejected": self.raised,
+            "vindicated": self.vindicated,
+            "vindication_rate": self.vindication_rate,
+        }
+
+
+def vindicated_vetoes(rows: list[dict[str, Any]]) -> list[VetoRecord]:
+    """Veto yang ditolak lalu ternyata benar (bagian 18.13, 18.50).
+
+    Tiap baris satu veto yang **ditolak** atas sebuah prediksi yang sudah
+    tuntas, membawa ``reason`` dan ``direction_correct``. Vetonya terbukti
+    benar tepat ketika keputusan yang ia lawan ternyata salah - aturan yang
+    sama persis dengan :func:`successful_objections`.
+
+    **Hanya yang DITOLAK yang bisa diukur, dan itu batas yang jujur.** Veto
+    yang ditegakkan menghentikan sinyalnya, jadi tidak ada hasil untuk
+    dibandingkan - kita tidak akan pernah tahu apa yang akan terjadi. Menghitung
+    veto yang ditegakkan sebagai "efektif" berarti memberi nilai penuh kepada
+    tiap veto yang tak pernah diuji, dan itu justru cara membuat veto yang
+    berlebihan terlihat sempurna.
+
+    Diurutkan menurut jumlah pembenaran: yang dicari titik buta yang terus
+    ditunjukkan dan terus dikesampingkan.
+    """
+    tallies: dict[str, list[int]] = {}
+    for row in rows:
+        alasan = str(row.get("reason") or "")
+        if not alasan:
+            continue
+        correct = row.get("direction_correct")
+        if correct is None:
+            continue
+        tally = tallies.setdefault(alasan, [0, 0])
+        tally[0] += 1
+        tally[1] += int(not bool(correct))
+
+    records = [
+        VetoRecord(reason=alasan, raised=raised, vindicated=won)
+        for alasan, (raised, won) in tallies.items()
+    ]
+    records.sort(key=lambda r: (r.vindicated, r.raised), reverse=True)
+    return records
+
+
+#: Seberapa besar gerak yang membuat sebuah veto disebut "menghindarkan
+#: sesuatu", dalam persen.
+#:
+#: Dipinjam dari :data:`~aruna.learning.counterfactual.GHOST_THRESHOLD_PCT` -
+#: pertanyaannya sama: mulai dari berapa sebuah gerak layak disebut gerak.
+#: Menuliskan ambang kedua di sini berarti dua angka yang bisa melenceng, dan
+#: laporan yang menyebut "veto efektif" dengan ambang berbeda dari "peluang
+#: terlewat" akan menghitung kejadian yang sama dua arah.
+AMBANG_GERAK_VETO = GHOST_THRESHOLD_PCT
+
+
+@dataclass(frozen=True, slots=True)
+class VetoDitegakkan:
+    """Apa yang pasar lakukan sesudah sebuah veto DITEGAKKAN (bagian 18.13).
+
+    **Ukuran yang berbeda dari** :class:`VetoRecord`, **dan keduanya perlu.**
+    Yang itu bertanya "veto yang dikesampingkan ternyata benar?" - jawaban yang
+    hanya ada kalau seseorang pernah mengesampingkannya. Terukur 2026-08-24:
+    dari 279 veto di ARUNA, **nol** pernah ditolak. Ukuran itu benar dan tidak
+    akan pernah menyala.
+
+    Yang ini bertanya "sesudah veto ini menahan, pasarnya bergejolak?" - dan
+    itulah contoh bagian 18.13 apa adanya: veto atas volatilitas ekstrem,
+    lalu flash crash, veto EFEKTIF.
+
+    **Batasnya jujur dan harus disebut:** gerak besar sesudah veto BUKAN bukti
+    veto itu menyelamatkan uang. ARUNA menganalisis saja - tidak ada posisi
+    yang terhindar. Yang terukur cuma bahwa keadaan yang veto sebut berbahaya
+    memang berakhir bergejolak, dan itu korelasi, bukan sebab-akibat.
+    """
+
+    reason: str
+    ditegakkan: int = 0
+    #: Ditegakkan, lalu pasar bergerak lebih besar daripada
+    #: :data:`AMBANG_GERAK_VETO`.
+    diikuti_gejolak: int = 0
+
+    @property
+    def rasio_gejolak(self) -> float | None:
+        if not self.ditegakkan:
+            return None
+        return round(self.diikuti_gejolak / self.ditegakkan, 4)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "reason": self.reason,
+            "upheld": self.ditegakkan,
+            "followed_by_large_move": self.diikuti_gejolak,
+            "large_move_rate": self.rasio_gejolak,
+            "caveat": (
+                "korelasi, bukan sebab-akibat: ARUNA menganalisis saja, "
+                "tidak ada posisi yang terhindar"
+            ),
+        }
+
+
+def veto_ditegakkan(rows: list[dict[str, Any]]) -> list[VetoDitegakkan]:
+    """Gejolak yang menyusul tiap jenis veto yang ditegakkan (bagian 18.13).
+
+    Tiap baris satu veto yang ditegakkan atas sebuah keputusan yang kemudian
+    tuntas sebagai WAIT, membawa ``reason`` beserta ``max_favourable_pct`` dan
+    ``max_adverse_pct`` - jangkauan terjauh pasar selama horizon itu.
+
+    Diurutkan menurut jumlah gejolak yang menyusul: yang dicari veto yang
+    berulang kali menahan tepat sebelum sesuatu terjadi.
+    """
+    tallies: dict[str, list[int]] = {}
+    for row in rows:
+        alasan = str(row.get("reason") or "")
+        if not alasan:
+            continue
+        naik = _number(row.get("max_favourable_pct"))
+        turun = _number(row.get("max_adverse_pct"))
+        if naik is None and turun is None:
+            # Horizonnya belum tuntas, atau jangkauannya tidak tercatat. Bukan
+            # "tidak bergejolak" - belum bisa dijawab.
+            continue
+        terjauh = max(abs(naik or 0.0), abs(turun or 0.0))
+        tally = tallies.setdefault(alasan, [0, 0])
+        tally[0] += 1
+        tally[1] += int(terjauh >= AMBANG_GERAK_VETO)
+
+    records = [
+        VetoDitegakkan(reason=a, ditegakkan=n, diikuti_gejolak=g)
+        for a, (n, g) in tallies.items()
+    ]
+    records.sort(key=lambda r: (r.diikuti_gejolak, r.ditegakkan), reverse=True)
     return records
 
 
