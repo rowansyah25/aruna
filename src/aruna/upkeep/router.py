@@ -53,6 +53,7 @@ from aruna.router.putusan import (
     pilih,
 )
 from aruna.router.rezim import BacaanRezim, PetaRezim, stabilitas, susun_peta
+from aruna.router.validasi import laporan_per_strategi
 from aruna.upkeep.candles import bar_start
 
 log = get_logger(__name__)
@@ -353,6 +354,7 @@ class FaseRouter:
         """
         try:
             baris = await self._repo.hasil_terkait_pilihan()
+            self._laporkan_konsistensi(baris)
             irisan = susun_slice(baris)
             return await self._repo.simpan_performa(
                 baris_simpan(irisan, pada=pada)
@@ -360,6 +362,30 @@ class FaseRouter:
         except Exception:
             log.exception("router.pengukuran_gagal")
             return 0
+
+    def _laporkan_konsistensi(self, baris: list[Any]) -> None:
+        """Bagian 17.41 - 17.43: apakah pilihan router bertahan lintas periode.
+
+        Memakai baris yang **sudah dibaca** untuk pengukuran, jadi tidak ada
+        kueri tambahan. Mesinnya milik :mod:`aruna.backtest.walkforward`;
+        yang di sini hanya memberinya bahan dan mencetak putusannya.
+
+        Dicatat, tidak disimpan. Ia pengamatan yang berubah lambat, dan satu
+        baris `router_pilihan` per bar sudah cukup padat tanpa menambahkan
+        laporan yang isinya hampir sama tiap kali. Yang perlu terlihat adalah
+        putusannya - terutama ketika ia berbunyi TIDAK KONSISTEN.
+        """
+        laporan = laporan_per_strategi(baris)
+        if not laporan:
+            return
+        for kode, lap in laporan.items():
+            log.info(
+                "router.konsistensi",
+                strategi=kode,
+                putusan=lap.verdict,
+                fold_terukur=len(lap.measured),
+                holdout=None if lap.holdout is None else lap.holdout.resolved,
+            )
 
     async def _status_tersimpan(self) -> dict[str, str]:
         """Status dari tabel ``strategies``, atau kosong kalau tak terbaca.

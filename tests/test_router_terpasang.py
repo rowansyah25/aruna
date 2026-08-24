@@ -180,6 +180,7 @@ class TestSeluruhRantaiTask1SampaiTask7Terpakai:
             "ingatan_sekondisi": "Bagian 17.20 - korpus ingatan per kondisi",
             "manfaat_ingatan": "Bagian 17.20 - gerbang PASAL 15.44 dibaca",
             "pengaruh_ingatan": "Bagian 17.20 - sikap ingatan jadi pengali",
+            "laporan_per_strategi": "Bagian 17.41-43 - konsistensi lintas fold",
         }
         hilang = {k: v for k, v in wajib.items() if k not in dipanggil}
 
