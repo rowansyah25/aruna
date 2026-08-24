@@ -253,6 +253,39 @@ class TestTerpasangDiJalurHidup:
 
         assert "note=note" in inspect.getsource(service.attach_quality)
 
+    def test_jalur_spot_menyebutkan_kenapa_rekam_jejaknya_kosong(self) -> None:
+        """Keputusan untuk TIDAK merangkai sesuatu harus berubah dengan
+        sengaja, bukan dengan tidak sengaja.
+
+        Jalur spot mengoper ``accuracy=None, sample=0`` secara harfiah, dan itu
+        keputusan - bukan baris yang terlupakan. Dua jalan pintas menuju
+        perangkaiannya keduanya salah, dan yang kedua salahnya halus: katalog
+        pola Phase 12 hanya memuat yang ``beats_baseline``, jadi faktornya akan
+        terukur justru ketika rekam jejaknya bagus.
+        """
+        import inspect
+
+        from aruna.signals.service import SignalService
+
+        sumber = inspect.getsource(SignalService._score_quality)
+
+        assert "accuracy=None" in sumber
+        assert "beats_baseline" in sumber, (
+            "alasan kenapa katalog pola TIDAK dipakai harus tertulis di tempat "
+            "keputusannya; tanpa itu pemeliharaan berikutnya akan merangkainya "
+            "karena terlihat murah"
+        )
+
+    def test_katalog_pola_memang_menyaring_baseline(self) -> None:
+        """Alasan di atas hanya berlaku selama penyaringnya memang ada. Kalau
+        `cocokkan` berhenti menyaring, jalan pintas itu berhenti bias - dan
+        catatan yang melarangnya jadi usang tanpa ada yang tahu."""
+        import inspect
+
+        from aruna.memory import pola
+
+        assert "beats_baseline" in inspect.getsource(pola.cocokkan)
+
     def test_ambang_sampel_phase_15_masih_ada(self) -> None:
         """Gerbangnya dipinjam, bukan disalin - kalau konstanta ini hilang,
         ``_rekam_jejak`` kehilangan aturannya tanpa satu pun test merah."""

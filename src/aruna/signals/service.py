@@ -843,6 +843,35 @@ class SignalService:
             target=signal.target_price,
             now=context.as_of,
             horizon_sec=horizon.duration.total_seconds(),
+            # **Rekam jejak belum terangkai di jalur spot, dan itu keputusan -
+            # bukan baris yang terlupakan.** Bobotnya tiga, yang terbesar kedua
+            # di antara faktor bernilai, dan terukur 2026-08-24 atas 300
+            # snapshot terakhir: `historical` tidak terukur pada 300 dari 300.
+            #
+            # Jalur futures sudah merangkainya (lihat `_rekam_jejak` di
+            # `aruna.futures.service`) karena di sana ingatan Phase 15 sudah
+            # dibaca **sekali per tick** dan dibagikan ke seluruh simbol.
+            # `SignalService` tidak punya pembaca itu, dan dua jalan pintas
+            # menuju ke sana keduanya salah:
+            #
+            # * membaca ingatan per sinyal - `cari_terhitung` memulangkan
+            #   sampai 5.000 baris, dan jalur ini mengunci dua puluh aset kali
+            #   tiga horizon tiap bar. Enam puluh pemindaian 5.000 baris per
+            #   bar adalah biaya yang harus diputuskan operator, bukan
+            #   diselundupkan lewat satu argumen.
+            # * memakai katalog pola Phase 12 lewat `memory.pola.cocokkan` -
+            #   terlihat murah, dan **bias**. `cocokkan` hanya memulangkan pola
+            #   yang `beats_baseline` (57 dari 368) dengan sampel di atas
+            #   `SAMPEL_POLA`. Faktornya akan terukur justru ketika rekam
+            #   jejaknya bagus dan tidak terukur ketika buruk - pengukuran satu
+            #   arah yang hanya bisa menaikkan skor. Itu confirmation bias
+            #   dengan angka di belakangnya.
+            #
+            # Yang benar adalah pembaca ingatan ber-TTL yang dibagikan kedua
+            # jalur, dan itu pemindahan plumbing Phase 15 yang berdiri sendiri.
+            # Sampai itu ada, `None` adalah laporan yang benar: `Factor`
+            # mengeluarkannya dari penyebut, dan cakupan yang lebih rendah
+            # mengatakan apa adanya bahwa bagian ini belum diukur.
             accuracy=None,
             sample=0,
         )
