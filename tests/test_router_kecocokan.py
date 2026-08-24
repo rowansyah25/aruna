@@ -168,6 +168,54 @@ class TestKeyakinanDanStabilitasMenskalakan:
         assert belum.skor == penuh.skor
 
 
+class TestIngatanMenskalakan:
+    """Bagian 17.20. **Test yang lahir dari cabut-uji yang gagal menangkap.**
+
+    Versi pertama hanya memeriksa kalimat alasannya muncul di baris tersimpan -
+    dan kalimat itu ditambahkan fase, bukan oleh `nilai`. Pengali ingatannya
+    bisa dicabut dari penskalaan dan seluruh suite tetap hijau.
+    """
+
+    def test_ingatan_buruk_menurunkan_skor(self) -> None:
+        biasa = nilai(_strategi(), peta=_peta(), performa=None, stabil=90.0)
+        buruk = nilai(
+            _strategi(), peta=_peta(), performa=None, stabil=90.0, ingatan=0.85
+        )
+
+        assert buruk.skor < biasa.skor
+
+    def test_ingatan_baik_menaikkan_skor(self) -> None:
+        biasa = nilai(_strategi(), peta=_peta(), performa=None, stabil=90.0)
+        baik = nilai(
+            _strategi(), peta=_peta(), performa=None, stabil=90.0, ingatan=1.15
+        )
+
+        assert baik.skor > biasa.skor
+
+    def test_pengali_seragam_tidak_membalik_peringkat(self) -> None:
+        """**Ini yang membuat ingatan aman dipakai di sini.** Ia bukti tentang
+        KONDISI, bukan tentang satu strategi melawan yang lain - jadi pengali
+        yang sama untuk semua kandidat tidak boleh mengubah siapa yang unggul.
+        """
+        for pengali in (0.8, 1.0, 1.2):
+            cocok = nilai(_strategi(preferred=("TRENDING",)), peta=_peta(),
+                          performa=None, stabil=90.0, ingatan=pengali)
+            tidak = nilai(_strategi(preferred=("RANGING",)), peta=_peta(),
+                          performa=None, stabil=90.0, ingatan=pengali)
+
+            assert cocok.skor > tidak.skor, pengali
+
+    def test_ingatan_netral_tidak_mengubah_apa_pun(self) -> None:
+        """Pengali satu harus benar-benar tidak berpengaruh - kalau tidak,
+        setiap aset yang ingatannya diam ikut tergeser diam-diam."""
+        tanpa = nilai(_strategi(), peta=_peta(), performa=None, stabil=90.0)
+        netral = nilai(
+            _strategi(), peta=_peta(), performa=None, stabil=90.0, ingatan=1.0
+        )
+
+        assert tanpa.skor == netral.skor
+
+
 class TestPerlindunganSampel:
     """Bagian 17.23."""
 

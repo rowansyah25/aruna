@@ -28,10 +28,16 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from aruna.core.enums import Horizon, Market
-from aruna.db.types import as_utc, to_mysql_datetime
+from aruna.core.logging import get_logger
+from aruna.db.types import as_utc, load_json, to_mysql_datetime
+from aruna.memory.manfaat import KUNCI_STATE as KUNCI_MANFAAT
+from aruna.memory.manfaat import dari_json
+from aruna.router.ingatan import INTERVAL_INGATAN
 from aruna.router.label import VERSI_ROUTER
 from aruna.router.putusan import PutusanRouter
 from aruna.router.rezim import BOBOT_INTERVAL, BacaanRezim, PetaRezim
+
+log = get_logger(__name__)
 
 __all__ = [
     "BATAS_ATRIBUSI",
@@ -323,6 +329,69 @@ class RouterRepository:
         for r in rows:
             r["resolved_at"] = as_utc(r["resolved_at"])
         return [dict(r) for r in rows]
+
+    async def ingatan_sekondisi(self) -> dict[tuple[str, str], tuple[int, int]]:
+        """Menang dan total ingatan per ``(simbol, rezim)`` pada 15m.
+
+        **Satu ``GROUP BY`` untuk seluruh aset**, bukan sapuan kemiripan.
+        Mesin PASAL 15 mengambil sampai lima ribu ingatan per (pasar,
+        timeframe) lalu membandingkan tiga belas dimensi berbobot di Python -
+        untuk tiap aset, tiap siklus. Itu yang sempat memblokir loop, dan itu
+        yang rencana Phase 17 sebut saat menunda bagian 17.20.
+
+        Yang ditanyakan di sini jauh lebih sempit dan terindeks, dan **bukan
+        kemiripan**: tidak ada pembobotan dimensi, tidak ada cakupan, tidak ada
+        skor. Yang dipakai bersama hanya korpusnya.
+
+        Hanya ``15m``, dan itu bukan pilihan melainkan pembacaan gerbang PASAL
+        15.44 - lihat :data:`~aruna.router.ingatan.INTERVAL_INGATAN`.
+
+        ``hasil`` yang belum final dibuang: ingatan yang belum tuntas bukan
+        bukti tentang apa pun, dan menghitungnya sebagai kalah akan membuat
+        tiap kondisi yang baru terlihat buruk.
+        """
+        rows = await self._db.fetch(
+            "SELECT symbol, regime, "
+            "       SUM(hasil = 'WIN') AS menang, "
+            "       COUNT(*) AS total "
+            "FROM market_memories "
+            "WHERE timeframe = %s AND hasil IN ('WIN', 'LOSS') "
+            "GROUP BY symbol, regime",
+            INTERVAL_INGATAN,
+        )
+        return {
+            (str(r["symbol"]), str(r["regime"])): (
+                int(r["menang"] or 0),
+                int(r["total"] or 0),
+            )
+            for r in rows
+        }
+
+    async def manfaat_ingatan(self) -> bool:
+        """Apakah gerbang PASAL 15.44 memberi ingatan bobot di :data:`~aruna.
+        router.ingatan.INTERVAL_INGATAN`.
+
+        **Dibaca, tidak dihitung ulang.** Yang memutuskan adalah evaluasi
+        PASAL 15.44 yang berjalan di loop upkeep dan menuliskan putusannya ke
+        ``app_state``; dua tempat yang memutuskan hal yang sama dengan aturan
+        berbeda adalah bug yang menunggu giliran.
+
+        ``False`` ketika putusannya belum ada - diam berarti belum terbukti,
+        bukan terbukti baik.
+        """
+        row = await self._db.fetchrow(
+            "SELECT state_value FROM app_state WHERE state_key = %s",
+            KUNCI_MANFAAT,
+        )
+        if not row:
+            return False
+        try:
+            manfaat = dari_json(load_json(row["state_value"]) or {})
+        except (TypeError, ValueError, KeyError):
+            log.warning("router.manfaat_tak_terbaca")
+            return False
+        putusan = manfaat.get(INTERVAL_INGATAN)
+        return bool(putusan and putusan.dipakai)
 
     async def semua_slice(self) -> list[dict[str, Any]]:
         """Baris ``strategy_performance``, seluruhnya, tanpa disaring di SQL.

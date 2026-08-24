@@ -177,6 +177,9 @@ class TestSeluruhRantaiTask1SampaiTask7Terpakai:
             "baris_simpan": "Penulis - bentuk baris untuk penyimpan Phase 12",
             "hasil_terkait_pilihan": "Penulis - attribusi sinyal ke pilihan",
             "simpan_performa": "Penulis - tulis baris berlabel router-1",
+            "ingatan_sekondisi": "Bagian 17.20 - korpus ingatan per kondisi",
+            "manfaat_ingatan": "Bagian 17.20 - gerbang PASAL 15.44 dibaca",
+            "pengaruh_ingatan": "Bagian 17.20 - sikap ingatan jadi pengali",
         }
         hilang = {k: v for k, v in wajib.items() if k not in dipanggil}
 

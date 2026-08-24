@@ -163,6 +163,7 @@ def nilai(
     performa: SlicePerforma | None,
     stabil: float | None,
     boleh_memimpin: bool = True,
+    ingatan: float = 1.0,
 ) -> Kecocokan:
     """Skor kecocokan satu strategi. Tidak pernah melempar.
 
@@ -193,13 +194,21 @@ def nilai(
     # menarik kembali ke netral alih-alih menuju nol - dan netral memang
     # jawaban yang benar ketika buktinya lemah.
     if peta.primary is not None and skor != NETRAL:
-        skala = (peta.primary_confidence / 100) * (
-            1.0 if stabil is None else stabil / 100
+        # `ingatan` ikut di sini dan bukan sebagai penambah, dengan alasan yang
+        # sama: ia bukti tentang KONDISI, bukan tentang strategi ini melawan
+        # yang lain. Karena pengalinya seragam untuk seluruh kandidat, ia tidak
+        # bisa membalik peringkat - yang berubah adalah apakah ada yang cukup
+        # layak dipilih, bukan siapa. Lihat :mod:`aruna.router.ingatan`.
+        skala = (
+            (peta.primary_confidence / 100)
+            * (1.0 if stabil is None else stabil / 100)
+            * ingatan
         )
         skor = NETRAL + round((skor - NETRAL) * skala)
         alasan.append(
             f"diskalakan keyakinan rezim {peta.primary_confidence:.0f}%"
             + ("" if stabil is None else f" dan stabilitas {stabil:.0f}%")
+            + ("" if ingatan == 1.0 else f", ingatan x{ingatan:.2f}")
         )
 
     if performa is not None:

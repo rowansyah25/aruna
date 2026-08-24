@@ -69,6 +69,12 @@ class _RepoPalsu:
         self.disimpan: list[Any] = []
         #: Sinyal tuntas yang bisa diatribusikan ke pilihan router.
         self.hasil: list[dict[str, Any]] = []
+        #: Ingatan sekondisi, dan apakah gerbang PASAL 15.44 membukanya.
+        #: Bawaannya TERTUTUP - itu keadaan produksi yang sebenarnya untuk
+        #: 1h/1d, dan test yang tidak sedang menguji ingatan tidak boleh
+        #: diam-diam mengujinya.
+        self.ingatan: dict[tuple[str, str], tuple[int, int]] = {}
+        self.manfaat = False
         self.performa_ditulis: list[dict[str, Any]] = []
 
     async def peta_rezim(self, *, sekarang: datetime) -> dict[str, tuple[Any, ...]]:
@@ -102,6 +108,12 @@ class _RepoPalsu:
     async def simpan(self, putusan: Any, **kw: Any) -> int:
         self.disimpan.append((putusan, kw))
         return 1
+
+    async def ingatan_sekondisi(self) -> dict[tuple[str, str], tuple[int, int]]:
+        return self.ingatan
+
+    async def manfaat_ingatan(self) -> bool:
+        return self.manfaat
 
     async def hasil_terkait_pilihan(self, **kw: Any) -> list[dict[str, Any]]:
         return list(self.hasil)
@@ -445,6 +457,47 @@ class TestPeralihanSampaiKeSini:
         hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
 
         assert hasil.berganti == 0
+
+
+class TestIngatanSampaiKeSini:
+    """Bagian 17.20, ditunda di rencana awal lalu disambungkan."""
+
+    @pytest.mark.asyncio
+    async def test_ingatan_buruk_bisa_menjatuhkan_di_bawah_ambang(self) -> None:
+        """Yang berubah bukan SIAPA yang dipilih melainkan APAKAH ada yang
+        cukup layak - dan itu memang yang ingatan tahu."""
+        repo = _RepoPalsu({"BTC/USDT": _sepakat("TRENDING")})
+        repo.manfaat = True
+        repo.ingatan = {("BTC/USDT", "TRENDING"): (2, 60)}
+        hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+        putusan, _ = repo.disimpan[0]
+
+        assert any("ingatan sekondisi" in a for a in putusan.alasan)
+        assert hasil.dipertimbangkan == 1
+
+    @pytest.mark.asyncio
+    async def test_gerbang_tertutup_ingatan_tidak_membobot(self) -> None:
+        """Gerbang PASAL 15.44 sudah memutuskan; router membacanya, bukan
+        memutuskan ulang. Terukur di 1h: mendukung 58,3% melawan 58,2% -
+        ingatan tidak membedakan apa pun di sana."""
+        repo = _RepoPalsu({"BTC/USDT": _sepakat("TRENDING")})
+        repo.manfaat = False
+        repo.ingatan = {("BTC/USDT", "TRENDING"): (2, 60)}
+        await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+        putusan, _ = repo.disimpan[0]
+
+        assert not any("ingatan sekondisi" in a for a in putusan.alasan)
+
+    @pytest.mark.asyncio
+    async def test_ingatan_tak_terbaca_tidak_menjatuhkan_fase(self) -> None:
+        class _Meledak(_RepoPalsu):
+            async def ingatan_sekondisi(self) -> dict:
+                raise RuntimeError("korpus tak terbaca")
+
+        repo = _Meledak({"BTC/USDT": _sepakat()})
+        hasil = await _fase(repo=repo).jalankan([_Pindai("BTC/USDT")], now=SAAT)
+
+        assert hasil.terpilih == 1
 
 
 class TestPengukuranMenutupLingkarannya:

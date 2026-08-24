@@ -38,6 +38,8 @@ from aruna.core.enums import Horizon, Market
 from aruna.core.logging import get_logger
 from aruna.governance.proposal import MIN_VALIDATION_SAMPLE
 from aruna.learning.strategies import StrategyStatus
+from aruna.router.ingatan import BacaanIngatan
+from aruna.router.ingatan import pengaruh as pengaruh_ingatan
 from aruna.router.invalidasi import PilihanSebelumnya, kenapa_berganti
 from aruna.router.kecocokan import Kecocokan, nilai
 from aruna.router.label import performa_rezim
@@ -171,6 +173,7 @@ class FaseRouter:
         riwayat = await self._repo.riwayat_15m(sekarang=now)
         risiko = await self._repo.risiko_terakhir(sekarang=now)
         sebelumnya = await self._repo.pilihan_terakhir()
+        ingatan_semua, manfaat = await self._ingatan()
         baris_performa = await self._baris_performa()
         katalog = _dengan_status(
             _katalog(self._katalog), await self._status_tersimpan()
@@ -198,7 +201,11 @@ class FaseRouter:
 
             keluar.dipertimbangkan += 1
             putusan, peta, stabil = self._putuskan(
-                bacaan, riwayat.get(simbol, ()), strategi, baris_performa
+                bacaan,
+                riwayat.get(simbol, ()),
+                strategi,
+                baris_performa,
+                ingatan=(simbol, ingatan_semua, manfaat),
             )
             # Gerbang risiko, sesudah peringkat dan sebelum penyimpanan
             # (diagram operator 2026-08-23). Kedua kalinya risiko masuk, dan
@@ -254,9 +261,21 @@ class FaseRouter:
         riwayat: tuple[str, ...],
         strategi: Any,
         baris_performa: list[Any],
+        ingatan: tuple[str, dict[tuple[str, str], tuple[int, int]], bool],
     ) -> tuple[PutusanRouter, PetaRezim, float | None]:
         peta = susun_peta(bacaan)
         stabil = stabilitas(riwayat)
+
+        # Bagian 17.20. Ingatan mencatat hasil per KONDISI, bukan per strategi,
+        # jadi pengalinya seragam untuk seluruh kandidat dan tidak bisa
+        # membalik peringkat. Yang berubah: apakah ada yang cukup layak.
+        simbol, semua, manfaat = ingatan
+        kunci = (simbol, peta.primary or "")
+        menang, total = semua.get(kunci, (0, 0))
+        sikap, pengali, catatan = pengaruh_ingatan(
+            BacaanIngatan(menang=menang, total=total), dipakai=manfaat
+        )
+        _ = sikap
 
         # **Yang dinilai `challenger`, bukan `champion`** - ia himpunan yang
         # lebih besar dan memuat keduanya. Versi pertama menilai `champion`
@@ -287,10 +306,32 @@ class FaseRouter:
                     performa=performa,
                     stabil=stabil,
                     boleh_memimpin=s.code in boleh_memimpin,
+                    ingatan=pengali,
                 )
             )
 
-        return pilih(tuple(kandidat), peta=peta), peta, stabil
+        putusan = pilih(tuple(kandidat), peta=peta)
+        if pengali != 1.0:
+            putusan = replace(putusan, alasan=(*putusan.alasan, catatan))
+        return putusan, peta, stabil
+
+    async def _ingatan(
+        self,
+    ) -> tuple[dict[tuple[str, str], tuple[int, int]], bool]:
+        """Korpus ingatan sekondisi, dan apakah gerbang PASAL 15.44 membukanya.
+
+        Kegagalannya membuat ingatan tidak diberi bobot sama sekali - diam
+        berarti belum terbukti, bukan terbukti baik. Disiplin yang sama dengan
+        gerbang manfaat itu sendiri.
+        """
+        try:
+            return (
+                await self._repo.ingatan_sekondisi(),
+                await self._repo.manfaat_ingatan(),
+            )
+        except Exception:
+            log.exception("router.ingatan_tak_terbaca")
+            return {}, False
 
     async def _ukur(self, *, pada: datetime) -> int:
         """Ubah pilihan router yang sudah tuntas menjadi baris performa.
