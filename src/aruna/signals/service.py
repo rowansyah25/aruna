@@ -14,7 +14,7 @@ one pass would make that guarantee impossible to inspect.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, NamedTuple
@@ -29,6 +29,7 @@ from aruna.db.repositories.market_data import MarketDataRepository
 from aruna.db.repositories.signals import SignalRepository
 from aruna.db.types import as_utc
 from aruna.signals.anomaly import detect as detect_anomalies
+from aruna.signals.keyakinan import periksa_keyakinan, pita
 from aruna.signals.lock import build_signal, should_lock, verify_integrity
 from aruna.signals.models import LockedSignal, SignalStatus
 from aruna.signals.multihorizon import MultiHorizonView, build_view
@@ -119,6 +120,17 @@ def maintained_intervals(market: Market) -> tuple[Horizon, ...]:
     way - and SPEC 22 forbids correcting that afterwards.
     """
     return refresh_intervals(market, STORED_INTERVALS)
+
+
+def _nama_pita(skor: Any) -> str | None:
+    """Nama pita mutu untuk sebuah skor (bagian 18.41), atau ``None``.
+
+    ``None`` ketika skornya tak terukur - dan itu berbeda dari ``POOR``. Skor
+    yang tidak bisa dihitung dan skor yang dihitung lalu jelek menuntut
+    tindakan yang berbeda.
+    """
+    nama = pita(None if skor is None else float(skor))
+    return None if nama is None else nama.value
 
 
 def _bangun_kalibrator(history: Any) -> Any:
@@ -475,9 +487,21 @@ class SignalService:
                         symbol=asset.symbol,
                         horizon=horizon.value,
                         quality=quality.score,
+                        pita=_nama_pita(quality.score),
                         coverage=round(quality.coverage, 3),
                         reasons=list(putusan.reasons),
                     )
+
+                # Bagian 18.22 dan 18.23. Keyakinan tidak boleh melampaui mutu
+                # bukti yang menopangnya - dan sebelum ini tidak ada yang
+                # menahannya: sinyal 95% di atas rezim berkeyakinan 42%
+                # mungkin. Dipasang SESUDAH kalibrasi karena keduanya hanya
+                # bisa menurunkan, dan yang terendah yang berlaku.
+                #
+                # Menahan, bukan membatalkan. Keyakinan yang dipotong tetap
+                # keyakinan; yang membatalkan sinyal adalah gerbang mutu di
+                # atas, dan hanya ia (bagian 18.43).
+                signal = self._batasi_keyakinan(signal, quality, context)
 
                 # PASAL 11.5 dan 11.6, dan hanya untuk yang berarah. Sebuah
                 # WAIT tidak bisa jadi duplikat dari apa pun - ia bukan posisi,
@@ -503,7 +527,14 @@ class SignalService:
                         reason=reason or "",
                         measured=None if quality.score is None else float(quality.score),
                         threshold=float(MIN_QUALITY),
-                        extra={"coverage": round(quality.coverage, 3)},
+                        # Bagian 18.41: angka yang disimpan tanpa namanya
+                        # memaksa tiap pembacanya mengingat ambangnya sendiri -
+                        # dan ambang itu bisa berubah, sementara baris yang
+                        # sudah tersimpan tidak.
+                        extra={
+                            "coverage": round(quality.coverage, 3),
+                            "pita": _nama_pita(quality.score),
+                        },
                     )
                 )
 
@@ -774,6 +805,55 @@ class SignalService:
             accuracy=None,
             sample=0,
         )
+
+    @staticmethod
+    def _skor_risiko(context: Any) -> float | None:
+        """Skor risiko 0-100 dari konteks, atau ``None`` kalau tak terukur.
+
+        ``None`` bukan nol: risiko yang belum dinilai bukan risiko rendah, dan
+        menyamakannya membuat peringatan keyakinan palsu tidak pernah menyala
+        pada aset yang justru paling sedikit diketahui.
+        """
+        risiko = getattr(context, "risk", None)
+        skor = getattr(risiko, "score", None)
+        return None if skor is None else float(skor)
+
+    @staticmethod
+    def _batasi_keyakinan(signal: Any, quality: Any, context: Any) -> Any:
+        """Terapkan langit-langit keyakinan (bagian 18.22 - 18.23).
+
+        Yang diperiksa keyakinan yang **sudah terkalibrasi** - kalibrasi
+        memetakan yang diklaim ke yang terbukti, dan langit-langit membatasi
+        menurut bukti yang menopangnya. Keduanya hanya bisa menurunkan, jadi
+        urutannya tidak mengubah hasil; yang terendah yang berlaku.
+
+        Sinyal tak berarah dilewati: WAIT tidak mengklaim apa pun, jadi tidak
+        ada yang bisa melampaui bukti.
+        """
+        if not getattr(signal, "is_directional", False):
+            return signal
+
+        rezim = getattr(context, "regime", None)
+        putusan = periksa_keyakinan(
+            float(signal.confidence),
+            mutu=None if quality.score is None else float(quality.score),
+            keyakinan_rezim=(
+                None if rezim is None else float(getattr(rezim, "confidence", 0)) * 100
+            ),
+            risiko=SignalService._skor_risiko(context),
+        )
+        if not putusan.peringatan:
+            return signal
+
+        log.info(
+            "signal.keyakinan_dibatasi",
+            symbol=signal.symbol,
+            semula=round(float(signal.confidence), 3),
+            menjadi=putusan.keyakinan,
+            peringatan=[p.value for p in putusan.peringatan],
+            alasan=list(putusan.alasan),
+        )
+        return replace(signal, confidence=putusan.keyakinan)
 
     async def resolve_due(
         self,

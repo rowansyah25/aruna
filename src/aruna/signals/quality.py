@@ -392,14 +392,59 @@ def agreement_factor(split: Any) -> Factor:
 
 
 def evidence_factor(opinions: Any, *, target: int = 20) -> Factor:
-    """Berapa banyak bukti yang benar-benar ditimbang."""
+    """Berapa banyak bukti INDEPENDEN yang benar-benar ditimbang.
+
+    **Bagian 18.6, ditambahkan 2026-08-24.** Versi sebelumnya menghitung
+    jumlah butir bukti apa adanya - dan enam agent yang semuanya membaca RSI
+    menghasilkan enam butir, terbaca sekuat enam saksi yang berbeda.
+
+    SPEC 17 sudah melarang itu, dan alatnya sudah ada:
+    :meth:`~aruna.agents.analyst.OpinionPool.independence` mengukur berapa
+    bagian bukti yang benar-benar berbeda. Yang hilang cuma pemakaiannya di
+    sini - ia dihitung, disimpan ke ``deliberations.independence``, lalu tidak
+    pernah menyentuh skor mutu.
+
+    Aturannya **dipinjam, bukan ditulis ulang**: dua rumus independensi adalah
+    dua angka yang harus tetap sepakat selamanya.
+
+    Sepuluh indikator lemah karena itu tidak lagi otomatis mengalahkan tiga
+    bukti kuat yang mandiri - persis yang bagian 18.5 tuntut.
+    """
+    from aruna.agents.analyst import OpinionPool
+
     opinions = tuple(opinions or ())
     if not opinions:
         return Factor("evidence_strength", None, 2.0, detail="tidak ada opini")
+
     total = sum(len(getattr(o, "evidence", ()) or ()) for o in opinions)
+
+    # Independensinya dihitung hanya kalau opininya memang membawa bahannya.
+    # `OpinionPool` menuntut `abstained` dan `evidence_keys`; opini yang tidak
+    # punya keduanya bukan opini yang redundan - ia opini yang belum
+    # melaporkan kuncinya, dan faktor ini tidak boleh menuntut lebih daripada
+    # yang ia butuhkan.
+    lengkap = all(
+        hasattr(o, "abstained") and hasattr(o, "evidence_keys")
+        for o in opinions
+    )
+    mandiri = OpinionPool(opinions=opinions).independence() if lengkap else 0.0
+    if not mandiri:
+        # Tidak ada `evidence_keys` sama sekali - independensinya tidak bisa
+        # dihitung, bukan nol. Menghukumnya akan membuat tiap jalur yang
+        # opininya tidak membawa kunci bukti terbaca redundan penuh.
+        return Factor(
+            "evidence_strength", _clamp(total / target), 2.0,
+            detail=f"{total} bukti dari {len(opinions)} agent "
+                   "(independensi tak terukur)",
+        )
+
+    efektif = total * mandiri
     return Factor(
-        "evidence_strength", _clamp(total / target), 2.0,
-        detail=f"{total} bukti dari {len(opinions)} agent",
+        "evidence_strength", _clamp(efektif / target), 2.0,
+        detail=(
+            f"{total} bukti dari {len(opinions)} agent, independensi "
+            f"{mandiri * 100:.0f}% -> setara {efektif:.1f}"
+        ),
     )
 
 
