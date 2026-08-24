@@ -29,8 +29,27 @@ def _upkeep(**overrides) -> UpkeepSettings:
 
 
 class TestDaftarDariKonfigurasi:
-    def test_dua_puluh_perpetual(self) -> None:
-        assert len(_upkeep().futures_symbol_list) == 20
+    def test_sembilan_belas_perpetual(self) -> None:
+        """Dua puluh sampai 2026-08-25, lalu BTCUSDT dikeluarkan.
+
+        Bukan karena pendapat tentang BTC - karena aritmetika bursa. Langkah
+        kuantitas terkecilnya 0,001 BTC, dan pada harga $78.840 itu bernilai
+        $78,84. Dengan stop khas 3%, posisi terkecil yang mungkin ada
+        mempertaruhkan $2,37, jadi ia baru muat di akun $118 pada risiko 2% -
+        di atas ekuitas yang dikonfigurasi.
+        """
+        assert len(_upkeep().futures_symbol_list) == 19
+
+    def test_btc_dikeluarkan_selama_ekuitasnya_belum_cukup(self) -> None:
+        """Dipasangkan dengan ekuitasnya, supaya keduanya tidak bisa berselisih
+        diam-diam: kalau ekuitas dinaikkan melewati $118, test ini yang
+        mengingatkan bahwa BTCUSDT boleh kembali."""
+        s = _upkeep()
+        assert "BTCUSDT" not in s.futures_symbol_list
+        assert s.futures_equity < 118, (
+            "ekuitas sudah melewati $118 - BTCUSDT bisa di-size lagi, jadi "
+            "keputusan mengeluarkannya perlu ditinjau ulang"
+        )
 
     def test_dipisah_koma_dan_dibersihkan(self) -> None:
         s = _upkeep(futures_symbols=" btcusdt , ethusdt ,, ")

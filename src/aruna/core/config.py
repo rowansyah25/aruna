@@ -596,11 +596,45 @@ class UpkeepSettings(BaseSettings):
     #: Ongkosnya terukur: satu tick memproses tiga simbol dalam lima detik -
     #: council penuh per simbol - jadi dua puluh simbol sekitar tiga puluh
     #: empat detik dari interval sembilan ratus detik.
+    #: **BTCUSDT dikeluarkan 2026-08-25, dan alasannya aritmetika bursa - bukan
+    #: pendapat tentang BTC.** Langkah kuantitas terkecilnya 0,001 BTC, dan pada
+    #: harga $78.840 itu bernilai $78,84. Dengan jarak stop khas 3%, posisi
+    #: terkecil yang bisa ada mempertaruhkan $2,37 - jadi ia baru muat di akun
+    #: **$118** pada risiko 2%. Di bawah itu `position_size` membulatkan
+    #: kuantitas ke NOL dan rencananya ditolak, setiap kali, selamanya.
+    #:
+    #: Membiarkannya berarti membuang satu council penuh per tick untuk simbol
+    #: yang tidak akan pernah menghasilkan rencana - dan mesin ini punya dua
+    #: inti.
+    #:
+    #: Sembilan belas sisanya muat: ETHUSDT, LINKUSDT dan LTCUSDT bermin-notional
+    #: $20 (akun min $30), enam belas lainnya $5 (akun min $8). Kalau ekuitas
+    #: naik melewati $118, kembalikan BTCUSDT ke daftar ini.
     futures_symbols: str = (
-        "BTCUSDT,ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,TRXUSDT,SUIUSDT,DOGEUSDT,"
+        "ETHUSDT,SOLUSDT,BNBUSDT,XRPUSDT,TRXUSDT,SUIUSDT,DOGEUSDT,"
         "NEARUSDT,LINKUSDT,ADAUSDT,FILUSDT,AVAXUSDT,LTCUSDT,POLUSDT,UNIUSDT,"
         "DOTUSDT,APTUSDT,OPUSDT,INJUSDT"
     )
+
+    #: Ekuitas akun yang dipakai menghitung ukuran posisi futures, dalam USDT.
+    #:
+    #: **Dulu ditulis mati sebagai "10000" di** ``supervisor.py``, **dan itu
+    #: menjadi kerugian nyata bagi operator yang akunnya jauh lebih kecil.**
+    #: Terukur 2026-08-25 atas 231 rencana yang benar-benar terbit: notional
+    #: bermedian 2.001 dan margin 200. Pada akun $10.000 itu 2% ekuitas per
+    #: posisi - wajar. Pada akun $100 yang sebenarnya, margin yang sama adalah
+    #: **dua kali lipat seluruh akun**, dan floating loss yang tercatat -6,3%
+    #: median sampai -31% terdalam **dari margin** menjadi mustahil ditahan.
+    #:
+    #: Ukuran posisi memang dihitung dari RISIKO, bukan dari leverage (lihat
+    #: ``futures.risk``) - tapi risiko itu persen dari ekuitas, jadi ekuitas
+    #: yang salah membuat seluruh rantainya salah dengan rapi dan tanpa error.
+    #:
+    #: Di sini dan bukan sebagai bawaan CLI, dengan alasan yang sama seperti
+    #: ``futures_symbols`` di atas: ``ARUNA.bat`` memanggil ``supervise`` tanpa
+    #: argumen, jadi bawaan yang hanya bisa diubah dengan mengedit kode bukan
+    #: konfigurasi.
+    futures_equity: float = Field(default=100.0, gt=0)
 
     @property
     def futures_symbol_list(self) -> tuple[str, ...]:

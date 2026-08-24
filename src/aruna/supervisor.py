@@ -286,7 +286,15 @@ def default_children(symbols: str, *, hours: float) -> list[ChildSpec]:
     berdiri sendiri akan berselisih tanpa satu pun error - tabel terisi rapi di
     interval yang tidak pernah ditanyakan siapa pun.
     """
+    from aruna.core.config import get_settings
     from aruna.upkeep.korelasi import HORIZON_KEPUTUSAN
+
+    # **Ekuitasnya dibaca, bukan diketik.** Sampai 2026-08-25 baris di bawah
+    # berbunyi `"--equity", "10000"`, dan angka itu tidak pernah cocok dengan
+    # akun operator. Ukuran posisi dihitung dari persen ekuitas, jadi ekuitas
+    # yang salah membuat setiap notional salah dengan rapi - tanpa satu pun
+    # error, dan hanya terasa sebagai floating loss yang tidak masuk akal.
+    ekuitas = get_settings().upkeep.futures_equity
 
     return [
         ChildSpec(name="aruna-run", args=["-m", "aruna.cli", "run"]),
@@ -297,7 +305,7 @@ def default_children(symbols: str, *, hours: float) -> list[ChildSpec]:
                 "--horizon", HORIZON_KEPUTUSAN.value,
                 "--hours", str(hours),
                 "--interval", "900",
-                "--equity", "10000",
+                "--equity", f"{ekuitas:g}",
             ],
         ),
     ]
