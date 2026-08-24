@@ -1640,7 +1640,97 @@ async def attach_pembelajaran(
         return note
 
 
-def _mutu_signal(*, context: Any, verdict: Any, plan: Any, now: Any) -> Any:
+def _rekam_jejak(note: Any, verdict: Any) -> tuple[float | None, int]:
+    """Akurasi kasus serupa untuk ARAH yang diambil, dan sampelnya.
+
+    Bagian 18.4 menyebut "Historical Similarity" di antara dua belas bahan
+    Decision Quality, dan faktor ``historical`` - bobot tiga, yang terbesar
+    kedua di antara faktor bernilai - **tidak pernah terukur di jalur mana
+    pun**: jalur spot mengoper ``accuracy=None, sample=0`` secara harfiah, dan
+    jalur futures tidak menyebutnya sama sekali. Bahannya ada sejak lama:
+    Phase 15 sudah meringkas kasus serupa dan menempelkannya di
+    ``note.memory`` beberapa ratus baris sebelum mutu dihitung.
+
+    **Per arah, bukan keseluruhan.** Rekam jejak LONG di kondisi ini tidak
+    mengatakan apa pun tentang SHORT, dan meratakannya menghasilkan angka yang
+    bukan rekam jejak salah satunya.
+
+    **Sampelnya yang DINILAI, bukan yang cocok.** ``per_arah`` menghitung
+    seluruh kasus di arah itu termasuk yang hasilnya NEUTRAL - memakainya akan
+    melaporkan rekam jejak lebih tebal daripada yang benar-benar ada.
+
+    Gerbang :attr:`~aruna.memory.outcome.Ringkasan.cukup` dihormati lebih dulu:
+    Phase 15 menolak mengubah korpus setipis itu menjadi persen, dan mutu yang
+    memakainya diam-diam akan menerbitkan angka yang pemiliknya sendiri tolak
+    cetak. Ambang kedua - ``needed`` milik ``historical_factor`` - menjawab
+    pertanyaan yang berbeda: bukan "boleh disebut?" melainkan "cukup untuk
+    dinilai?".
+    """
+    ringkasan = getattr(getattr(note, "memory", None), "ringkasan", None)
+    if ringkasan is None or not getattr(ringkasan, "cukup", False):
+        return None, 0
+    from aruna.memory.outcome import EJAAN_ARAH
+
+    arah = EJAAN_ARAH.get(
+        str(
+            getattr(getattr(verdict, "decision", None), "value", "")
+            or getattr(verdict, "decision", "")
+            or ""
+        ).strip().upper()
+    )
+    if arah is None:
+        return None, 0
+    persen = (getattr(ringkasan, "win_rate", None) or {}).get(arah)
+    sampel = int((getattr(ringkasan, "dinilai", None) or {}).get(arah, 0))
+    return (None if persen is None else float(persen) / 100.0), sampel
+
+
+def _mutu_futures(plan: Any) -> dict[str, float | None]:
+    """Tiga faktor yang hanya berlaku untuk perpetual (bagian 18.16).
+
+    Ketiganya sudah ada di ``score_signal`` sejak PASAL 11.1 dan tidak satu pun
+    pernah dioper - terukur 2026-08-24: ``funding``, ``open_interest``, dan
+    ``liquidation`` TAK PERNAH TERUKUR di jalur futures, satu-satunya jalur
+    tempat ketiganya berlaku.
+
+    * ``liquidation`` - :attr:`BufferScore.score` apa adanya, dibagi seratus.
+      Angka itu sudah dihitung Phase 14 dan sudah dicetak di pesan; yang belum
+      ada hanyalah mengopernya ke penilai mutu.
+    * ``funding`` - jarak tarif sekarang dari
+      :data:`~aruna.futures.funding.EXTREME_RATE`. Ambangnya **dipinjam**, dan
+      itu yang membuat angka ini bukan skala karangan: "ekstrem" sudah punya
+      definisi di Phase 14, dan mutu memakai definisi yang sama.
+
+    ``open_interest`` **sengaja tidak dibangun.** Nilainya ada di
+    ``futures_metrics`` (1.840 baris, terisi seluruhnya), tapi tidak ada satu
+    pun aturan di sistem ini yang mengatakan open interest berapa itu baik atau
+    buruk - tidak ada ambang untuk dipinjam. Menerjemahkannya menjadi skor 0-1
+    berarti mengarang skala, lalu bobot satu penuh akan bergerak menurut skala
+    karangan itu. "Tidak terukur" adalah laporan yang benar sampai aturannya
+    ada, dan `Factor` sudah membedakannya dari nol.
+    """
+    from aruna.futures.funding import EXTREME_RATE
+
+    buffer = getattr(plan, "buffer", None)
+    skor = getattr(buffer, "score", None) if buffer is not None else None
+
+    funding = getattr(plan, "funding", None)
+    tarif = getattr(funding, "current_rate", None) if funding is not None else None
+
+    return {
+        "liquidation": None if skor is None else max(0.0, min(1.0, skor / 100.0)),
+        "funding": (
+            None
+            if tarif is None or not EXTREME_RATE
+            else max(0.0, 1.0 - abs(float(tarif)) / float(EXTREME_RATE))
+        ),
+        "open_interest": None,
+    }
+
+
+def _mutu_signal(
+    *, context: Any, verdict: Any, plan: Any, now: Any, note: Any = None
+) -> Any:
     """Signal quality PASAL 11.1 untuk rencana futures ini, atau ``None``.
 
     Memakai penilai yang **sama** dengan jalur spot - bukan salinan. Dua penilai
@@ -1662,6 +1752,7 @@ def _mutu_signal(*, context: Any, verdict: Any, plan: Any, now: Any) -> Any:
         from aruna.signals.quality import score_signal
 
         jam = float(getattr(plan, "horizon_hours", 0) or 0)
+        akurasi, sampel = _rekam_jejak(note, verdict)
         return score_signal(
             context=context,
             split=getattr(verdict, "split", None),
@@ -1671,6 +1762,9 @@ def _mutu_signal(*, context: Any, verdict: Any, plan: Any, now: Any) -> Any:
             target=getattr(plan, "target", None),
             now=now,
             horizon_sec=jam * 3600 if jam else 3600.0,
+            accuracy=akurasi,
+            sample=sampel,
+            **_mutu_futures(plan),
         )
     except Exception:
         log.exception("futures.quality_failed")
@@ -1680,12 +1774,16 @@ def _mutu_signal(*, context: Any, verdict: Any, plan: Any, now: Any) -> Any:
 def attach_quality(
     note: Any, *, context: Any, verdict: Any, plan: Any, now: Any
 ) -> Any:
-    """Titipkan signal quality di catatan council (PASAL 14.39)."""
+    """Titipkan signal quality di catatan council (PASAL 14.39).
+
+    ``note`` ikut dioper ke penilainya, bukan hanya menerima hasilnya: ingatan
+    Phase 15 yang sudah menempel di sana adalah bahan faktor ``historical``.
+    """
     try:
         return replace(
             note,
             mutu=_mutu_signal(
-                context=context, verdict=verdict, plan=plan, now=now
+                context=context, verdict=verdict, plan=plan, now=now, note=note
             ),
         )
     except Exception:

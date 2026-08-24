@@ -43,12 +43,21 @@ class _SkenarioUntukMutu:
     Bukan :class:`~aruna.scenario.models.Skenario` yang penuh: yang itu memuat
     perkembangan, bukti, pemicu, dan kondisi awal - puluhan kalimat yang tidak
     seorang pun di jalur keputusan baca, disalin ke tiap konteks tiap bar.
+
+    **Empat bidang ini persis yang dibaca**
+    :func:`~aruna.scenario.banding.bandingkan`, dan itu bukan kebetulan:
+    ``scenario_factor`` memanggil fungsi Phase 16 itu apa adanya alih-alih
+    menulis ulang aturan dominansinya. Menambah bidang di sini boleh; membuang
+    salah satu dari keempatnya akan mematahkan panggilan itu.
     """
 
     nama: str
     bobot: int
     keyakinan: float
     kerapuhan: Kerapuhan
+    #: Dibaca ``bandingkan`` untuk mengambil risiko TERTINGGI di antara seluruh
+    #: skenario - bukan risiko yang teratas.
+    risiko: str = "UNKNOWN"
 
 
 __all__ = [
@@ -242,7 +251,7 @@ class ScenarioRepository:
         if not terakhir or terakhir["pada"] is None:
             return []
         baris = await self._db.fetch(
-            "SELECT scenario_id, nama, bobot, keyakinan, invalidasi "
+            "SELECT scenario_id, nama, bobot, keyakinan, invalidasi, risiko "
             "FROM scenario_evidence "
             "WHERE asset = %s AND market_code = %s AND dibuat_pada = %s "
             "ORDER BY bobot DESC LIMIT %s",
@@ -263,6 +272,7 @@ class ScenarioRepository:
                 kerapuhan=Invalidasi(
                     syarat=tuple(load_json(r["invalidasi"]) or ())
                 ).kerapuhan,
+                risiko=str(r["risiko"] or "UNKNOWN"),
             )
             for r in baris
         ]

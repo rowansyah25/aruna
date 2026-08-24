@@ -586,21 +586,44 @@ _SKOR_ROUTER_MENOLAK = 0.25
 def scenario_factor(skenario: Any) -> Factor:
     """Kekokohan skenario yang Phase 16 hasilkan (bagian 18.15).
 
-    Yang diukur bagian bobot yang dipegang skenario **KOKOH**. ``RAPUH``
-    berarti seluruh skenario runtuh oleh satu syarat yang hilang (bagian
-    16.10), dan sekumpulan skenario yang seluruhnya rapuh adalah bukti yang
-    jauh lebih tipis daripada yang bersyarat banyak.
+    Yang dinilai bagian bobot yang dipegang skenario ``KOKOH`` - tapi **hanya
+    ketika Phase 16 benar-benar menunjuk sesuatu**.
 
-    **Ditimbang bobotnya, bukan dihitung kepalanya.** Skenario berbobot
-    sembilan puluh yang kokoh dan satu berbobot sepuluh yang rapuh bukan
-    "setengah kokoh" - yang menentukan skenario yang benar-benar
-    dipertimbangkan.
+    **Konflik berarti tidak terukur, bukan buruk.**
+    :func:`~aruna.scenario.banding.bandingkan` menyebut selisih bobot di bawah
+    :data:`~aruna.scenario.banding.AMBANG_DOMINAN` sebagai konflik, dan
+    docstring-nya mengeja artinya: *"mesin ini tidak sedang menunjuk apa
+    pun."* Keadaan itu ``None`` di sini. Memberinya nol akan mengubah
+    kelemahan mesin skenario menjadi tuduhan terhadap setupnya - dan skor mutu
+    akan turun karena cacat Phase 16, bukan karena pasarnya.
 
-    ``None`` ketika tidak ada skenario sama sekali, dan itu bukan kelemahan
-    bukti: fase skenario hanya berjalan ketika pemicunya menyala (bagian
-    16.2), jadi aset yang pemicunya diam memang tidak punya pertanyaan untuk
-    dijawab.
+    **Kenapa aturan ini ada.** Terukur 2026-08-24 atas seluruh 6.561 baris
+    ``scenario_evidence``: ``kerapuhan`` bernilai ``KOKOH`` pada semuanya -
+    tiap skenario yang pernah dihasilkan punya dua atau tiga syarat
+    invalidasi, tidak pernah satu. Versi pertama faktor ini hanya memakai
+    kekokohan, jadi ia memulangkan 1.0 untuk kedua puluh aset, bobot dua
+    penuh, tiap kali. Faktor tanpa ragam tidak menilai apa pun: ia menaikkan
+    setiap skor dengan angka yang sama sambil terlihat seperti pengukuran.
+
+    Terukur pada tanggal yang sama, dan ini yang lebih besar: 1.256 dari 1.569
+    simulasi seri di puncak, dan 355 dari 513 tick menghasilkan **satu** vektor
+    bobot yang sama untuk seluruh dua puluh aset - ``(31, 31, 31, 7)`` sendiri
+    muncul 1.001 kali. Bobot Phase 16 hari ini nyaris bukan fungsi dari asetnya.
+    Itu cacat Phase 16 dan diperbaiki di sana; yang dikerjakan di sini adalah
+    menolak melaporkannya sebagai pengukuran. Cakupan yang turun mengatakannya
+    apa adanya - Phase 16 hanya menginformasikan sebagian keputusan.
+
+    Kekokohan dipertahankan meski hari ini konstan. Ia diam karena keadaannya
+    memang belum pernah muncul, dan penjaga yang belum pernah menyala berbeda
+    dari penjaga yang tidak ada.
+
+    ``None`` juga ketika tidak ada skenario sama sekali, dan itu bukan
+    kelemahan bukti: fase skenario hanya berjalan ketika pemicunya menyala
+    (bagian 16.2), jadi aset yang pemicunya diam memang tidak punya pertanyaan
+    untuk dijawab.
     """
+    from aruna.scenario.banding import bandingkan
+
     daftar = list(skenario or ())
     if not daftar:
         return Factor("scenario", None, 2.0, detail="tidak ada skenario")
@@ -609,6 +632,15 @@ def scenario_factor(skenario: Any) -> Factor:
     if total <= 0:
         return Factor(
             "scenario", None, 2.0, detail=f"{len(daftar)} skenario tanpa bobot"
+        )
+    banding = bandingkan(tuple(daftar))
+    if banding.konflik:
+        return Factor(
+            "scenario", None, 2.0,
+            detail=(
+                f"{len(daftar)} skenario berkonflik - jarak bobot "
+                f"{banding.jarak}, Phase 16 tidak menunjuk satu pun"
+            ),
         )
     kokoh = sum(
         max(0, int(getattr(s, "bobot", 0)))
@@ -619,7 +651,11 @@ def scenario_factor(skenario: Any) -> Factor:
         "scenario",
         _clamp(kokoh / total),
         2.0,
-        detail=f"{len(daftar)} skenario, {kokoh}/{total} bobot kokoh",
+        detail=(
+            f"{len(daftar)} skenario, {banding.teratas.nama} unggul "
+            f"{banding.jarak} bobot, {kokoh}/{total} bobot kokoh, "
+            f"risiko {banding.risiko}"
+        ),
     )
 
 

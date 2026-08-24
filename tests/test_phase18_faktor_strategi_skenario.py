@@ -41,20 +41,31 @@ class _Champ:
         self.skor = skor
 
 
-class _Skenario:
-    """Bentuknya mengikuti `Skenario`: `bobot` 0-100, `kerapuhan` KOKOH/RAPUH."""
+def _Skenario(
+    bobot: int, kokoh: bool, *, nama: str = "", risiko: str = "LOW"
+) -> Any:
+    """Baris yang **sungguhan** dioper produksi, bukan palsu yang mirip.
 
-    def __init__(self, bobot: int, kokoh: bool) -> None:
-        self.bobot = bobot
-        self.kerapuhan = _Rapuh(kokoh)
+    Versi pertama file ini memakai kelas palsu bernama ``_Skenario`` dengan dua
+    bidang - ``bobot`` dan ``kerapuhan``. Seluruh testnya hijau. Lalu
+    ``scenario_factor`` mulai memanggil
+    :func:`~aruna.scenario.banding.bandingkan`, yang membaca ``nama`` dan
+    ``risiko`` juga, dan palsunya meledak - bukan karena aturannya salah, tapi
+    karena bentuknya tidak pernah sama dengan yang dioper produksi.
 
+    Memakai ``_SkenarioUntukMutu`` yang asli menutup celah itu untuk seterusnya:
+    bidang yang hilang di sana akan gagal di sini lebih dulu.
+    """
+    from aruna.db.repositories.scenario import _SkenarioUntukMutu
+    from aruna.scenario.models import Kerapuhan
 
-class _Rapuh:
-    def __init__(self, kokoh: bool) -> None:
-        self.value = "KOKOH" if kokoh else "RAPUH"
-
-    def __str__(self) -> str:
-        return self.value
+    return _SkenarioUntukMutu(
+        nama=nama or f"S{bobot}",
+        bobot=bobot,
+        keyakinan=bobot / 100,
+        kerapuhan=Kerapuhan.KOKOH if kokoh else Kerapuhan.RAPUH,
+        risiko=risiko,
+    )
 
 
 class TestFaktorStrategi:
@@ -147,6 +158,55 @@ class TestFaktorSkenario:
 
     def test_tidak_pernah_memblokir(self) -> None:
         assert not scenario_factor([_Skenario(100, False)]).blocking
+
+    def test_konflik_adalah_TIDAK_TERUKUR_bukan_nol(self) -> None:
+        """**Yang paling penting di kelas ini.**
+
+        `bandingkan` menyebut selisih di bawah AMBANG_DOMINAN sebagai konflik,
+        dan docstring-nya mengeja artinya: mesin skenario tidak sedang menunjuk
+        apa pun. Memberinya nol mengubah kelemahan Phase 16 menjadi tuduhan
+        terhadap setupnya - skor mutu turun karena mesinnya, bukan pasarnya.
+
+        Terukur 2026-08-24: 1.256 dari 1.569 simulasi seri persis di puncak.
+        Nol di sini berarti empat dari lima keputusan dihukum atas cacat yang
+        bukan miliknya.
+        """
+        seri = scenario_factor([_Skenario(50, True), _Skenario(50, True)])
+
+        assert seri.score is None
+        assert "konflik" in seri.detail
+
+    def test_tepat_di_ambang_dominan_terukur(self) -> None:
+        from aruna.scenario.banding import AMBANG_DOMINAN
+
+        f = scenario_factor([
+            _Skenario(50 + AMBANG_DOMINAN, True), _Skenario(50, True)
+        ])
+
+        assert f.score is not None
+
+    def test_ambangnya_dipinjam_dari_phase_16(self) -> None:
+        """Ambang kedua akan membuat "dominan" punya dua arti - satu di Phase
+        16 yang melaporkannya, satu di Phase 18 yang menilainya."""
+        import inspect
+
+        from aruna.signals import quality
+
+        assert "bandingkan" in inspect.getsource(quality.scenario_factor)
+
+    def test_bukan_konstanta(self) -> None:
+        """Terukur 2026-08-24: `kerapuhan` bernilai KOKOH pada SELURUH 6.561
+        baris `scenario_evidence`, karena tiap skenario punya dua atau tiga
+        syarat invalidasi - tidak pernah satu. Faktor yang hanya membaca
+        kekokohan memulangkan 1.0 setiap kali, bobot dua penuh, tanpa menilai
+        apa pun.
+        """
+        semua_kokoh = [
+            scenario_factor([_Skenario(a, True), _Skenario(b, True)]).score
+            for a, b in ((50, 50), (70, 30), (95, 5))
+        ]
+
+        assert len(set(map(str, semua_kokoh))) > 1
 
 
 class TestKeduanyaMasukKeSkor:

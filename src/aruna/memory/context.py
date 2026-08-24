@@ -32,7 +32,7 @@ from datetime import datetime
 from enum import StrEnum
 from typing import Any
 
-from aruna.memory.outcome import Ringkasan, ringkas
+from aruna.memory.outcome import EJAAN_ARAH, Ringkasan, ringkas
 from aruna.memory.record import Ingatan
 from aruna.memory.similarity import Kemiripan
 
@@ -51,12 +51,10 @@ MARGIN_PENGARUH = 10
 #: ``ringkasan.total``, jadi yang hilang cuma daftarnya - bukan angkanya.
 MAX_JEJAK_ID = 20
 
-_ARAH: dict[str, str] = {
-    "BUY": "LONG",
-    "LONG": "LONG",
-    "SELL": "SHORT",
-    "SHORT": "SHORT",
-}
+#: Dipinjam dari :data:`~aruna.memory.outcome.ARAH`, bukan disalin lagi. Peta
+#: ini pernah ada dua kali dengan isi yang identik; peta ketiga - yang dibutuhkan
+#: Phase 18 - membuat salinannya jadi tiga tempat yang harus tetap sepakat.
+_ARAH = EJAAN_ARAH
 
 
 class Pengaruh(StrEnum):
