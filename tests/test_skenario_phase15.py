@@ -347,6 +347,7 @@ class TestHasil:
             build_reliability,
         )
 
+        n = MIN_RELIABILITY_SAMPLE * 2
         baris = [
             {
                 "agent": AgentRole.MOMENTUM.value,
@@ -354,12 +355,26 @@ class TestHasil:
                 "council_decision": "BUY",
                 "direction_correct": 0,
             }
-            for _ in range(MIN_RELIABILITY_SAMPLE * 2)
+            for _ in range(n)
+        ]
+        # Jangkar pasar - lihat alasannya di `TestPerubahanPerforma._baris`.
+        # Tanpa ini pasar hanya bergerak turun, dan agen yang selalu bilang
+        # BUY lalu selalu salah tidak membuktikan apa pun: garis dasarnya
+        # sendiri sudah nol.
+        baris += [
+            {
+                "agent": AgentRole.NEWS.value,
+                "agent_decision": "BUY",
+                "council_decision": "BUY",
+                "direction_correct": i % 2,
+            }
+            for i in range(n * 5)
         ]
         laporan = build_reliability(baris)
-        catatan = next(iter(laporan.measured), None)
+        catatan = next(
+            r for r in laporan.measured if r.role is AgentRole.MOMENTUM
+        )
 
-        assert catatan is not None
         assert catatan.multiplier < 1.0
 
 
@@ -368,7 +383,19 @@ class TestHasil:
 
 class TestPerubahanPerforma:
     def _baris(self, agent, benar: int, n: int):
-        return [
+        """Baris agen yang diuji, PLUS jangkar yang menetapkan garis dasar.
+
+        **Jangkarnya wajib sejak 2026-08-25.** Titik netral seorang agen
+        sekarang diukur dari seberapa sering pasar bergerak ke arah yang ia
+        sebut. Kalau seluruh baris berasal dari satu agen yang selalu bilang
+        BUY, garis dasar pasar menjadi persis sama dengan akurasi agen itu -
+        dan keunggulannya nol berapa pun akurasinya, karena ia sendiri yang
+        mendefinisikan "biasa".
+
+        Jangkarnya lima kali lebih banyak dan berimbang 50/50, meniru keadaan
+        sebenarnya: satu agen dari tujuh tidak menggerakkan garis dasar.
+        """
+        diuji = [
             {
                 "agent": agent.value,
                 "agent_decision": "BUY",
@@ -377,6 +404,22 @@ class TestPerubahanPerforma:
             }
             for i in range(n)
         ]
+        from aruna.core.enums import AgentRole
+
+        jangkar = [
+            {
+                "agent": AgentRole.NEWS.value,
+                "agent_decision": "BUY",
+                "council_decision": "BUY",
+                "direction_correct": i % 2,
+            }
+            for i in range(n * 5)
+        ]
+        return diuji + jangkar
+
+    @staticmethod
+    def _catatan(laporan, agent):
+        return next(r for r in laporan.records if r.role is agent)
 
     def test_22_agent_membaik_dapat_bobot_lebih_tinggi(self) -> None:
         from aruna.core.enums import AgentRole
@@ -394,8 +437,8 @@ class TestPerubahanPerforma:
         )
 
         assert (
-            next(iter(bagus.measured)).multiplier
-            > next(iter(biasa.measured)).multiplier
+            self._catatan(bagus, AgentRole.MOMENTUM).multiplier
+            > self._catatan(biasa, AgentRole.MOMENTUM).multiplier
         )
 
     def test_23_agent_memburuk_dapat_bobot_lebih_rendah(self) -> None:
@@ -408,7 +451,7 @@ class TestPerubahanPerforma:
 
         n = MIN_RELIABILITY_SAMPLE * 2
         buruk = build_reliability(self._baris(AgentRole.MOMENTUM, int(n * 0.2), n))
-        catatan = next(iter(buruk.measured))
+        catatan = self._catatan(buruk, AgentRole.MOMENTUM)
 
         assert catatan.multiplier < 1.0
         assert catatan.multiplier >= MIN_MULTIPLIER

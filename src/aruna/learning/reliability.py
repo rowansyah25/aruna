@@ -37,9 +37,27 @@ MIN_RELIABILITY_SAMPLE = 25
 MIN_MULTIPLIER = 0.7
 MAX_MULTIPLIER = 1.2
 
-#: Accuracy treated as the neutral point. Below it an agent loses weight, above
-#: it gains. Not 0.5: a directional call in a market that mostly goes sideways
-#: is harder than a coin flip, and 0.5 would flatter every agent.
+#: Titik netral cadangan, dipakai hanya ketika garis dasar tidak bisa diukur.
+#:
+#: **Angka ini pernah dipakai selalu, dan itu membalik seluruh papan bobot.**
+#: Komentar aslinya sudah menyebut risikonya - *"0.5 would flatter every
+#: agent"* - lalu tetap memakai 0,5 dengan alasan "pasar yang kebanyakan
+#: sideways". Pasarnya tidak sideways.
+#:
+#: Terukur 2026-08-25 atas 142.461 suara agen: pasar naik **58,9%** waktu. Pada
+#: titik netral 0,5, agen yang SELALU bilang BUY mendapat akurasi 0,589 dan
+#: pengali 1,089 - bobot tambahan untuk tidak menyumbang apa pun, karena garis
+#: dasarnya memang sudah 0,589. Sebaliknya REVERSAL, yang 3.349 dari 3.669
+#: suaranya SELL, mendapat akurasi sekitar 0,411 dan pengali 0,911 - satu-
+#: satunya agen yang keunggulannya BERTAHAN di data uji (+6,1 poin) justru
+#: dikurangi bobotnya.
+#:
+#: Itu menjelaskan tiga hal yang terukur bersamaan: keyakinan tinggi lebih
+#: sering salah daripada keyakinan sedang, keyakinan sama sekali tidak
+#: berkorelasi dengan benar, dan council 7-9 poin DI BAWAH garis dasar.
+#:
+#: Lihat :func:`build_reliability`, yang sekarang mengukur garis dasarnya
+#: sendiri dari baris yang sama.
 NEUTRAL_ACCURACY = 0.5
 
 
@@ -54,6 +72,13 @@ class AgentRecord:
     vindicated: int = 0
     #: Times it opposed and the council was right.
     overruled_correctly: int = 0
+    #: Akurasi yang agen ini dapat TANPA keahlian apa pun, dari campuran
+    #: arahnya sendiri dan garis dasar pasar.
+    #:
+    #: Diisi :func:`build_reliability` dari baris yang sama. Bawaannya
+    #: :data:`NEUTRAL_ACCURACY` supaya catatan yang dibangun tangan - test,
+    #: pemanggil lama - tetap berperilaku seperti dulu.
+    netral: float = NEUTRAL_ACCURACY
 
     @property
     def sufficient(self) -> bool:
@@ -66,23 +91,34 @@ class AgentRecord:
         return round(self.correct / self.scored, 4)
 
     @property
+    def edge(self) -> float | None:
+        """Akurasi DI ATAS yang bisa didapat tanpa keahlian, dalam pecahan.
+
+        Ini yang sebenarnya menjawab "agen ini menyumbang atau tidak". Akurasi
+        mentah tidak menjawabnya: di pasar yang naik 58,9%, akurasi 0,589 dari
+        agen yang selalu bilang BUY berarti nol sumbangan.
+        """
+        accuracy = self.accuracy
+        return None if accuracy is None else round(accuracy - self.netral, 4)
+
+    @property
     def multiplier(self) -> float | None:
         """Weight adjustment for the judge, or ``None`` while unproven."""
-        accuracy = self.accuracy
-        if accuracy is None:
+        keunggulan = self.edge
+        if keunggulan is None:
             return None
         # Linear around the neutral point, then clamped.
-        raw = 1.0 + (accuracy - NEUTRAL_ACCURACY)
+        raw = 1.0 + keunggulan
         return round(min(MAX_MULTIPLIER, max(MIN_MULTIPLIER, raw)), 4)
 
     @property
     def status(self) -> str:
         if not self.sufficient:
             return "INSUFFICIENT_SAMPLE"
-        accuracy = self.accuracy or 0.0
-        if accuracy > NEUTRAL_ACCURACY + 0.1:
+        keunggulan = self.edge or 0.0
+        if keunggulan > 0.1:
             return "ABOVE_NEUTRAL"
-        if accuracy < NEUTRAL_ACCURACY - 0.1:
+        if keunggulan < -0.1:
             return "BELOW_NEUTRAL"
         return "NEUTRAL"
 
@@ -103,6 +139,11 @@ class AgentRecord:
 @dataclass(frozen=True, slots=True)
 class ReliabilityReport:
     records: tuple[AgentRecord, ...] = field(default_factory=tuple)
+    #: Seberapa sering pasar naik di jendela yang diukur, atau ``None``.
+    #:
+    #: Dilaporkan supaya akurasi agen bisa dibaca terhadap sesuatu. "TECHNICAL
+    #: 58%" tidak bisa dinilai siapa pun tanpa mengetahui pasarnya naik 58,9%.
+    pasar_naik: float | None = None
 
     @property
     def measured(self) -> tuple[AgentRecord, ...]:
@@ -139,6 +180,9 @@ def build_reliability(rows: list[dict[str, Any]]) -> ReliabilityReport:
     result; when it dissented, it was right exactly when the council was wrong.
     """
     tallies: dict[AgentRole, dict[str, int]] = {}
+    #: [berapa suara, berapa di antaranya pasar naik] - garis dasar pasar,
+    #: diukur dari baris yang sama alih-alih ditetapkan sebagai konstanta.
+    naik_total = [0, 0]
 
     for row in rows:
         role = _role(row.get("agent"))
@@ -157,15 +201,26 @@ def build_reliability(rows: list[dict[str, Any]]) -> ReliabilityReport:
         agent_was_right = council_was_right if agreed else not council_was_right
 
         tally = tallies.setdefault(
-            role, {"scored": 0, "correct": 0, "vindicated": 0, "overruled": 0}
+            role,
+            {"scored": 0, "correct": 0, "vindicated": 0, "overruled": 0,
+             "buy": 0},
         )
         tally["scored"] += 1
         tally["correct"] += int(agent_was_right)
+        tally["buy"] += int(agent_decision == "BUY")
         if not agreed:
             if council_was_right:
                 tally["overruled"] += 1
             else:
                 tally["vindicated"] += 1
+
+        # Arah pasar terbaca dari baris ini sendiri: agen bilang BUY dan benar
+        # berarti harga naik; bilang SELL dan benar berarti turun. Tidak perlu
+        # kolom tambahan, dan tidak ada tebakan.
+        naik_total[0] += 1
+        naik_total[1] += int((agent_decision == "BUY") == agent_was_right)
+
+    pasar_naik = (naik_total[1] / naik_total[0]) if naik_total[0] else None
 
     records = tuple(
         AgentRecord(
@@ -174,10 +229,29 @@ def build_reliability(rows: list[dict[str, Any]]) -> ReliabilityReport:
             correct=tally["correct"],
             vindicated=tally["vindicated"],
             overruled_correctly=tally["overruled"],
+            netral=_netral(tally, pasar_naik),
         )
         for role, tally in sorted(tallies.items(), key=lambda kv: kv[0].value)
     )
-    return ReliabilityReport(records=records)
+    return ReliabilityReport(records=records, pasar_naik=pasar_naik)
+
+
+def _netral(tally: dict[str, int], pasar_naik: float | None) -> float:
+    """Akurasi yang agen ini dapat tanpa keahlian, dari campuran arahnya.
+
+    Sebuah suara BUY benar ketika pasar naik, dan suara SELL benar ketika pasar
+    turun - jadi titik netral seorang agen adalah rata-rata tertimbang antara
+    keduanya menurut seberapa sering ia mengambil tiap arah.
+
+    Agen yang selalu BUY di pasar yang naik 58,9% bernetral 0,589: akurasi
+    0,589 darinya berarti **nol** sumbangan. Agen yang selalu SELL bernetral
+    0,411, jadi akurasi 0,45 darinya adalah keunggulan nyata - dan pada titik
+    netral tetap 0,5 ia justru terbaca sebagai kegagalan.
+    """
+    if pasar_naik is None or not tally["scored"]:
+        return NEUTRAL_ACCURACY
+    bagian_buy = tally["buy"] / tally["scored"]
+    return bagian_buy * pasar_naik + (1 - bagian_buy) * (1 - pasar_naik)
 
 
 def _role(value: Any) -> AgentRole | None:

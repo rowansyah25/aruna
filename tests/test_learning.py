@@ -208,14 +208,51 @@ class TestReliability:
         assert record.overruled_correctly == MIN_RELIABILITY_SAMPLE
 
     def test_a_dissenter_is_vindicated_when_the_council_is_wrong(self) -> None:
-        rows = [
-            _opinion_row(AgentRole.REVERSAL, "SELL", "BUY", False)
-        ] * MIN_RELIABILITY_SAMPLE
-        record = build_reliability(rows).records[0]
+        """**Pasarnya harus bergerak dua arah, dan itu bukan kerapian.**
+
+        Versi pertama test ini hanya memuat baris tempat pasar TURUN, dan di
+        sampel seperti itu keahlian tidak bisa diukur sama sekali: agen yang
+        selalu bilang SELL akan selalu benar tanpa membuktikan apa pun. Sejak
+        titik netral diukur dari garis dasar (2026-08-25), keadaan itu
+        dilaporkan NEUTRAL - dan itu jawaban yang benar.
+
+        Baris TECHNICAL di bawah ada untuk memberi pasar arah yang lain, bukan
+        untuk diuji.
+        """
+        rows = (
+            [_opinion_row(AgentRole.REVERSAL, "SELL", "BUY", False)]
+            * MIN_RELIABILITY_SAMPLE
+            + [_opinion_row(AgentRole.TECHNICAL, "BUY", "BUY", True)]
+            * MIN_RELIABILITY_SAMPLE
+        )
+        laporan = build_reliability(rows)
+        record = next(
+            r for r in laporan.records if r.role is AgentRole.REVERSAL
+        )
 
         assert record.correct == MIN_RELIABILITY_SAMPLE
         assert record.vindicated == MIN_RELIABILITY_SAMPLE
+        assert laporan.pasar_naik == 0.5
         assert record.status == "ABOVE_NEUTRAL"
+
+    def test_selalu_benar_di_pasar_satu_arah_bukan_keahlian(self) -> None:
+        """**Inti perbaikan 2026-08-25.**
+
+        Agen yang selalu bilang BUY di sampel yang pasarnya selalu naik akan
+        berakurasi 1,0 - dan menyumbang nol, karena garis dasarnya juga 1,0.
+        Pada titik netral tetap 0,5 ia mendapat pengali maksimum untuk mengikuti
+        arus. Terukur di produksi: pasar naik 58,9%, dan agen yang selalu BUY
+        mendapat bobot tambahan sementara satu-satunya agen ber-edge nyata
+        justru dikurangi.
+        """
+        record = build_reliability(
+            [_opinion_row(AgentRole.TECHNICAL, "BUY", "BUY", True)] * 100
+        ).records[0]
+
+        assert record.accuracy == 1.0
+        assert record.edge == 0.0
+        assert record.multiplier == 1.0
+        assert record.status == "NEUTRAL"
 
     def test_abstentions_are_not_scored(self) -> None:
         """Declining to read thin evidence is a legitimate act, not a failure."""
@@ -223,11 +260,18 @@ class TestReliability:
         assert build_reliability(rows).records == ()
 
     def test_the_multiplier_is_bounded_in_both_directions(self) -> None:
+        """Pasarnya dibuat bergerak dua arah - lihat alasannya di
+        ``test_a_dissenter_is_vindicated_when_the_council_is_wrong``. Agen yang
+        benar di KEDUA arah punya keahlian; agen yang selalu benar di pasar
+        satu arah tidak.
+        """
         perfect = build_reliability(
-            [_opinion_row(AgentRole.TECHNICAL, "BUY", "BUY", True)] * 100
+            [_opinion_row(AgentRole.TECHNICAL, "BUY", "BUY", True)] * 50
+            + [_opinion_row(AgentRole.TECHNICAL, "SELL", "SELL", True)] * 50
         ).records[0]
         hopeless = build_reliability(
-            [_opinion_row(AgentRole.TECHNICAL, "BUY", "BUY", False)] * 100
+            [_opinion_row(AgentRole.TECHNICAL, "BUY", "BUY", False)] * 50
+            + [_opinion_row(AgentRole.TECHNICAL, "SELL", "SELL", False)] * 50
         ).records[0]
 
         assert perfect.multiplier == MAX_MULTIPLIER
@@ -258,9 +302,16 @@ class TestMeasuredHistory:
         assert "unavailable" in described["effect_on_judging"]
 
     def _measured(self, **kw) -> MeasuredHistory:
+        # Benar di KEDUA arah, bukan hanya BUY. Sejak titik netral diukur dari
+        # garis dasar (2026-08-25), agen yang selalu bilang BUY di sampel yang
+        # pasarnya selalu naik berkeunggulan NOL - jadi tidak ada yang bisa
+        # diusulkan, dan test ini akan menguji ketiadaan usulan alih-alih
+        # rutenya.
         return MeasuredHistory(
             reliability_report=build_reliability(
                 [_opinion_row(AgentRole.TECHNICAL, "BUY", "BUY", True)]
+                * MIN_RELIABILITY_SAMPLE
+                + [_opinion_row(AgentRole.TECHNICAL, "SELL", "SELL", True)]
                 * MIN_RELIABILITY_SAMPLE
             ),
             calibration_report=calibrate(
@@ -305,7 +356,9 @@ class TestMeasuredHistory:
         assert [p.role for p in proposals] == ["TECHNICAL"]
         assert proposals[0].current == 1.0
         assert proposals[0].proposed > 1.0
-        assert proposals[0].sample == MIN_RELIABILITY_SAMPLE
+        # Dua kali ambangnya: fixture-nya memuat sampel di kedua arah pasar,
+        # karena keahlian tidak bisa diukur di pasar yang bergerak satu arah.
+        assert proposals[0].sample == MIN_RELIABILITY_SAMPLE * 2
 
 
 # ---------------------------------------------------------------------------
