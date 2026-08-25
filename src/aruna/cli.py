@@ -2185,6 +2185,94 @@ async def _learn(settings: Settings, args: argparse.Namespace) -> int:
         await app.shutdown()
 
 
+def cmd_korpus(args: argparse.Namespace) -> int:
+    """Ukur keunggulan tiap agen atas korpus keputusan lintas regime.
+
+    **Perintah ini menjawab satu pertanyaan: agen mana yang benar-benar
+    menyumbang.** Bukan "agen mana yang sering benar" - itu pertanyaan yang
+    jawabannya menyesatkan, karena di pasar yang naik 58% waktu, agen yang
+    selalu bilang BUY benar 58% dan menyumbang nol.
+
+    Council diputar ulang di candle yang sudah tersimpan, jadi tidak ada
+    panggilan pasar dan tidak ada yang ditulis. Jalankan sesudah mengubah agen
+    mana pun; angkanya sebanding karena korpusnya sama.
+    """
+    settings = _load_settings()
+    _setup_cli_logging(settings)
+    return asyncio.run(_korpus(settings, args))
+
+
+async def _korpus(settings: Settings, args: argparse.Namespace) -> int:
+    from aruna.backtest.korpus import bangun
+    from aruna.core.enums import Horizon
+
+    app = ArunaApplication(settings)
+    try:
+        await app.startup(background=False)
+    except ArunaError as exc:
+        print(f"STARTUP FAILED: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    try:
+        interval = Horizon(args.interval)
+        simbol = await app.db.fetch(
+            "SELECT DISTINCT symbol FROM candles WHERE interval_code = %s "
+            "AND symbol LIKE '%%/%%' ORDER BY symbol",
+            interval.value,
+        )
+        candles: dict[str, list] = {}
+        for row in simbol:
+            candles[row["symbol"]] = await app.db.fetch(
+                "SELECT open_time, close_time, open, high, low, close, volume "
+                "FROM candles WHERE symbol = %s AND interval_code = %s "
+                "ORDER BY open_time",
+                row["symbol"],
+                interval.value,
+            )
+        if not candles:
+            print(f"tidak ada candle {interval.value} tersimpan", file=sys.stderr)
+            return EXIT_ERROR
+
+        korpus = bangun(candles, interval=interval)
+        dasar = korpus.garis_dasar
+        if dasar is None:
+            print("korpus kosong - tidak ada keputusan yang bisa dinilai")
+            return EXIT_ERROR
+
+        rentang = sorted(o.pada for o in korpus.opini)
+        _rule(f"KORPUS {interval.value}")
+        print(f"  simbol      : {len(candles)}")
+        print(f"  keputusan   : {len(korpus.keputusan):,}")
+        print(f"  opini agen  : {len(korpus.opini):,}")
+        print(f"  rentang     : {rentang[0].date()} .. {rentang[-1].date()}")
+        print(f"  gagal       : {korpus.gagal}")
+        print(f"  garis dasar : {dasar:.1%} naik")
+        print()
+        print("  Keunggulan diukur dalam POIN di atas garis dasar, bukan")
+        print("  akurasi. Nol berarti agen itu tidak menyumbang apa pun.")
+        print()
+        def _poin(nilai: float | None, n: int) -> str:
+            # Tidak diukur bukan diukur nol. "+0.0" di sebelah n=0 terbaca
+            # sebagai "agen ini netral", padahal artinya ia tidak pernah
+            # bersuara ke arah itu sama sekali.
+            if nilai is None or n < args.min_sample:
+                return f"{'-':>8}"
+            return f"{nilai:>+8.1f}"
+
+        print(f"  {'agen':12} {'BUY':>8} {'n':>7} {'SELL':>8} {'n':>7}")
+        for agen in sorted({o.agen for o in korpus.opini}):
+            eb, nb = korpus.edge(agen, "BUY")
+            es, ns = korpus.edge(agen, "SELL")
+            if max(nb, ns) < args.min_sample:
+                continue
+            print(f"  {agen:12} {_poin(eb, nb)} {nb:>7} {_poin(es, ns)} {ns:>7}")
+        print()
+        print("  ARUNA MENGANALISIS SAJA. Tidak ada order yang dikirim.")
+        return EXIT_OK
+    finally:
+        await app.shutdown()
+
+
 def cmd_strategies(args: argparse.Namespace) -> int:
     """Katalog strategi, statusnya, dan hasilnya (PASAL 12.7, 12.15)."""
     settings = _load_settings()
@@ -2561,6 +2649,25 @@ def build_parser() -> argparse.ArgumentParser:
         "--detail", action="store_true", help="ikut cetak deskripsi dan kondisi"
     )
     strategies.set_defaults(func=cmd_strategies)
+
+    korpus = sub.add_parser(
+        "korpus",
+        help="ukur keunggulan tiap agen atas korpus keputusan lintas regime",
+    )
+    korpus.add_argument(
+        "--interval",
+        default="1d",
+        help="interval candle yang diputar ulang (default 1d - satu-satunya "
+        "yang riwayatnya memuat lebih dari satu regime)",
+    )
+    korpus.add_argument(
+        "--min-sample",
+        type=int,
+        default=150,
+        help="agen dengan suara lebih sedikit dari ini tidak dicetak; "
+        "keunggulan dari sampel tipis adalah derau yang punya angka",
+    )
+    korpus.set_defaults(func=cmd_korpus)
 
     sub.add_parser("health", help="run one health sweep and print it as JSON").set_defaults(
         func=cmd_health
