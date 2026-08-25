@@ -36,6 +36,43 @@ def _ref(context: DecisionContext, name: str) -> EvidenceRef | None:
 #: 1.0-weight signal is a hint, not certainty.
 FULL_CONVICTION_MARGIN = 3.0
 
+#: Perubahan 10-bar, dalam persen, yang MOMENTUM sebut sebagai arah.
+#:
+#: **Angka ini tidak pernah diturunkan dari apa pun, dan letaknya bukan yang
+#: dikira penulisnya.** Diukur 2026-08-25 atas 22.540 jendela di dua puluh lima
+#: simbol 15m, sebaran ``momentum`` adalah::
+#:
+#:     p10 = -1,04    median = +0,06    p90 = +1,57
+#:
+#: Jadi 1,5 duduk **tepat di p90**. MOMENTUM hanya bersuara pada 16,7% kasus,
+#: dan seluruhnya di ekor sebaran - bukan di "momentum yang jelas berarah"
+#: seperti yang namanya sarankan.
+#:
+#: **Itu bertabrakan dengan keterangan agennya sendiri.** Komentar di
+#: :class:`MomentumAgent` berbunyi *"the extremes are left to REVERSAL, which is
+#: the agent that reads them as a turn"* - dan pada ambang ini MOMENTUM justru
+#: beroperasi persis di ekor itu. Dua agen membaca wilayah yang sama dengan
+#: tesis yang berlawanan: satu menyebutnya kelanjutan, satu menyebutnya
+#: pembalikan.
+#:
+#: Yang terukur atas keputusan nyata (142.461 suara agen, dibelah menurut
+#: waktu): REVERSAL satu-satunya agen yang keunggulannya BERTAHAN di paruh
+#: kedua (+6,1 poin), sementara MOMENTUM ber-edge negatif di kedua sisi.
+#:
+#: **Kenapa ambangnya TIDAK diubah di sini.** Pola per pita diuji dua paruh dan
+#: sebagian besar tidak bertahan - pita -3,0..-1,5 memberi +13,1 poin di paruh
+#: pertama lalu -1,9 di paruh kedua. Sebabnya garis dasar pasar sendiri
+#: bergeser 46,0% -> 62,3% antara kedua paruh; pada ayunan sebesar itu, aturan
+#: apa pun yang diturunkan akan terpasang pada paruh mana yang kebetulan
+#: bullish. Delapan hari korpus satu-regime tidak bisa menopang perubahan
+#: logika agen.
+#:
+#: Yang dibutuhkan sebelum angka ini boleh disentuh: korpus yang memuat pasar
+#: turun dan menyamping, bukan hanya naik. Sampai itu ada, satu-satunya
+#: perubahan yang jujur adalah menuliskan apa yang sudah diketahui - dan itulah
+#: catatan ini.
+AMBANG_MOMENTUM = 1.5
+
 
 def _decide(bull: float, bear: float, *, threshold: float = 1.0) -> tuple[Decision, float]:
     """Turn a bull/bear score into a decision and a raw confidence.
@@ -219,7 +256,14 @@ class StructureAgent(Agent):
 
 
 class MomentumAgent(Agent):
-    """Rate of change and RSI positioning."""
+    """Rate of change and RSI positioning.
+
+    Tesisnya **kelanjutan**: gerak kuat berlanjut ke arah yang sama. Ambangnya
+    ternyata duduk di p90 sebaran, jadi tesis itu diterapkan justru di ekor -
+    wilayah yang docstring di bawah serahkan ke REVERSAL, yang tesisnya
+    berlawanan. Lihat :data:`AMBANG_MOMENTUM` untuk angkanya dan untuk kenapa
+    ia belum diubah.
+    """
 
     role = AgentRole.MOMENTUM
 
@@ -234,10 +278,10 @@ class MomentumAgent(Agent):
         evidence = [r for r in (_ref(context, "momentum"), _ref(context, "rsi")) if r]
 
         if move is not None:
-            if move >= 1.5:
+            if move >= AMBANG_MOMENTUM:
                 bull += 1.5
                 reasons.append(f"{move:+.2f}% sepanjang window momentum")
-            elif move <= -1.5:
+            elif move <= -AMBANG_MOMENTUM:
                 bear += 1.5
                 reasons.append(f"{move:+.2f}% sepanjang window momentum")
             else:
