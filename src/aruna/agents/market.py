@@ -471,8 +471,44 @@ class RegimeAgent(Agent):
         bull = bear = 0.0
         reasons: list[str] = [f"regime {verdict.regime.value}"]
 
-        if verdict.regime is Regime.TRENDING:
-            # A trend regime is directional only once structure says which way.
+        if verdict.regime in (Regime.TRENDING_BULLISH, Regime.TRENDING_BEARISH):
+            # **Cabang ini hilang selama taksonomi berarah sudah jalan.**
+            # `Regime.TRENDING` pensiun ketika regime tren dipecah menurut
+            # arahnya (lihat catatan di :class:`~aruna.core.enums.Regime`), tapi
+            # agen ini tidak ikut diperbarui - jadi ia menguji `is
+            # Regime.TRENDING`, tidak pernah cocok, dan jatuh ke WAIT.
+            #
+            # Terukur 2026-08-25: sejak taksonomi itu masuk, 26,8% keputusan
+            # produksi mendarat di regime yang agen ini tidak bisa baca
+            # (TRENDING_BULLISH 19,1%, TRENDING_BEARISH 6,3%, BREAKDOWN 1,4%),
+            # dan cabang `TRENDING` cocok 0%. Di replay 9.805 keputusan, REGIME
+            # bilang SELL NOL kali - bukan sebaran yang timpang, melainkan jalur
+            # yang tidak bisa dilewati.
+            #
+            # Bekasnya condong panjang: di produksi REGIME bilang BUY 30,7% dan
+            # SELL 3,7%, karena satu-satunya jalur bearish yang tersisa lewat
+            # `BREAKOUT` - yang kini berarti "ke atas" saja.
+            naik = verdict.regime is Regime.TRENDING_BULLISH
+            # Structure boleh MEMBATALKAN, tidak boleh membalik. Labelnya sudah
+            # membawa arah, jadi structure tidak lagi diperlukan untuk
+            # menemukannya - tapi structure yang berlawanan berarti dua bacaan
+            # bertentangan, dan itu bukan edge. Sama hasilnya dengan `TRENDING`
+            # yang structure-nya belum punya arah, di cabang berikutnya.
+            lawan = TrendStructure.DOWNTREND if naik else TrendStructure.UPTREND
+            if trend is lawan:
+                reasons.append(
+                    f"regime {verdict.regime.value} tapi structure mengarah "
+                    f"{trend.value} - dua bacaan yang bertentangan"
+                )
+            elif naik:
+                bull += 2.0
+                reasons.append("regime tren naik")
+            else:
+                bear += 2.0
+                reasons.append("regime tren turun")
+        elif verdict.regime is Regime.TRENDING:
+            # Tren tanpa arah. Classifier tidak menghasilkannya lagi, tapi baris
+            # lama memuatnya dan masih dibaca ulang - lihat `Regime.TRENDING`.
             if trend is TrendStructure.UPTREND:
                 bull += 2.0
                 reasons.append("regime trend dengan structure mengarah naik")
@@ -481,7 +517,13 @@ class RegimeAgent(Agent):
                 reasons.append("regime trend dengan structure mengarah turun")
             else:
                 reasons.append("sedang trending, tapi structure belum punya arah")
-        elif verdict.regime is Regime.BREAKOUT:
+        elif verdict.regime in (Regime.BREAKOUT, Regime.BREAKDOWN):
+            # `BREAKDOWN` dipisah dari `BREAKOUT` di taksonomi yang sama, dan
+            # ikut tertinggal - tanpa cabang sama sekali, bukan cuma tanpa arah.
+            # Ia diberi perlakuan yang PERSIS sama dengan kembarannya: arahnya
+            # tetap dari structure. Membiarkan label regime yang menentukan di
+            # sini akan sekalian menggeser ambang `BREAKOUT` yang sedang bekerja,
+            # dan itu perubahan lain yang belum diukur.
             breakout = structure.breakout if structure else BreakoutState.NONE
             if breakout is BreakoutState.BREAKOUT_UP:
                 bull += 1.5

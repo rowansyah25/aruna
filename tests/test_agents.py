@@ -7,6 +7,7 @@ on: no agent has a permanent stance (SPEC 12, 48), the prosecutor may agree
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
@@ -28,8 +29,10 @@ from aruna.agents.market import (
 from aruna.agents.notrade import MIN_EDGE_CONFIDENCE, evaluate_no_trade
 from aruna.agents.risk import RiskAgent, RiskLevel, assess_risk
 from aruna.analysis.engine import AnalysisEngine
+from aruna.analysis.regime import RegimeVerdict
 from aruna.analysis.series import CandleSeries
-from aruna.core.enums import AgentRole, Decision, Horizon, Market, NoTradeReason
+from aruna.analysis.structure import BreakoutState, TrendStructure
+from aruna.core.enums import AgentRole, Decision, Horizon, Market, NoTradeReason, Regime
 from aruna.data.models import Candle, Provenance
 
 NOW = datetime(2026, 8, 17, 4, 0, tzinfo=UTC)
@@ -194,6 +197,112 @@ class TestNoPermanentBias:
         for agent in default_roster():
             opinion = agent.safe_evaluate(thin)
             assert opinion.decision in (Decision.BUY, Decision.SELL, Decision.WAIT)
+
+
+#: Regime yang NAMANYA sudah membawa arah, dan arah yang wajib keluar kalau
+#: structure tidak melawan. Daftar ini yang membuat pemekaran taksonomi
+#: berikutnya gagal keras di test, bukan diam-diam jadi WAIT di produksi.
+REGIME_BERARAH = {
+    Regime.TRENDING_BULLISH: (
+        Decision.BUY, TrendStructure.UPTREND, BreakoutState.NONE,
+    ),
+    Regime.TRENDING_BEARISH: (
+        Decision.SELL, TrendStructure.DOWNTREND, BreakoutState.NONE,
+    ),
+    Regime.BREAKOUT: (
+        Decision.BUY, TrendStructure.RANGE, BreakoutState.BREAKOUT_UP,
+    ),
+    Regime.BREAKDOWN: (
+        Decision.SELL, TrendStructure.RANGE, BreakoutState.BREAKOUT_DOWN,
+    ),
+    Regime.ACCUMULATION: (
+        Decision.BUY, TrendStructure.RANGE, BreakoutState.NONE,
+    ),
+    Regime.DISTRIBUTION: (
+        Decision.SELL, TrendStructure.RANGE, BreakoutState.NONE,
+    ),
+}
+
+
+class TestRegimeAgentMembacaTaksonomiBerarah:
+    """REGIME harus bisa membaca regime yang classifier BENAR-BENAR hasilkan.
+
+    `Regime.TRENDING` pensiun ketika regime tren dipecah menurut arahnya, dan
+    agen ini tidak ikut diperbarui: ia menguji `is Regime.TRENDING`, tidak
+    pernah cocok, lalu jatuh ke WAIT. `BREAKDOWN` yang dipisah dari `BREAKOUT`
+    di taksonomi yang sama bahkan tidak punya cabang sama sekali.
+
+    Terukur sebelum diperbaiki: 26,8% keputusan produksi mendarat di regime yang
+    tidak terbaca, dan di replay 9.805 keputusan REGIME bilang SELL nol kali.
+    """
+
+    def _dengan(
+        self,
+        regime: Regime,
+        *,
+        trend: TrendStructure = TrendStructure.RANGE,
+        breakout: BreakoutState = BreakoutState.NONE,
+    ) -> DecisionContext:
+        """Konteks nyata dengan regime dan structure yang ditentukan.
+
+        Dibangun dengan `replace` di atas snapshot asli, bukan objek palsu:
+        palsu yang bidangnya menyimpang dari aslinya adalah cara test ini bisa
+        hijau di atas agen yang rusak.
+        """
+        base = context_from(FALLING)
+        assert base.technical is not None
+        technical = replace(
+            base.technical,
+            regime=RegimeVerdict(regime=regime, confidence=0.8, evidence_used=5),
+            structure=replace(
+                base.technical.structure, trend=trend, breakout=breakout
+            ),
+        )
+        return replace(base, technical=technical)
+
+    def test_tren_turun_berarah_terbaca_sebagai_sell(self) -> None:
+        opinion = RegimeAgent().safe_evaluate(
+            self._dengan(Regime.TRENDING_BEARISH, trend=TrendStructure.DOWNTREND)
+        )
+        assert opinion.decision is Decision.SELL
+
+    def test_tren_naik_berarah_terbaca_sebagai_buy(self) -> None:
+        opinion = RegimeAgent().safe_evaluate(
+            self._dengan(Regime.TRENDING_BULLISH, trend=TrendStructure.UPTREND)
+        )
+        assert opinion.decision is Decision.BUY
+
+    def test_breakdown_terbaca_seperti_kembarannya(self) -> None:
+        """`BREAKDOWN` tidak punya cabang sama sekali - bukan cuma tanpa arah."""
+        opinion = RegimeAgent().safe_evaluate(
+            self._dengan(Regime.BREAKDOWN, breakout=BreakoutState.BREAKOUT_DOWN)
+        )
+        assert opinion.decision is Decision.SELL
+
+    def test_structure_yang_berlawanan_membatalkan_bukan_membalik(self) -> None:
+        """Dua bacaan yang bertentangan bukan edge ke salah satu sisi."""
+        opinion = RegimeAgent().safe_evaluate(
+            self._dengan(Regime.TRENDING_BULLISH, trend=TrendStructure.DOWNTREND)
+        )
+        assert opinion.decision is Decision.WAIT
+
+    def test_tren_tanpa_arah_masih_terbaca_lewat_structure(self) -> None:
+        """Baris lama masih memuat `TRENDING`, dan masih dibaca ulang."""
+        opinion = RegimeAgent().safe_evaluate(
+            self._dengan(Regime.TRENDING, trend=TrendStructure.DOWNTREND)
+        )
+        assert opinion.decision is Decision.SELL
+
+    @pytest.mark.parametrize("regime", list(REGIME_BERARAH), ids=lambda r: r.value)
+    def test_setiap_regime_berarah_menghasilkan_arah(self, regime: Regime) -> None:
+        harus, trend, breakout = REGIME_BERARAH[regime]
+        opinion = RegimeAgent().safe_evaluate(
+            self._dengan(regime, trend=trend, breakout=breakout)
+        )
+        assert opinion.decision is harus, (
+            f"{regime.value} tidak menghasilkan {harus.value} - kalau regime ini "
+            "baru dipecah dari yang lain, cabangnya di RegimeAgent belum ada"
+        )
 
 
 class TestConfidenceCalibration:
