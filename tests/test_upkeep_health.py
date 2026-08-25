@@ -526,6 +526,154 @@ class TestLoopYangBerputarTanpaMenjangkauApaPun:
         assert "sejak terakhir kali ada sinyal yang berhasil dinilai" in sweeps[-1].message
 
 
+class TestSiklusMencatatKapanSelesaiBukanKapanMulai:
+    """`last_cycle_at` menjawab "kapan loop terakhir MENYELESAIKAN sesuatu".
+
+    Versi lama menyimpan `moment` - stempel yang diambil di AWAL siklus dan
+    dioper ke setiap fase sebagai "as of". Benar untuk fase-fase itu, salah
+    untuk pertanyaan ini: umur yang dibaca penjaga kesehatan jadi durasi siklus
+    LALU ditambah waktu berjalan siklus SEKARANG. Dobel hitung, dan itu separuh
+    dari kenapa penjaganya berteriak pada 100% siklus sehat.
+    """
+
+    async def test_stempelnya_tidak_mendahului_pekerjaannya(self) -> None:
+        import asyncio as _asyncio
+
+        class _Lambat:
+            def __init__(self) -> None:
+                self.schedule: dict = {}
+
+            async def refresh(self, *, now: datetime) -> RefreshResult:
+                await _asyncio.sleep(0.05)
+                return RefreshResult()
+
+            def state(self) -> dict:
+                return self.schedule
+
+        mulai = datetime(2026, 8, 25, 5, 0, tzinfo=UTC)
+        loop = _loop(_Lambat(), _Resolver(), resolve_enabled=False)
+        await loop.cycle(now=mulai)
+
+        assert loop.stats.last_cycle_at is not None
+        assert loop.stats.last_cycle_at > mulai, (
+            "siklus dicap selesai pada detik ia mulai - pekerjaannya tidak "
+            "terhitung, dan penjaga kesehatan membacanya sebagai umur ekstra"
+        )
+
+    async def test_durasinya_dicatat_untuk_menghitung_anggaran(self) -> None:
+        loop = _loop(_Refresher(), _Resolver(), resolve_enabled=False)
+        await loop.cycle()
+
+        assert len(loop.stats.cycle_seconds) == 1
+        assert loop.stats.durasi_khas is not None
+
+    async def test_belum_ada_siklus_berarti_belum_terukur(self) -> None:
+        """Belum terukur bukan nol - dan nol akan membuat anggarannya nol."""
+        stats = UpkeepStats(started_at=now_utc())
+
+        assert stats.durasi_khas is None
+
+    async def test_jendelanya_tidak_tumbuh_tanpa_batas(self) -> None:
+        """Sepekan tanpa pengawasan tidak boleh menumbuhkan daftar ini."""
+        from aruna.upkeep.loop import CYCLE_WINDOW
+
+        stats = UpkeepStats(started_at=now_utc())
+        for i in range(CYCLE_WINDOW * 3):
+            stats.catat_durasi(float(i))
+
+        assert len(stats.cycle_seconds) == CYCLE_WINDOW
+        # Yang tersisa harus yang TERBARU, bukan yang terlama.
+        assert stats.cycle_seconds[-1] == float(CYCLE_WINDOW * 3 - 1)
+
+
+class TestAnggaranMacetDiturunkanDariDurasiSiklus:
+    """Penjaga "loop macet" yang berteriak pada siklus SEHAT bukan penjaga.
+
+    Dua cacat, dan keduanya harus dibongkar untuk memperbaikinya:
+
+    * `last_cycle_at` menyimpan waktu MULAI siklus, jadi umur yang dibaca di
+      sini adalah durasi siklus lalu ditambah waktu berjalan siklus sekarang;
+    * anggarannya `tick_sec * 4`, yang mengandaikan satu siklus jauh lebih
+      murah daripada satu tick.
+
+    Terukur 2026-08-25 atas 401 siklus sehat: siklus memakan p50 64 detik
+    terhadap tick 15 detik, dan penjaganya melanggar batasnya sendiri pada 100%
+    siklus - 207 CRITICAL dalam 29 jam, semuanya palsu.
+    """
+
+    @staticmethod
+    def _loop_dengan_siklus(detik: float, *, sejak: float):
+        """Loop yang siklusnya memakan ``detik`` dan selesai ``sejak`` detik lalu."""
+        loop = _loop(_Refresher(), _Resolver(), tick_sec=15.0)
+        loop.stats.cycles = 20
+        loop.stats.candles = 400
+        loop.stats.cycle_seconds = [detik] * 10
+        loop.stats.last_cycle_at = now_utc() - timedelta(seconds=sejak)
+        return loop
+
+    async def test_siklus_berat_yang_baru_selesai_bukan_macet(self) -> None:
+        """Siklus 64 detik yang selesai 30 detik lalu - persis bentuk yang
+        dulu memicu CRITICAL, dan tidak ada yang salah dengannya."""
+        loop = self._loop_dengan_siklus(64.0, sejak=30.0)
+        async with _alive(loop):
+            health = await UpkeepCheck(loop, background=True).check()
+
+        assert health.status is not HealthStatus.DOWN
+        assert "macet" not in health.message
+
+    async def test_ekor_sebaran_yang_sehat_juga_bukan_macet(self) -> None:
+        """p99 siklus adalah enam kali p50. Anggaran yang tidak memuat ekornya
+        akan menyebut sebaran normal sebagai kerusakan."""
+        loop = self._loop_dengan_siklus(64.0, sejak=385.0)
+        async with _alive(loop):
+            health = await UpkeepCheck(loop, background=True).check()
+
+        assert health.status is not HealthStatus.DOWN
+
+    async def test_yang_benar_benar_macet_tetap_ditangkap(self) -> None:
+        """Pasangannya. Tanpa ini, perbaikan di atas bisa "lulus" dengan
+        melebarkan anggaran sampai tak terhingga."""
+        loop = self._loop_dengan_siklus(64.0, sejak=3600.0)
+        async with _alive(loop):
+            health = await UpkeepCheck(loop, background=True).check()
+
+        assert health.status is HealthStatus.DOWN
+        assert "macet" in health.message
+
+    async def test_anggaran_mengikuti_mesin_yang_lambat(self) -> None:
+        """Mesin yang siklusnya empat kali lebih lama melebarkan anggarannya
+        sendiri - tanpa siapa pun menyunting konstanta.
+
+        Umur yang sama dinilai macet di mesin cepat dan sehat di mesin lambat,
+        dan itu memang seharusnya: yang ditanya "apakah ini lebih lama dari
+        biasanya", bukan "apakah ini lebih lama dari angka yang ditulis sekali".
+        """
+        cepat = self._loop_dengan_siklus(10.0, sejak=300.0)
+        lambat = self._loop_dengan_siklus(120.0, sejak=300.0)
+
+        async with _alive(cepat):
+            vonis_cepat = await UpkeepCheck(cepat, background=True).check()
+        async with _alive(lambat):
+            vonis_lambat = await UpkeepCheck(lambat, background=True).check()
+
+        assert vonis_cepat.status is HealthStatus.DOWN
+        assert vonis_lambat.status is not HealthStatus.DOWN
+
+    async def test_sebelum_ada_siklus_selesai_anggaran_jatuh_ke_tick(self) -> None:
+        """Belum terukur bukan nol. Tanpa satu pun durasi tersimpan, anggaran
+        lama yang dipakai - bukan anggaran nol yang menyebut semuanya macet."""
+        loop = _loop(_Refresher(), _Resolver(), tick_sec=15.0)
+        loop.stats.cycles = 1
+        loop.stats.candles = 10
+        loop.stats.cycle_seconds = []
+        loop.stats.last_cycle_at = now_utc() - timedelta(seconds=90)
+        async with _alive(loop):
+            health = await UpkeepCheck(loop, background=True).check()
+
+        assert health.status is HealthStatus.DOWN
+        assert "macet" in health.message
+
+
 class TestNolTidakDiucapkanSebagaiCacat:
     """Rule C: a nought that means "nothing wrong" must never be announced as
     a finding.

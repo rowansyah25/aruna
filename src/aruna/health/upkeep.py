@@ -65,6 +65,20 @@ STARVED_DEFERRALS = 2
 #: is treated as a verdict rather than as a loop that has only just started.
 MIN_CYCLES_FOR_VERDICT = 3
 
+#: Berapa kali durasi siklus KHAS boleh lewat sebelum loop disebut macet.
+#:
+#: Delapan, dan angkanya disimulasikan - bukan dipilih. Atas 401 siklus sehat
+#: yang tercatat 2026-08-24..25::
+#:
+#:     tick*4 = 60 detik (aturan lama)   alarm palsu 399/401 = 100%
+#:     4 x median siklus                 alarm palsu  19/401 =   5%
+#:     8 x median siklus                 alarm palsu   0/401 =   0%
+#:
+#: Pengali harus di atas enam karena durasi siklus sendiri menyebar sekitar enam
+#: kali antara p50 dan p99; apa pun di bawah itu menangkap ekor sebaran yang
+#: sehat dan menyebutnya macet.
+SLACK_SIKLUS = 8.0
+
 
 def last_idx_trading_instant(moment: datetime) -> datetime:
     """The most recent instant IDX was matching orders, never later than ``moment``.
@@ -537,9 +551,32 @@ class UpkeepCheck:
                 details=details,
             )
 
-        # Four ticks of slack: one missed cycle is a hiccup, four in a row is a
-        # task that is stuck rather than slow.
-        stale_after = loop.settings.tick_sec * 4
+        # **Anggaran ini diturunkan dari durasi siklus, bukan dari tick.**
+        #
+        # Versi lama memakai `tick_sec * 4` dengan alasan "empat tick kelonggaran:
+        # satu siklus terlewat itu cegukan, empat berturut-turut itu macet". Niat
+        # itu benar; satuannya yang salah. Empat tick sama dengan empat siklus
+        # HANYA kalau satu siklus kira-kira semahal satu tick. Terukur 2026-08-25
+        # atas 401 siklus sehat: satu siklus memakan p50 64 detik terhadap tick
+        # 15 detik - jadi `tick_sec * 4` = 60 detik bahkan lebih pendek dari SATU
+        # siklus, dan penjaganya melanggar batasnya sendiri pada 100% siklus.
+        # 207 teriakan CRITICAL dalam 29 jam, semuanya palsu.
+        #
+        # Alarm yang salah 207 kali bukan alarm; ia melatih operator mengabaikan
+        # warna merah, dan warna merah itulah satu-satunya yang tersisa untuk
+        # macet yang sungguhan.
+        #
+        # Pengalinya delapan, bukan empat, karena durasi siklus SENDIRI menyebar
+        # lebar: p50 64 detik tapi p99 385 detik, rentang enam kali. Pengali di
+        # bawah enam pasti kena ekornya. Disimulasikan atas siklus nyata yang
+        # sama: 4x median menyisakan 5% alarm palsu, 8x median menyisakan NOL,
+        # dengan ambang 552 detik - masih menangkap macet sungguhan dalam
+        # sepuluh menit.
+        khas = stats.durasi_khas
+        stale_after = max(
+            loop.settings.tick_sec * 4,
+            SLACK_SIKLUS * khas if khas is not None else 0.0,
+        )
         age = (now_utc() - stats.last_cycle_at).total_seconds()
         if age > stale_after:
             return ComponentHealth(

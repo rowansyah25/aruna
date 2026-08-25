@@ -38,6 +38,8 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
+from statistics import median
+from time import monotonic
 from typing import Any
 
 from aruna.core.clock import idx_active, isoformat, now_utc
@@ -53,6 +55,12 @@ log = get_logger("aruna.upkeep")
 #: Bound on the stored error list, mirroring LoopStats: an unattended week of
 #: failures must not grow without limit.
 MAX_ERRORS = 200
+
+#: Berapa siklus terakhir yang durasinya disimpan untuk menghitung anggaran
+#: "macet". Cukup panjang supaya satu siklus berat tidak menggeser mediannya,
+#: cukup pendek supaya mesin yang berubah kecepatan diikuti dalam hitungan
+#: menit, bukan hari.
+CYCLE_WINDOW = 50
 
 #: Berapa pasangan ``(market, horizon)`` yang dikunci dalam SATU siklus.
 #:
@@ -361,9 +369,42 @@ class UpkeepStats:
     #: Same reasoning for the locking phase: "0 prediksi dikunci" has to be
     #: separable from "locking was never switched on".
     lock_enabled: bool = True
+    #: Kapan siklus terakhir SELESAI - bukan kapan ia mulai. Bedanya satu
+    #: durasi siklus penuh, dan penjaga kesehatan membandingkannya dengan
+    #: anggaran yang lebih pendek dari itu.
     last_cycle_at: datetime | None = None
     last_resolve_at: datetime | None = None
+    #: Durasi beberapa siklus terakhir, dalam detik.
+    #:
+    #: **Ada supaya anggaran "macet" bisa diturunkan dari apa yang siklus ini
+    #: benar-benar makan, bukan dari tebakan yang dituliskan sekali.** Anggaran
+    #: lama `tick_sec * 4` mengandaikan satu siklus jauh lebih murah daripada
+    #: satu tick; terukur 2026-08-25, satu siklus memakan p50 64 detik terhadap
+    #: tick 15 detik - jadi "empat tick" bahkan bukan satu siklus.
+    cycle_seconds: list[float] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+
+    def catat_durasi(self, detik: float) -> None:
+        """Simpan durasi siklus, buang yang paling lama.
+
+        Jendelanya bergerak supaya anggaran mengikuti mesin apa adanya: mesin
+        yang jadi lebih lambat melebarkan anggarannya sendiri, dan mesin yang
+        jadi lebih cepat mengetatkannya - tanpa siapa pun menyunting konstanta.
+        """
+        self.cycle_seconds.append(detik)
+        if len(self.cycle_seconds) > CYCLE_WINDOW:
+            del self.cycle_seconds[0]
+
+    @property
+    def durasi_khas(self) -> float | None:
+        """Durasi siklus yang khas, atau ``None`` kalau belum ada yang selesai.
+
+        ``None`` berarti belum terukur, dan itu harus tetap bisa dibedakan dari
+        nol - pemanggilnya yang memutuskan apa yang dipakai sebagai pengganti.
+        """
+        if not self.cycle_seconds:
+            return None
+        return median(self.cycle_seconds)
 
     def note_error(self, message: str) -> None:
         if len(self.errors) < MAX_ERRORS:
@@ -673,6 +714,7 @@ class UpkeepLoop:
         stored deserve scoring even while a venue is unreachable.
         """
         moment = now or now_utc()
+        mulai = monotonic()
         stats = self._stats
 
         try:
@@ -859,7 +901,21 @@ class UpkeepLoop:
             await self._beat(moment)
 
         stats.cycles += 1
-        stats.last_cycle_at = moment
+        # **Waktu SELESAI, bukan waktu mulai.** `moment` diambil di awal siklus
+        # dan dioper ke setiap fase sebagai "as of" - benar untuk mereka, salah
+        # untuk pertanyaan "kapan loop terakhir menyelesaikan sesuatu".
+        #
+        # Sebelumnya `moment` yang disimpan di sini, jadi umur yang dibaca
+        # penjaga kesehatan adalah durasi siklus LALU ditambah waktu berjalan
+        # siklus SEKARANG - dobel hitung. Terukur 2026-08-25 atas 401 siklus
+        # sehat: penjaganya melanggar batasnya sendiri pada 100% siklus.
+        #
+        # Durasinya diukur dengan jam monotonik, bukan selisih jam dinding,
+        # supaya penyetelan jam atau `now=` di test tidak menghasilkan durasi
+        # negatif atau raksasa.
+        durasi = max(0.0, monotonic() - mulai)
+        stats.catat_durasi(durasi)
+        stats.last_cycle_at = moment + timedelta(seconds=durasi)
         return stats
 
     async def _beat(self, moment: datetime) -> None:
