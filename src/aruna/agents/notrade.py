@@ -17,8 +17,40 @@ from aruna.agents.context import DecisionContext
 from aruna.agents.risk import RiskAssessment, RiskLevel, assess_risk
 from aruna.core.enums import Decision, Market, NoTradeReason, Regime
 
-#: Below this, a council decision is not an edge - it is a coin toss with a
-#: number attached.
+#: Batas keyakinan sebelum sebuah putusan boleh disebut punya edge.
+#:
+#: **Kalimat aslinya - "di bawah ini bukan edge, melainkan lemparan koin dengan
+#: angka menempel" - diukur pada 2026-08-25 dan TIDAK benar.** Yang di atas
+#: ambang sama-sama lemparan koin.
+#:
+#: Diukur atas 10.795 putusan hakim (diambil dari `judge_decisions`, yaitu
+#: SEBELUM no-trade memblokir - `council_sessions` tidak bisa dipakai karena
+#: gerbang ini menghapus persis baris yang dibutuhkan untuk menilainya), gerak
+#: satu bar ke depan, dibandingkan koin berkomposisi arah yang sama::
+#:
+#:     0,00-0,10   n=2699   edge -3,9
+#:     0,10-0,20   n=2046   edge -2,7
+#:     0,20-0,35   n=2078   edge -0,1   <- pita terbaik, dan ia diblokir
+#:     0,35-0,50   n=1123   edge -1,9
+#:     0,50-0,70   n=1286   edge -1,2
+#:     0,70-1,01   n=1563   edge -3,8   <- pita paling yakin, dan paling buruk
+#:
+#:     di bawah 0,35: edge -2,4      di atas 0,35: edge -2,4
+#:
+#: Keduanya identik. Keyakinan bukan cuma gagal memisahkan edge - urutannya
+#: sedikit TERBALIK, dan pita paling percaya diri justru paling sering salah.
+#:
+#: **Angkanya tetap 0,35, dan itu keputusan yang diukur juga.** Melonggarkannya
+#: hanya berguna kalau di baliknya ada sesuatu yang gerbang lain bisa saring;
+#: tidak ada. Dari yang dibungkam ambang ini, yang kesepakatan agennya mencapai
+#: lima hanya 12 kasus, dan edge-nya -9,2. Yang dilepas bukan sinyal yang
+#: tertahan, melainkan lebih banyak koin.
+#:
+#: Jadi ia dipertahankan sebagai PEMBATAS VOLUME yang tidak merugikan, bukan
+#: sebagai penyaring edge. Siapa pun yang menyetel angka ini nanti harus tahu
+#: bedanya: menaikkannya mengurangi sinyal tanpa menaikkan mutu, dan
+#: menurunkannya menambah sinyal tanpa menaikkan mutu. Yang terbukti memisahkan
+#: adalah KESEPAKATAN agen - lihat `aruna.futures.plan.MIN_SEPAKAT`.
 MIN_EDGE_CONFIDENCE = 0.35
 
 #: Fewer independent agents than this and there is nothing to weigh.
