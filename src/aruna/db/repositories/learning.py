@@ -12,9 +12,11 @@ replace the finding rather than pile up duplicates.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from datetime import datetime, timedelta
 from typing import Any
 
+from aruna.backtest.korpus import Opini
 from aruna.core.clock import now_utc
 from aruna.core.enums import Stance, VetoReviewOutcome
 from aruna.db.pool import Database
@@ -37,6 +39,29 @@ OBJECTING_STANCES: tuple[str, ...] = (
     Stance.OBJECT.value,
     Stance.COUNTER_PROPOSE.value,
 )
+
+
+def _gerak_satu_bar(
+    deret: list[tuple[datetime, float]] | None, saat: datetime
+) -> float | None:
+    """Gerak harga satu bar ke depan dari ``saat``, dalam persen.
+
+    ``None`` berarti belum bisa dinilai - bukan nol. Sebuah keputusan yang bar
+    berikutnya belum tutup adalah keputusan yang belum sempat terbukti, dan
+    menghitungnya sebagai kegagalan akan menghukum tiap keputusan terbaru
+    justru karena ia terbaru. Bar yang belum tutup juga masih bergerak, jadi
+    menilai terhadapnya membaca harga yang belum final (SPEC 24).
+    """
+    if not deret:
+        return None
+    # `deret` sudah terurut menurut waktu tutup.
+    i = bisect_right([t for t, _ in deret], saat)
+    if i == 0 or i >= len(deret):
+        return None
+    dasar = deret[i - 1][1]
+    if dasar <= 0:
+        return None
+    return (deret[i][1] - dasar) / dasar * 100
 
 
 class LearningRepository:
@@ -269,31 +294,129 @@ class LearningRepository:
         The agent's own decision comes from the stored judge weights, so an
         agent is scored on what it argued rather than on what the council
         concluded.
+
+        **Sumbernya keputusan council HIDUP yang dinilai dari candle tersimpan,
+        bukan lagi hasil spot.** Versi sebelumnya berlabuh di
+        ``signal_snapshots`` -> ``signals`` -> ``paper_results``; ketiganya
+        berhenti tumbuh ketika jalur spot dicabut (2026-08-25). Kuerinya tidak
+        gagal - ia memulangkan baris beku yang sama selamanya, jadi
+        ``build_reliability`` menghitung ulang angka yang identik tiap siklus
+        dan pengali agen tidak pernah lagi bergerak. Terukur: dua snapshot
+        berurutan sama persis sampai empat desimal.
+
+        Cacat itu tidak bisa dilihat dari mana pun. Tabelnya terisi, kuerinya
+        sukses, loop-nya jalan - yang mati cuma pertumbuhannya.
+
+        Gantinya tidak menuntut jalur baru: ``council_sessions`` dan
+        ``judge_decisions`` tumbuh tiap siklus, dan gerak harga sesudah tiap
+        keputusan ada di ``candles``. Definisi "benar" diambil dari
+        :class:`~aruna.backtest.korpus.Opini` - satu definisi untuk replay dan
+        untuk keputusan hidup, supaya keduanya tidak bisa berpisah diam-diam.
+
+        ``futures_ghost_results`` sengaja TIDAK dipakai meski 7.240 baris dan
+        tumbuh tiap jam: ``max_move_pct`` di sana besaran tanpa tanda (0 dari
+        7.240 negatif) dan ``side`` selalu FLAT. Ia bisa menjawab "ada gerakan
+        selagi ARUNA diam", tidak bisa menjawab "ke arah mana". Agen yang
+        dinilai dari sana hanya akan mempelajari satu hal - bicara lebih banyak
+        - dan itu jalan kembali ke akurasi 50,4% yang baru saja ditinggalkan.
         """
         rows = await self._db.fetch(
-            "SELECT j.weights, c.decision AS council_decision, "
-            "r.direction_correct "
-            "FROM signal_snapshots s "
-            "JOIN signals g ON g.signal_id = s.signal_id "
-            "JOIN paper_results r ON r.signal_id = s.signal_id "
-            "JOIN council_sessions c ON c.id = s.council_session_id "
+            "SELECT c.id, c.market_code, c.symbol, c.interval_code, "
+            "c.decided_at, c.decision AS council_decision, j.weights "
+            "FROM council_sessions c "
             "JOIN judge_decisions j ON j.session_id = c.id "
-            "WHERE s.direction IN ('BUY', 'SELL') AND g.published = TRUE "
-            "ORDER BY s.locked_at DESC LIMIT %s",
+            "WHERE c.decision IN ('BUY', 'SELL') "
+            "ORDER BY c.decided_at DESC LIMIT %s",
             limit,
         )
+        if not rows:
+            return []
+
+        deret = await self._deret_penutupan(rows)
+
         out: list[dict[str, Any]] = []
         for row in rows:
+            gerak = _gerak_satu_bar(
+                deret.get((str(row["market_code"]), str(row["symbol"]),
+                           str(row["interval_code"]))),
+                as_utc(row["decided_at"]),
+            )
+            # Belum ada bar yang tertutup sesudah keputusan ini. Dilewati, BUKAN
+            # dihitung nol: keputusan yang belum sempat terbukti bukan keputusan
+            # yang salah, dan memasukkannya sebagai kegagalan akan menghukum
+            # setiap keputusan terbaru justru karena ia terbaru.
+            if gerak is None:
+                continue
+
+            benar = Opini(
+                symbol=str(row["symbol"]),
+                pada=as_utc(row["decided_at"]),
+                agen="",
+                arah=str(row["council_decision"]),
+                keyakinan=0.0,
+                council=str(row["council_decision"]),
+                gerak_pct=gerak,
+            ).benar
+
             for weight in load_json(row["weights"]) or []:
                 out.append(
                     {
                         "agent": weight.get("role"),
                         "agent_decision": weight.get("decision"),
                         "council_decision": row["council_decision"],
-                        "direction_correct": bool(row["direction_correct"]),
+                        "direction_correct": bool(benar),
                     }
                 )
         return out
+
+    async def _deret_penutupan(
+        self, sesi: list[dict[str, Any]]
+    ) -> dict[tuple[str, str, str], list[tuple[datetime, float]]]:
+        """Semua penutupan yang dibutuhkan seluruh sesi, dalam SATU kueri.
+
+        **Versi pertama menanyakan dua kueri per sesi dan tidak pernah
+        selesai.** Enam ribu perjalanan bolak-balik, dan tiap satunya
+        pemindaian tabel penuh - karena kueri itu menyaring ``close_time``,
+        yang tidak punya indeks. Yang ada ``candles_lookup_idx`` atas
+        ``(market_code, symbol, interval_code, open_time)``.
+
+        Jadi penyaringannya memakai ``open_time``, dan urutannya identik:
+        ``close_time = open_time + interval`` untuk tiap baris di satu
+        interval, jadi mengurutkan salah satunya mengurutkan keduanya. Batas
+        bawahnya dilonggarkan satu langkah lewat ``MIN(decided_at)`` supaya bar
+        yang menaungi keputusan paling awal tetap terbawa.
+
+        Ini berjalan di dalam loop upkeep, jadi biayanya bukan detail: satu pass
+        yang menghabiskan puluhan detik akan menaikkan waktu siklus, dan itu
+        persis cacat yang baru saja dicabut dari loop ini.
+        """
+        pasangan = {
+            (str(r["market_code"]), str(r["symbol"]), str(r["interval_code"]))
+            for r in sesi
+        }
+        paling_awal = min(as_utc(r["decided_at"]) for r in sesi)
+
+        pasar = sorted({p[0] for p in pasangan})
+        slot = ", ".join(["%s"] * len(pasar))
+        baris = await self._db.fetch(
+            "SELECT market_code, symbol, interval_code, close_time, close "
+            f"FROM candles WHERE market_code IN ({slot}) AND open_time >= %s "
+            "ORDER BY market_code, symbol, interval_code, open_time",
+            *pasar,
+            to_mysql_datetime(paling_awal - timedelta(days=2)),
+        )
+
+        deret: dict[tuple[str, str, str], list[tuple[datetime, float]]] = {}
+        for b in baris:
+            kunci = (
+                str(b["market_code"]), str(b["symbol"]), str(b["interval_code"])
+            )
+            if kunci not in pasangan:
+                continue
+            deret.setdefault(kunci, []).append(
+                (as_utc(b["close_time"]), float(b["close"]))
+            )
+        return deret
 
     async def overruled_objections(self, *, limit: int = 2000) -> list[dict[str, Any]]:
         """Objections raised against a call that was made anyway (SPEC 26)."""

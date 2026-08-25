@@ -196,22 +196,57 @@ class TestAgentDihitungLangsung:
     """
 
     def _repo(self, opinions: int, correct: int):
+        """Fake yang bentuknya mengikuti sumber SEKARANG: keputusan hidup.
+
+        `agent_outcomes` tidak lagi membaca `direction_correct` dari
+        `paper_results` - tabel itu berhenti tumbuh saat spot dicabut. Benar
+        atau salahnya sekarang dihitung dari gerak candle sesudah keputusan,
+        jadi fake ini memberi tiap sesi simbolnya sendiri: yang benar naik,
+        yang salah turun. Palsu yang bidangnya menyimpang dari sumber aslinya
+        adalah cara test ini bisa hijau di atas kode yang rusak.
+        """
         import json
+        from datetime import UTC, datetime, timedelta
 
         from aruna.db.repositories.daily import DailyRepository
 
         bobot = json.dumps([{"role": "TECHNICAL", "decision": "BUY"}])
+        saat = datetime(2026, 8, 20, 12, 0, tzinfo=UTC).replace(tzinfo=None)
+
+        sesi = [
+            {
+                "id": i,
+                "market_code": "CRYPTO",
+                "symbol": f"S{i}/USDT",
+                "interval_code": "1d",
+                "decided_at": saat,
+                "council_decision": "BUY",
+                "weights": bobot,
+            }
+            for i in range(opinions)
+        ]
+        candles = []
+        for i in range(opinions):
+            # Council bilang BUY, jadi naik = benar.
+            sesudah = 110.0 if i < correct else 90.0
+            candles.append({
+                "market_code": "CRYPTO", "symbol": f"S{i}/USDT",
+                "interval_code": "1d",
+                "close_time": saat - timedelta(days=1), "close": 100.0,
+            })
+            candles.append({
+                "market_code": "CRYPTO", "symbol": f"S{i}/USDT",
+                "interval_code": "1d",
+                "close_time": saat + timedelta(days=1), "close": sesudah,
+            })
 
         class _Db:
             async def fetch(self, sql, *args):
-                return [
-                    {
-                        "weights": bobot,
-                        "council_decision": "BUY",
-                        "direction_correct": i < correct,
-                    }
-                    for i in range(opinions)
-                ]
+                if "council_sessions" in sql:
+                    return list(sesi)
+                if "FROM candles" in sql:
+                    return list(candles)
+                return []
 
         return DailyRepository(_Db())
 
