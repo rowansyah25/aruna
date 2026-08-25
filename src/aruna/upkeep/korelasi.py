@@ -52,7 +52,32 @@ log = get_logger("aruna.upkeep.korelasi")
 #: korelasi 1h yang tersimpan rapi sementara futures merencanakan 4h adalah
 #: tabel terisi yang tidak pernah terbaca - persis cacat yang modul ini ada
 #: untuk menutupnya, cuma pindah satu interval.
-HORIZON_KEPUTUSAN: Horizon = Horizon.H4
+#:
+#: **Empat jam sampai 2026-08-25, dan empat jam terlalu pendek untuk biayanya.**
+#: Biaya transaksi TETAP sekitar 0,14% dari notional, sementara jarak yang
+#: ditempuh pasar tumbuh dengan akar horizon. Akibatnya di 4 jam: 231 rencana
+#: yang dinilai berakhir 214 EXPIRED (93%), 14 kena stop, 3 kena target.
+#:
+#: Ditelusuri bar demi bar atas 25 simbol, dengan stop diperiksa lebih dulu pada
+#: bar yang sama:
+#:
+#: =========  ========  ======  =========  ========
+#: horizon    target    stop    hit rate   expired
+#: =========  ========  ======  =========  ========
+#: 4 jam      1,50%     1,00%   46,4%      47,3%
+#: 12 jam     3,46%     2,60%   61,9%      60,1%
+#: 1 hari     3,67%     2,45%   58,8%      43,2%
+#: =========  ========  ======  =========  ========
+#:
+#: **Yang TIDAK diklaim:** ini tidak menciptakan keunggulan. Diuji di kedua
+#: sisi, ekspektansi rata-rata tetap negatif sebesar biaya di setiap horizon -
+#: yang membaik hanya sisi LONG, dan itu tren pasar. Yang diperbaiki di sini
+#: rencananya jadi SELESAI dan rasionya masuk akal; untungnya tetap harus datang
+#: dari arah yang benar.
+#:
+#: Candle 1d untuk crypto sudah ada dan lebih dalam daripada 4h - 507 bar per
+#: simbol lawan sekitar 540 bar 4h yang hanya menjangkau tiga bulan.
+HORIZON_KEPUTUSAN: Horizon = Horizon.D1
 
 #: Bar minimum sebelum sebuah aset boleh ikut dihitung.
 #:

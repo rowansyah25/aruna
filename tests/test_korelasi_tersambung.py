@@ -179,8 +179,16 @@ class TestPenyegarnyaSendiri:
         Memintanya tiap jam menghasilkan peringatan yang tidak akan pernah bisa
         diperbaiki oleh data, dan peringatan yang selalu ada berhenti dibaca -
         lalu ia menutupi peringatan yang berarti sesuatu.
+
+        **Horizonnya disebut di sini, bukan dipinjam dari ``HORIZON_KEPUTUSAN``.**
+        Versi pertama mengandalkan bawaannya, dan bawaan itu pindah ke 1d pada
+        2026-08-25 - interval yang IDX justru PUNYA, jadi testnya merah tanpa
+        satu pun aturan berubah. Yang diuji "pasar tanpa horizonnya dilewati",
+        dan itu butuh horizon yang memang tidak ditawarkan pasar itu.
         """
-        penyegar, _ = _penyegar(markets=(Market.CRYPTO, Market.IDX))
+        penyegar, _ = _penyegar(
+            markets=(Market.CRYPTO, Market.IDX), interval=Horizon.H4
+        )
 
         hasil = await penyegar.refresh(now=NOW)
 
