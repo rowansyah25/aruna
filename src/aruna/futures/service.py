@@ -26,6 +26,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from aruna.agents.market import PERAN_PEMBACA_PASAR
 from aruna.core.clock import now_utc
 from aruna.core.enums import Market
 from aruna.core.errors import ArunaError
@@ -840,6 +841,10 @@ class FuturesPlanService:
             # price it is quoted against.
             evidence_as_of=context.as_of,
             reference=now,
+            # Berapa agen pembaca pasar yang SEARAH vonis - gerbang PASAL
+            # MIN_SEPAKAT. Dihitung di sini karena hanya di sini opini per agen
+            # masih ada; `build_plan` cuma menerima arahnya.
+            sepakat=_sepakat(verdict),
         )
 
         # A second pass, now that the numbers exist.
@@ -2009,6 +2014,29 @@ def _regime_name(context: Any) -> str:
     if regime is None:
         return ""
     return str(getattr(regime.regime, "value", regime.regime) or "")
+
+
+def _sepakat(verdict: Any) -> int:
+    """Berapa agen PEMBACA PASAR yang bersuara searah vonis dewan.
+
+    Yang dihitung hanya enam peran di :data:`PERAN_PEMBACA_PASAR`, bukan
+    sembilan anggota roster - lihat catatan di sana untuk kenapa menghitung
+    sembilan membuat ambang yang sama berarti dua hal berbeda.
+
+    Dibaca bertahan lewat ``getattr``: vonis yang dibangun test double sederhana
+    tidak selalu punya ``opinions``, dan gerbangnya sendiri sudah dijaga
+    terpisah. Nol berarti tidak ada yang searah, dan itu memang harus ditolak -
+    bukan disamakan dengan "tidak terukur".
+    """
+    arah = getattr(getattr(verdict, "decision", None), "value", None)
+    if arah is None:
+        return 0
+    return sum(
+        1
+        for o in getattr(verdict, "opinions", ()) or ()
+        if getattr(o, "role", None) in PERAN_PEMBACA_PASAR
+        and getattr(getattr(o, "decision", None), "value", None) == arah
+    )
 
 
 def _hostile(context: Any) -> bool:

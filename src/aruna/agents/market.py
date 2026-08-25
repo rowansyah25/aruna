@@ -36,6 +36,29 @@ def _ref(context: DecisionContext, name: str) -> EvidenceRef | None:
 #: 1.0-weight signal is a hint, not certainty.
 FULL_CONVICTION_MARGIN = 3.0
 
+#: Peran yang membaca pasar dari harga dan volume saja - persis enam agen yang
+#: modul ini definisikan.
+#:
+#: **Dipisahkan karena "berapa agen sepakat" harus menghitung agen yang SAMA di
+#: korpus dan di produksi.** Roster lengkap berisi sembilan; tiga sisanya (NEWS,
+#: FUNDAMENTAL, RISK) membaca bahan yang tidak tersedia point-in-time, jadi di
+#: replay mereka praktis tidak pernah ikut menyetujui apa pun sementara di
+#: produksi sesekali ikut. Ambang yang menghitung sembilan berarti dua hal
+#: berbeda di dua tempat - dengan nama yang sama.
+#:
+#: Terukur 2026-08-25: dengan enam peran ini, ambang lima meloloskan porsi
+#: keputusan yang sama di korpus dan di produksi (69% vs 69% pada ambang empat).
+PERAN_PEMBACA_PASAR = frozenset(
+    {
+        AgentRole.TECHNICAL,
+        AgentRole.STRUCTURE,
+        AgentRole.MOMENTUM,
+        AgentRole.VOLUME,
+        AgentRole.REVERSAL,
+        AgentRole.REGIME,
+    }
+)
+
 #: Perubahan 10-bar, dalam persen, yang MOMENTUM sebut sebagai arah.
 #:
 #: **Angka ini tidak pernah diturunkan dari apa pun, dan letaknya bukan yang
@@ -564,6 +587,7 @@ class RegimeAgent(Agent):
 
 
 __all__ = [
+    "PERAN_PEMBACA_PASAR",
     "MomentumAgent",
     "RegimeAgent",
     "ReversalAgent",

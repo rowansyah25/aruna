@@ -25,6 +25,7 @@ from aruna.futures.models import (
 from aruna.futures.orderbook import OrderBookDepth
 from aruna.futures.plan import (
     FORBIDDEN_CLAIMS,
+    MIN_SEPAKAT,
     ForbiddenClaim,
     FuturesPlan,
     PlanVerdict,
@@ -112,6 +113,109 @@ def _plan(**kwargs) -> FuturesPlan:
         "reference": NOW,
     }
     return build_plan(**(params | kwargs))
+
+
+class TestGerbangKesepakatan:
+    """Arah yang disepakati tipis tidak boleh jadi plan.
+
+    Diukur atas korpus 9.805 keputusan lintas 17 bulan, dilaporkan dari paruh
+    kedua: pada ambang empat dewan yang "sepakat" benar 50,5% - edge -0,3, tidak
+    lebih baik dari koin. Pada lima, 73,0%. Bentuknya tebing, bukan lereng, dan
+    itu yang membuat lima bukan pilihan selera.
+
+    Angkanya sendiri tidak dikunci di sini - yang dikunci adalah bahwa gerbangnya
+    ADA, menolak di bawah ambang, dan menghitung agen yang benar.
+    """
+
+    def test_sepakat_di_bawah_ambang_ditolak(self) -> None:
+        plan = _plan(sepakat=MIN_SEPAKAT - 1)
+        assert plan.verdict is PlanVerdict.WAIT
+        assert not plan.actionable
+
+    def test_penolakannya_menyebut_angkanya(self) -> None:
+        """Penolakan tanpa angka tidak bisa dibedakan dari penolakan lain, dan
+        operator tidak bisa tahu seberapa dekat tadi."""
+        plan = _plan(sepakat=2)
+        assert any("2" in r and str(MIN_SEPAKAT) in r for r in plan.refusals), (
+            plan.refusals
+        )
+
+    def test_sepakat_di_ambang_lolos(self) -> None:
+        plan = _plan(sepakat=MIN_SEPAKAT)
+        assert plan.verdict is PlanVerdict.PLAN, plan.refusals
+
+    def test_tidak_terukur_bukan_nol(self) -> None:
+        """`None` berarti pemanggilnya tidak mengukur, dan itu bukan alasan
+        menolak - membalikkannya akan mematikan setiap pemanggil lama diam-diam.
+        Jalur produksi SELALU mengoper angka; itu dijaga terpisah di bawah."""
+        assert _plan(sepakat=None).verdict is PlanVerdict.PLAN
+
+    def test_yang_dihitung_hanya_pembaca_pasar(self) -> None:
+        """**Menghitung sembilan peran membuat ambang yang sama berarti dua hal
+        berbeda di korpus dan di produksi.** NEWS/FUNDAMENTAL/RISK membaca bahan
+        yang tidak tersedia point-in-time, jadi di replay mereka praktis tidak
+        pernah menyetujui apa pun - ambang yang memasukkan mereka akan lolos
+        jauh lebih sering di produksi daripada di tempat ia diukur.
+        """
+        from aruna.agents.base import AgentOpinion
+        from aruna.core.enums import AgentRole, Decision
+        from aruna.futures.service import _sepakat
+
+        class _Vonis:
+            decision = Decision.BUY
+            opinions = tuple(
+                AgentOpinion(
+                    role=peran, decision=Decision.BUY, confidence=0.6,
+                    reasoning=("x",),
+                )
+                for peran in (
+                    AgentRole.TECHNICAL,
+                    AgentRole.STRUCTURE,
+                    AgentRole.NEWS,
+                    AgentRole.FUNDAMENTAL,
+                    AgentRole.RISK,
+                )
+            )
+
+        assert _sepakat(_Vonis()) == 2, "tiga peran non-pasar ikut terhitung"
+
+    def test_yang_melawan_tidak_ikut_terhitung(self) -> None:
+        from aruna.agents.base import AgentOpinion
+        from aruna.core.enums import AgentRole, Decision
+        from aruna.futures.service import _sepakat
+
+        class _Vonis:
+            decision = Decision.BUY
+            opinions = (
+                AgentOpinion(role=AgentRole.TECHNICAL, decision=Decision.BUY,
+                             confidence=0.6, reasoning=("x",)),
+                AgentOpinion(role=AgentRole.MOMENTUM, decision=Decision.SELL,
+                             confidence=0.6, reasoning=("x",)),
+                AgentOpinion(role=AgentRole.VOLUME, decision=Decision.WAIT,
+                             confidence=0.0, reasoning=("x",)),
+            )
+
+        assert _sepakat(_Vonis()) == 1
+
+    def test_jalur_hidup_benar_benar_mengopernya(self) -> None:
+        """Gerbang yang tidak pernah dipanggil bukan gerbang.
+
+        Cacat ini sudah berulang di proyek ini: kode ditulis, diuji, diekspor,
+        dan tidak pernah tersambung ke jalur yang jalan.
+        """
+        import inspect
+
+        from aruna.futures import service
+
+        sumber = inspect.getsource(service.FuturesPlanService)
+        assert "sepakat=_sepakat(verdict)" in sumber
+
+    def test_ambangnya_tidak_melebihi_jumlah_agen_yang_ada(self) -> None:
+        """Ambang di atas jumlah pemilih adalah gerbang yang menutup selamanya -
+        dan diamnya akan terbaca seperti "pasar sedang tidak ada peluang"."""
+        from aruna.agents.market import PERAN_PEMBACA_PASAR
+
+        assert len(PERAN_PEMBACA_PASAR) >= MIN_SEPAKAT
 
 
 class TestTheHappyPathIsReachable:

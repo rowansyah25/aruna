@@ -45,6 +45,7 @@ from decimal import Decimal
 from enum import StrEnum
 from typing import Any
 
+from aruna.agents.market import PERAN_PEMBACA_PASAR
 from aruna.core.claims import FORBIDDEN_CLAIMS as _FORBIDDEN_CLAIMS
 from aruna.core.clock import isoformat, now_utc
 from aruna.core.errors import ArunaError
@@ -92,6 +93,38 @@ from aruna.signals.lock import (
 #: kalimat di atas literal kedua. Yang mengubah satu sisi tidak akan tahu sisi
 #: lain ada, dan tidak ada test yang merah ketika keduanya melenceng.
 MAX_EVIDENCE_AGE_MULTIPLE = _MAX_EVIDENCE_AGE_MULTIPLE
+
+#: Berapa dari enam agen pembaca pasar harus SEARAH sebelum plan dibuat.
+#:
+#: **Ini gerbang yang menukar jumlah sinyal dengan ketepatannya**, dan angkanya
+#: bukan selera. Diukur 2026-08-25 atas korpus 9.805 keputusan lintas 17 bulan
+#: dan empat regime, dilaporkan dari paruh kedua sesudah ambangnya dipilih hanya
+#: dari paruh pertama (``aruna korpus``)::
+#:
+#:     sepakat >= 2    50,4%   n=1218   edge  +0,0
+#:     sepakat >= 3    49,9%   n=1160   edge  -0,5
+#:     sepakat >= 4    50,5%   n= 915   edge  -0,3
+#:     sepakat >= 5    73,0%   n=  74   edge +22,1
+#:
+#: Bentuknya tebing, bukan lereng - dan itu sebabnya empat tidak dipakai
+#: meskipun sampelnya dua belas kali lebih tebal. Di empat, dewan yang "sepakat"
+#: tidak lebih baik daripada koin.
+#:
+#: Bertahan di setiap potongan: per pertiga waktu +7,4/+21,1/+19,8; per regime
+#: naik +2,7, turun +31,2, datar +3,2; per arah BUY +14,5 dan SELL +27,3;
+#: tersebar di 17 koin dengan penyumbang terbesar 19%. Dibandingkan pasar HARI
+#: ITU - pembanding yang sudah tahu hasil harinya - sisanya +4,5 poin, jadi
+#: sebagian besar keunggulannya adalah memilih HARI, bukan memilih koin.
+#:
+#: Harganya: dari ~3,7 sinyal per hari jadi ~0,3. Itu pertukaran yang diminta
+#: operator secara eksplisit, dua kali: "mending satu signal per hari asal
+#: akurasi tepat daripada banyak signal loss semua".
+#:
+#: Batas jujurnya, supaya yang membaca ini tidak menaruh lebih banyak beban di
+#: atasnya daripada yang ia bisa tanggung: n=74 di jendela uji, selang
+#: kepercayaan 95% kira-kira 61%-83%. Batas bawahnya masih di atas 50,4% yang
+#: dicapai dewan tanpa gerbang, tapi 73% bukan angka yang sudah mengendap.
+MIN_SEPAKAT = 5
 
 #: Which set of fields the fingerprint currently covers.
 #:
@@ -355,6 +388,7 @@ def build_plan(
     discipline: DisciplineReport | None = None,
     evidence_as_of: datetime | None = None,
     reference: datetime | None = None,
+    sepakat: int | None = None,
 ) -> FuturesPlan:
     """Assemble one futures answer (FUTURES SPEC 8-14, 37-39).
 
@@ -437,6 +471,20 @@ def build_plan(
                 "council tidak mengambil sisi, jadi tidak ada posisi untuk "
                 "di-size. Tidak ada stop, leverage, atau liquidation price "
                 "untuk trade yang tidak pernah diajukan"
+            ],
+            integrity=integrity,
+        )
+
+    # ---- 2b. did ENOUGH of the council take that side? ---------------------
+    if sepakat is not None and sepakat < MIN_SEPAKAT:
+        return refuse(
+            PlanVerdict.WAIT,
+            [
+                f"hanya {sepakat} dari {len(PERAN_PEMBACA_PASAR)} agen pembaca "
+                f"pasar yang searah; ambangnya {MIN_SEPAKAT}. Arah yang "
+                "disepakati tipis terukur tidak lebih baik daripada lemparan "
+                "koin, dan plan yang tetap dibuat di atasnya hanya memindahkan "
+                "kerugian ke bawah nama yang lebih meyakinkan"
             ],
             integrity=integrity,
         )
