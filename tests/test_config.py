@@ -18,8 +18,23 @@ from aruna.core.enums import Market
 
 
 class TestMarkets:
-    def test_defaults_to_both_markets(self) -> None:
+    def test_defaults_to_crypto_saja(self) -> None:
+        """Dua pasar sampai 2026-08-25, lalu IDX dikeluarkan.
+
+        IDX adalah separuh saham dari jalur spot, dan jalur itu dicabut atas
+        keputusan operator - tidak ada lagi pembaca yang memakai candle atau
+        kuotasi IDX untuk memutuskan apa pun. Yang tersisa hanya ongkosnya,
+        terukur 900+ ``ingest.quality_rejected`` per jam di luar jam bursa.
+
+        Penolakannya benar; yang salah tetap menanyakannya.
+        """
         app = AppSettings(_env_file=None)
+        assert app.enabled_markets == (Market.CRYPTO,)
+
+    def test_idx_masih_bisa_dinyalakan_kembali(self) -> None:
+        """Dikeluarkan dari bawaan, bukan dihapus dari kosakata: kalau kelak
+        ada pembacanya lagi, satu variabel lingkungan cukup."""
+        app = AppSettings(_env_file=None, enabled_markets="CRYPTO,IDX")
         assert app.enabled_markets == (Market.CRYPTO, Market.IDX)
 
     def test_parses_comma_separated(self) -> None:

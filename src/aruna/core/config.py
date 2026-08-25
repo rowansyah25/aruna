@@ -81,7 +81,22 @@ class AppSettings(BaseSettings):
     # NoDecode: without it pydantic-settings tries to JSON-parse a collection
     # field before any validator runs, and "CRYPTO,IDX" fails there with an
     # error that says nothing useful about markets.
-    enabled_markets: Annotated[tuple[Market, ...], NoDecode] = (Market.CRYPTO, Market.IDX)
+    #: **IDX dikeluarkan 2026-08-25, sesudah jalur spot dicabut.**
+    #:
+    #: IDX adalah separuh SAHAM dari jalur spot, dan jalur itu tidak ada lagi -
+    #: tidak ada satu pun pembaca yang memakai candle atau kuotasi IDX untuk
+    #: memutuskan apa pun. Yang tersisa hanya ongkosnya, dan ongkosnya terukur:
+    #: **900+ ``ingest.quality_rejected`` per jam** di luar jam bursa, sebelas
+    #: saham dikali satu penolakan STALE per pass, di mesin dua inti.
+    #:
+    #: Penolakannya sendiri BENAR - bursa Indonesia tutup, Yahoo memulangkan
+    #: kuotasi basi, penjaga menolaknya. Yang salah adalah tetap menanyakannya.
+    #: Peringatan yang selalu ada berhenti dibaca, lalu ia menutupi peringatan
+    #: yang berarti sesuatu.
+    #:
+    #: Dikembalikan dengan ``ARUNA_ENABLED_MARKETS=CRYPTO,IDX`` kalau kelak ada
+    #: yang membacanya lagi.
+    enabled_markets: Annotated[tuple[Market, ...], NoDecode] = (Market.CRYPTO,)
 
     @field_validator("enabled_markets", mode="before")
     @classmethod
