@@ -818,6 +818,16 @@ class ArunaApplication:
             # hari tanpa catatan apa yang hilang - dan sejak 2026-08-21 angkanya
             # sampai ke keyakinan yang diterbitkan.
             review_state=self.app_state,
+            # Kabar saat ARUNA mengubah bobot agennya sendiri. Sejak 2026-08-25
+            # perubahan itu berlaku tanpa persetujuan per perubahan (keputusan
+            # operator), jadi baris ini yang menggantikan kesempatan memeriksa
+            # di depan dengan kesempatan memeriksa di belakang. Tanpa ia,
+            # ARUNA menyetel dirinya diam-diam - dan itu bukan yang diminta.
+            #
+            # `_LateSender` dengan alasan yang sama seperti laporan harian:
+            # `_start_upkeep` berjalan sebelum `_start_telegram`, jadi membaca
+            # botnya sekarang akan menyimpan None selamanya.
+            pemberitahu=_LateSender(lambda: self.bot),
             # Denyut. Tanpa ini tidak ada satu pun catatan tentang berapa lama
             # ARUNA mati - terukur: `aruna.stopped` 22 kali dalam sehari dan
             # `telegram.stopped` nol kali, karena proses yang dibunuh paksa

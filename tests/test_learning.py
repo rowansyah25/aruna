@@ -320,30 +320,49 @@ class TestMeasuredHistory:
             **kw,
         )
 
-    def test_measuring_an_agent_does_not_change_its_weight(self) -> None:
-        """PASAL 11.11: measurement is not application.
+    def test_measuring_an_agent_now_does_change_its_weight(self) -> None:
+        """**PASAL 11.11 dan 11.16 ditimpa operator pada 2026-08-25.**
 
-        This test previously asserted the opposite - that crossing the sample
-        threshold made ``reliability()`` return a multiplier. That was the
-        defect: an agent's weight moved, and with it every later council
-        verdict, with no proposal and nobody approving. PASAL 11.11 names this
-        exact case (``1.00 -> 1.10``) and PASAL 11.16 forbids it outright.
+        Test ini sudah berbalik dua kali, dan riwayatnya layak disimpan.
+        Mula-mula ia menyatakan bahwa melewati ambang sampel membuat
+        ``reliability()`` memulangkan pengali. Lalu dibalik: PASAL 11.11
+        menyebut kasus itu persis (``1,00 -> 1,10``) dan melarangnya, jadi
+        pengukuran berhenti berlaku sendiri.
+
+        Sekarang dibalik lagi, dan kali ini bukan karena penulis kode berubah
+        pikiran - operator memutuskannya. Yang menentukan: gerbang itu tidak
+        memperlambat penerapan, ia MENIADAKANNYA. Tabel yang mengisi
+        ``approved_weights`` tidak pernah ada, jadi terukur di
+        ``judge_decisions``, ``historical_reliability`` tercatat tidak tersedia
+        pada 100% keputusan di setiap hari yang tersimpan.
+
+        Pagarnya tidak ikut dicabut - ia pindah tempat: sampel minimum, batas
+        pengali 0,7-1,2, dan titik netral yang diukur. Lihat
+        ``test_bobot_berlaku_tanpa_persetujuan``.
         """
         history = self._measured()
 
         assert history.measurable is True
         assert history.calibration(0.7) is not None
-        # Measured, and still not applied.
-        assert history.reliability(AgentRole.TECHNICAL) is None
         assert history.reliability_report.measured
 
-    def test_an_approved_weight_is_the_one_applied(self) -> None:
+        pengali = history.reliability(AgentRole.TECHNICAL)
+        assert pengali is not None, (
+            "pengukuran tidak berlaku - gerbang persetujuan masih terpasang"
+        )
+        assert 0.7 <= pengali <= 1.2
+
+    def test_bobot_yang_disetujui_tidak_lagi_menimpa_pengukuran(self) -> None:
+        """Pasangan test di atas. ``approved_weights`` masih ada sebagai bahan
+        usulan, tapi ia bukan lagi yang menentukan apa yang berlaku - dan kalau
+        ia menimpa lagi, gerbangnya kembali lewat pintu belakang."""
         from aruna.learning.weights import ApprovedWeights
 
         history = self._measured(
             approved_weights=ApprovedWeights({"TECHNICAL": 1.1})
         )
-        assert history.reliability(AgentRole.TECHNICAL) == 1.1
+
+        assert history.reliability(AgentRole.TECHNICAL) != 1.1
 
     def test_an_agent_with_no_record_is_still_unmeasured(self) -> None:
         assert self._measured().reliability(AgentRole.FUNDAMENTAL) is None

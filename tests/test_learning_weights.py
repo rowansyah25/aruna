@@ -16,7 +16,11 @@ from __future__ import annotations
 from types import SimpleNamespace as NS
 
 from aruna.core.enums import AgentRole
-from aruna.learning.reliability import MIN_RELIABILITY_SAMPLE, AgentRecord
+from aruna.learning.reliability import (
+    MIN_RELIABILITY_SAMPLE,
+    AgentRecord,
+    ReliabilityReport,
+)
 from aruna.learning.weights import (
     DEFAULT_WEIGHT,
     MIN_PROPOSAL_DELTA,
@@ -101,43 +105,67 @@ class TestUsulanBukanPenerapan:
 
 
 class TestTidakAdaJalurOtomatis:
+    """**Pasal yang dijaga kelas ini ditimpa operator pada 2026-08-25.**
+
+    Dua test di sini dulu mengunci PASAL 11.11: pengukuran tidak boleh berlaku
+    tanpa persetujuan manusia. Operator menyatakan langsung bahwa ARUNA harus
+    memperbaiki dirinya sendiri tanpa persetujuan per perubahan, jadi keduanya
+    DIGANTI - bukan dihapus. Yang dihapus tidak meninggalkan jejak bahwa
+    aturannya pernah ada, dan orang berikutnya akan mengira jalur otomatis itu
+    kelalaian.
+
+    Terukur sebelum dicabut: `historical_reliability` tercatat tidak tersedia
+    pada 100% keputusan, di setiap hari yang tersimpan. Gerbangnya bukan
+    memperlambat penerapan - ia meniadakannya, karena tabel yang mengisi
+    `approved_weights` tidak pernah ada.
+
+    Yang MASIH dijaga: mengusulkan tetap tidak boleh diam-diam mengubah bobot
+    yang tersimpan. Mesin usulan dan bobot berlaku tetap dua hal berbeda.
+    """
+
     def test_mengusulkan_tidak_mengubah_bobot_berlaku(self) -> None:
-        """Kalau ada satu pun jalur dari pengukuran ke bobot berlaku, seluruh
-        pasal ini hanya hiasan."""
+        """Ini tetap berlaku. `propose_weights` melapor; ia tidak menulis."""
         sudah = ApprovedWeights({"TECHNICAL": 1.0})
         propose_weights([_record()], sudah)
         assert sudah.for_role(AgentRole.TECHNICAL) == 1.0
 
-    def test_history_memakai_yang_disetujui_bukan_yang_diukur(self) -> None:
+    def test_yang_diukur_sekarang_BERLAKU_tanpa_disetujui(self) -> None:
+        """Kebalikan dari test yang dulu ada di sini, dan itu disengaja.
+
+        Dulu: "history memakai yang disetujui, bukan yang diukur."
+        Sekarang: yang diukur berlaku, dan `approved_weights` tidak lagi
+        menggerbanginya. Pagarnya pindah ke sampel minimum dan batas pengali -
+        lihat `test_bobot_berlaku_tanpa_persetujuan`.
+        """
         from aruna.learning.history import MeasuredHistory
 
         diukur = _record()
-        assert diukur.multiplier is not None  # pengukurannya ada
+        assert diukur.multiplier is not None
 
         history = MeasuredHistory(
-            reliability_report=NS(records=(diukur,), measured=(diukur,)),
+            reliability_report=ReliabilityReport(records=(diukur,)),
             calibration_report=NS(buckets=()),
         )
-        # ...dan tetap tidak berlaku.
-        assert history.reliability(AgentRole.TECHNICAL) is None
 
-    def test_belum_disetujui_beda_dari_disetujui_dan_kebetulan_satu(self) -> None:
-        """Mengembalikan 1,0 untuk keduanya membuat "tidak ada bobot yang
-        disetujui" terlihat sama dengan "disetujui dan kebetulan 1,0" - dan
-        judge mencatat yang pertama sebagai faktor tidak tersedia."""
+        assert history.reliability(AgentRole.TECHNICAL) == diukur.multiplier
+
+    def test_belum_terukur_tetap_beda_dari_terukur_dan_kebetulan_satu(self) -> None:
+        """Satu-satunya bagian yang TIDAK berubah maknanya.
+
+        ``None`` dulu berarti "belum ada yang menyetujui"; sekarang berarti
+        "belum cukup sampel untuk diukur". Yang tetap: ia bukan 1,0. Judge
+        mencatat ``None`` sebagai faktor tidak tersedia, dan menyamakannya
+        dengan 1,0 akan membuat "tidak diukur" terlihat seperti "diukur dan
+        kebetulan netral".
+        """
         from aruna.learning.history import MeasuredHistory
 
         kosong = MeasuredHistory(
-            reliability_report=NS(records=(), measured=()),
+            reliability_report=ReliabilityReport(records=()),
             calibration_report=NS(buckets=()),
         )
-        satu = MeasuredHistory(
-            reliability_report=NS(records=(), measured=()),
-            calibration_report=NS(buckets=()),
-            approved_weights=ApprovedWeights({"TECHNICAL": 1.0}),
-        )
+
         assert kosong.reliability(AgentRole.TECHNICAL) is None
-        assert satu.reliability(AgentRole.TECHNICAL) == 1.0
 
 
 def test_ambang_usulan_masuk_akal() -> None:

@@ -609,6 +609,10 @@ class UpkeepLoop:
         review_state: Any = None,
         research: Any = None,
         screening: Any = None,
+        #: Pengirim kabar saat ARUNA mengubah bobot agennya sendiri. Sejak
+        #: 2026-08-25 perubahan itu berlaku tanpa persetujuan, jadi kabar ini
+        #: yang menggantikan kesempatan operator memeriksa di depan.
+        pemberitahu: Any = None,
         results: Any = None,
         signals: Any = None,
         #: Penyimpan ``app_state`` untuk denyut. ``None`` mematikan denyutnya -
@@ -661,6 +665,10 @@ class UpkeepLoop:
         self._review_state = review_state
         self._research = research
         self._screening = screening
+        #: Pengirim kabar untuk perubahan yang ARUNA lakukan pada dirinya
+        #: sendiri. ``None`` berarti tidak ada yang dikabari - dan itu keadaan
+        #: yang sah, bukan kegagalan, jadi ia tidak dicatat sebagai peringatan.
+        self._pemberitahu = pemberitahu
         self._results = results
         self._signals = signals
         self._heartbeat = heartbeat_state
@@ -1338,6 +1346,7 @@ class UpkeepLoop:
                     penerima.use_history(sejarah)
             diterapkan = True
             await self._catat_perubahan_kalibrasi(sejarah, moment)
+            await self._catat_perubahan_bobot(sejarah, moment)
         except Exception as exc:
             log.exception("upkeep.review_apply_failed")
             stats.review_failures += 1
@@ -1407,6 +1416,132 @@ class UpkeepLoop:
             log.info("upkeep.kalibrasi_berubah", detail=riwayat[-1].ringkas())
         except Exception:
             log.exception("upkeep.catat_kalibrasi_failed")
+
+    async def _catat_perubahan_bobot(self, sejarah: Any, moment: datetime) -> None:
+        """Catat dan KABARKAN bobot agen yang berubah sendiri.
+
+        Sejak 2026-08-25 pengali keandalan berlaku tanpa persetujuan per
+        perubahan - keputusan operator, lihat
+        :meth:`~aruna.learning.history.MeasuredHistory.reliability`. Yang
+        menggantikan persetujuan bukan kepercayaan melainkan dua hal: pagar yang
+        membatasi seberapa jauh ia boleh bergerak, dan kabar ini.
+
+        **Operator tidak lagi menyetujui di depan, jadi ia harus bisa memeriksa
+        di belakang.** Perubahan yang tidak pernah dikatakan sama saja dengan
+        sistem yang menyetel dirinya diam-diam, dan itu bukan yang diminta.
+
+        Hanya dikabarkan saat benar-benar BERUBAH. Pesan harian yang berbunyi
+        sama akan berhenti dibaca, dan yang tenggelam bersamanya justru
+        perubahan yang sesungguhnya.
+
+        Kegagalan di sini tidak menjatuhkan fase review, dengan alasan yang sama
+        seperti kalibrasi: kabar yang hilang lebih murah daripada bobot yang
+        tidak pernah diterapkan.
+        """
+        if self._review_state is None:
+            return
+        try:
+            from aruna.governance.rollback import (
+                KUNCI_STATE,
+                PerubahanParameter,
+                catat,
+                dari_json,
+                ke_json,
+                terakhir,
+            )
+
+            laporan = getattr(sejarah, "reliability_report", None)
+            if laporan is None:
+                return
+
+            # Hanya yang sampelnya cukup. `measured` sudah menyaringnya, dan
+            # menyaring ulang di sini akan jadi daftar kedua yang bebas
+            # berselisih.
+            sekarang = {
+                r.role.value: r.multiplier
+                for r in getattr(laporan, "measured", ())
+                if r.multiplier is not None
+            }
+            if not sekarang:
+                return
+
+            nilai = ", ".join(f"{a}={p:.4f}" for a, p in sorted(sekarang.items()))
+            riwayat = dari_json(await self._review_state.get(KUNCI_STATE))
+            sebelumnya = terakhir(riwayat, "bobot_agen")
+            if sebelumnya is not None and sebelumnya.baru == nilai:
+                return
+
+            dasar = getattr(laporan, "pasar_naik", None)
+            riwayat = catat(
+                riwayat,
+                PerubahanParameter(
+                    nama="bobot_agen",
+                    lama=sebelumnya.baru if sebelumnya else "(belum pernah berlaku)",
+                    baru=nilai,
+                    alasan=(
+                        f"diukur ulang dari {sum(r.scored for r in laporan.measured)}"
+                        " opini terskor"
+                        + (f", pasar naik {dasar:.1%}" if dasar is not None else "")
+                    ),
+                    pemicu="upkeep.review harian",
+                    pada=moment,
+                ),
+            )
+            await self._review_state.set(
+                KUNCI_STATE, ke_json(riwayat), actor="upkeep.review"
+            )
+            log.info("upkeep.bobot_berubah", detail=riwayat[-1].ringkas())
+            await self._kabarkan_bobot(laporan, sebelumnya, moment)
+        except Exception:
+            log.exception("upkeep.catat_bobot_failed")
+
+    async def _kabarkan_bobot(
+        self, laporan: Any, sebelumnya: Any, moment: datetime
+    ) -> None:
+        """Kirim kabar bahwa ARUNA menyetel dirinya sendiri.
+
+        Pengirimnya ditanya ``ready()`` lebih dulu - tanpa itu, instalasi tanpa
+        Telegram akan membangun pesan lalu membuangnya pada setiap review, cacat
+        yang persis sama dengan laporan harian yang dulu memakan 45% waktu
+        siklus.
+        """
+        pengirim = self._pemberitahu
+        if pengirim is None:
+            return
+        siap = getattr(pengirim, "ready", None)
+        if siap is not None and not siap():
+            return
+
+        baris = [
+            "ARUNA — BOBOT AGEN DIPERBARUI",
+            "",
+            f"{moment:%Y-%m-%d %H:%M} UTC, tanpa persetujuan (keputusan operator",
+            "2026-08-25). Ini kabar, bukan permintaan izin.",
+            "",
+        ]
+        dasar = getattr(laporan, "pasar_naik", None)
+        if dasar is not None:
+            baris.append(f"Garis dasar pasar di jendela ini: naik {dasar:.1%}")
+            baris.append("")
+        for r in sorted(laporan.measured, key=lambda x: x.role.value):
+            if r.multiplier is None:
+                continue
+            edge = r.edge
+            baris.append(
+                f"  {r.role.value:10} x{r.multiplier:.4f}   "
+                f"akurasi {(r.accuracy or 0):.1%} dari {r.scored} opini"
+                + (f", edge {edge:+.2%}" if edge is not None else "")
+            )
+        baris += [
+            "",
+            "Pengali dibatasi 0,7-1,2 dan butuh minimal 25 opini terskor.",
+            "ARUNA MENGANALISIS SAJA. Tidak ada order yang dikirim.",
+        ]
+
+        try:
+            await pengirim.send("\n".join(baris))
+        except Exception:
+            log.exception("upkeep.kabar_bobot_failed")
 
     async def _scan(self, moment: datetime) -> None:
         """Jalankan pemindai cepat dan antrekan yang bergerak (PASAL 14, 15).

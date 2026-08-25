@@ -40,29 +40,41 @@ class MeasuredHistory:
     approved_weights: ApprovedWeights = field(default_factory=ApprovedWeights)
 
     def reliability(self, role: AgentRole) -> float | None:
-        """Bobot yang BERLAKU untuk agent ini, bukan yang menurut pengukuran pantas.
+        """Pengali yang DIUKUR untuk agent ini, berlaku tanpa persetujuan.
 
-        Sebelumnya metode ini mengembalikan ``reliability_report.multiplier``
-        langsung - pengali yang dihitung dari akurasi. Artinya begitu seorang
-        agent melewati dua puluh lima opini terskor, bobotnya berubah sendiri
-        dan putusan council ikut bergeser, tanpa proposal dan tanpa satu pun
-        manusia menyetujuinya. PASAL 11.11 dan 11.16 melarang itu.
+        **PASAL 11.11 dan 11.16 ditimpa keputusan operator pada 2026-08-25**,
+        dinyatakan langsung: ARUNA harus belajar dari kesalahannya dan
+        memperbaiki dirinya sendiri tanpa persetujuan per perubahan. Ini bukan
+        kelalaian dan bukan penyederhanaan - ini instruksi pemilik sistem, dan
+        dicatat di sini supaya siapa pun yang menemukannya nanti tahu bahwa
+        pasal itu sengaja dilewati, bukan terlupa.
 
-        Pengukurannya tidak dibuang - ia tetap dihitung dan tetap dilaporkan
-        lewat ``reliability_report``, dan menjadi bahan proposal. Yang berubah
-        hanya satu hal: ia tidak lagi berlaku dengan sendirinya.
+        Versi sebelumnya memulangkan bobot dari ``approved_weights``. Tabel yang
+        mengisinya tidak pernah ada, jadi jawabannya SELALU ``None`` - dan
+        terukur di ``judge_decisions``: ``historical_reliability`` tercatat
+        tidak tersedia pada 100% keputusan, di setiap hari yang tersimpan.
+        Seluruh mesin keandalan berjalan, mengukur, dan menulis snapshot yang
+        tidak pernah menyentuh satu pun putusan.
 
-        ``None`` untuk agent yang bobotnya belum pernah disetujui, dan itu
-        disengaja. Judge memperlakukan ``None`` sebagai netral DAN mencatat
-        faktornya sebagai tidak tersedia pada keputusan tersimpan - yang jujur:
-        tidak ada penyesuaian keandalan yang diterapkan pada keputusan itu.
-        Mengembalikan 1,0 akan membuat "tidak ada bobot yang disetujui" terlihat
-        sama dengan "bobotnya disetujui dan kebetulan 1,0".
+        **Yang menggantikan persetujuan adalah pagar yang bisa diperiksa**, dan
+        ketiganya sudah berdiri sebelum perubahan ini:
+
+        * :data:`~aruna.learning.reliability.MIN_RELIABILITY_SAMPLE` - di bawah
+          dua puluh lima opini terskor, :attr:`AgentRecord.multiplier` tetap
+          ``None`` dan tidak ada yang bergerak. Bukan bergerak sedikit: nol.
+        * :data:`~aruna.learning.reliability.MIN_MULTIPLIER` dan ``MAX_`` -
+          0,7 sampai 1,2, jadi satu jendela buruk tidak bisa membungkam sebuah
+          agent. Agent yang tidak bisa didengar tidak bisa dibuktikan benar
+          belakangan.
+        * titik netral DIUKUR dari baris yang sama, bukan 0,5 mati - tanpa itu
+          agent yang selalu bilang BUY di pasar yang naik mendapat bobot
+          tambahan karena mengikuti arus.
+
+        ``None`` tetap berarti "belum terukur", dan judge tetap mencatatnya
+        sebagai faktor yang tidak tersedia. Yang hilang hanya satu: ``None``
+        tidak lagi berarti "belum ada manusia yang menyetujui".
         """
-        key = role.value
-        if key not in self.approved_weights.weights:
-            return None
-        return self.approved_weights.for_role(role)
+        return self.reliability_report.multiplier(role)
 
     def proposals(self) -> tuple[Any, ...]:
         """Perubahan bobot yang layak diusulkan ke manusia (PASAL 11.11)."""
