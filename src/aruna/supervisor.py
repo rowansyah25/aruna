@@ -295,6 +295,12 @@ def default_children(symbols: str, *, hours: float) -> list[ChildSpec]:
     # yang salah membuat setiap notional salah dengan rapi - tanpa satu pun
     # error, dan hanya terasa sebagai floating loss yang tidak masuk akal.
     ekuitas = get_settings().upkeep.futures_equity
+    # **Risikonya dibaca juga, dengan alasan yang sama.** Sampai 2026-08-25
+    # baris ini tidak ada sama sekali, jadi `--risk` tetap None dan yang berlaku
+    # `futures.risk.DEFAULT_RISK_PCT` = 0,5% - seperempat dari 2% yang operator
+    # tetapkan. Ekuitas yang benar dengan risiko yang salah tetap menghasilkan
+    # ukuran posisi yang salah; keduanya harus sampai.
+    risiko = get_settings().upkeep.futures_risk_pct
 
     return [
         ChildSpec(name="aruna-run", args=["-m", "aruna.cli", "run"]),
@@ -306,6 +312,7 @@ def default_children(symbols: str, *, hours: float) -> list[ChildSpec]:
                 "--hours", str(hours),
                 "--interval", "900",
                 "--equity", f"{ekuitas:g}",
+                "--risk", f"{risiko:g}",
             ],
         ),
     ]

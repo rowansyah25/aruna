@@ -651,6 +651,30 @@ class UpkeepSettings(BaseSettings):
     #: konfigurasi.
     futures_equity: float = Field(default=100.0, gt=0)
 
+    #: Persen ekuitas yang dipertaruhkan pada satu ide.
+    #:
+    #: **Ditetapkan operator pada 2026-08-25: 2%.** Sampai hari itu keputusan
+    #: tersebut tidak punya jalan sampai ke kode sama sekali - tidak ada setting
+    #: untuknya, ``--risk`` di CLI berbawaan ``None``, dan ``supervise`` tidak
+    #: pernah mengopernya. Yang berlaku ``futures.risk.DEFAULT_RISK_PCT`` = 0,5%,
+    #: seperempat dari yang diputuskan.
+    #:
+    #: Bentuk cacatnya sama persis dengan ``futures_equity`` di atas, di jalur
+    #: yang sama: angka nyata yang operator putuskan, dan tidak satu pun jalur
+    #: yang membawanya. Keduanya gagal dengan cara yang sama - tanpa error, dan
+    #: hanya terasa sebagai ukuran posisi yang tidak masuk akal.
+    #:
+    #: Terukur akibatnya: anggaran risiko $0,50 alih-alih $2, jadi notional yang
+    #: bisa didukung bermedian $1,25 sementara minimum venue $5. Dari 86
+    #: penolakan "di bawah minimum venue" dalam lima hari, setidaknya separuh
+    #: hilang pada 2% - POLUSDT, SOLUSDT dan TRXUSDT seluruhnya lolos.
+    #:
+    #: Yang TIDAK tertolong: ETHUSDT (minimum $20) dan BTCUSDT ($50). Akun $100
+    #: memang tidak cukup untuk keduanya, dan menaikkan risiko lebih jauh bukan
+    #: jawabannya - ``MAX_RISK_PCT`` 2% ada karena satu rentetan buruk pada
+    #: angka di atasnya menghabiskan akun.
+    futures_risk_pct: float = Field(default=2.0, gt=0, le=2.0)
+
     @property
     def futures_symbol_list(self) -> tuple[str, ...]:
         """Simbol futures sebagai tuple, huruf besar, tanpa yang kosong."""
