@@ -94,6 +94,43 @@ PERAN_PEMBACA_PASAR = frozenset(
 #: turun dan menyamping, bukan hanya naik. Sampai itu ada, satu-satunya
 #: perubahan yang jujur adalah menuliskan apa yang sudah diketahui - dan itulah
 #: catatan ini.
+#:
+#: ---------------------------------------------------------------------------
+#: **2026-08-26: korpus itu ada sekarang, dan angkanya TETAP tidak diubah.**
+#:
+#: `aruna korpus` memberi 506 hari lintas empat regime, jadi prasyarat di atas
+#: terpenuhi. Yang ditemukan begitu diukur di 1d - bukan 15m seperti pengukuran
+#: pertama - membalik gambarannya::
+#:
+#:     sebaran momentum di 1d, 9.805 pembacaan
+#:     p10 = -15,30    median = -0,99    p90 = +13,52
+#:
+#:     menyala di atas +1,5 : 39,7%
+#:     menyala di bawah -1,5: 48,1%
+#:
+#: **Satu konstanta, dua timeframe, sebaran sepuluh kali berbeda.** Di 15m ambang
+#: ini duduk di p90 dan menyala 16,7%; di 1d ia menyala 88% dan praktis tidak
+#: menyaring apa pun. Ia dikalibrasi untuk satu timeframe dan dipakai di semua.
+#: Itu fakta yang harus diketahui siapa pun yang menyetelnya nanti - menaikkan
+#: angka ini mengetatkan 15m jauh lebih keras daripada 1d.
+#:
+#: **Ambang persentil diuji dan DITOLAK pengukuran.** Menggantinya dengan ambang
+#: yang setangkup dalam PELUANG (p90/p10 dari paruh pertama) mula-mula terlihat
+#: menjanjikan - di paruh kedua, BUY -10,6 dan SELL +4,0, seolah momentum turun
+#: berlanjut sementara momentum naik berbalik. Tidak bertahan::
+#:
+#:     SELL per pertiga  : +2,9  -3,3  -0,5
+#:     SELL per regime   : turun -1,3   datar -3,8
+#:     SELL lawan pasar hari itu: +0,6 poin
+#:
+#: Positif di satu potongan, negatif di dua, dan yang tersisa terhadap pasar
+#: HARI ITU cuma +0,6 poin - itu beta, bukan seleksi. Sama persis dengan pita
+#: -3,0..-1,5 yang dicatat di atas: sebuah aturan yang terpasang pada paruh mana
+#: yang kebetulan bersahabat.
+#:
+#: Dicatat supaya tidak dicoba ulang. Yang boleh mengubah angka ini bukan
+#: pembelahan latih/uji tunggal, melainkan pola yang bertahan di KETIGA
+#: potongan waktu DAN di kedua regime yang terukur.
 AMBANG_MOMENTUM = 1.5
 
 
