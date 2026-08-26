@@ -195,6 +195,15 @@ class FuturesPlan:
     margin_required: Decimal | None = None
     liquidation: Liquidation | None = None
     buffer: BufferScore | None = None
+
+    #: Terisi juga pada PENOLAKAN yang aritmetikanya sempat berjalan.
+    #:
+    #: Keduanya observasi tentang setup, bukan instruksi - dan pada penolakan
+    #: karena "net reward terlalu kecil", justru merekalah isi putusannya.
+    #: Sampai 2026-08-26 keduanya hanya diisi pada rencana yang lolos, jadi
+    #: 136 baris penolakan menyimpan kalimat "net reward adalah 0.24x" dengan
+    #: kolom `net_rr` NULL - angka yang menentukan putusan tidak pernah bisa
+    #: dikueri. Lihat `refuse()`.
     net_rr: Decimal | None = None
     expected_net_pnl: Decimal | None = None
 
@@ -407,6 +416,29 @@ def build_plan(
         reasons: list[str],
         **carried: Any,
     ) -> FuturesPlan:
+        # **Angka yang MENYEBABKAN penolakan ikut disimpan.**
+        #
+        # Sampai 2026-08-26 `net_rr` dan `expected_net_pnl` hanya diisi pada
+        # rencana yang lolos, jadi sebuah penolakan berbunyi "net reward adalah
+        # 0.24x" tanpa satu pun kolom yang memuat 0,24. Angkanya hidup di prosa
+        # saja - tidak bisa dikueri, tidak bisa disebar, tidak bisa dibandingkan
+        # antar hari.
+        #
+        # Biayanya terukur: mendiagnosis 134 penolakan berturut-turut menuntut
+        # mereproduksi seluruh jalur rencana di mesin produksi, karena riwayatnya
+        # tidak menyimpan apa pun selain kalimatnya. `futures_plans` punya 136
+        # baris "net reward" dengan `net_rr` NULL di semuanya.
+        #
+        # Keduanya OBSERVASI, bukan instruksi - itu sebabnya boleh ikut, dengan
+        # alasan yang sama persis seperti `reference_price` di bawah. `entry`,
+        # `stop` dan `target` tetap tidak ikut: itu instruksi, dan mencetaknya
+        # pada penolakan membuat ARUNA terlihat menyarankan trade yang baru saja
+        # ia tolak.
+        eko = carried.get("economics")
+        if eko is not None:
+            carried.setdefault("net_rr", eko.net_rr)
+            carried.setdefault("expected_net_pnl", eko.net_reward)
+
         return FuturesPlan(
             signal_id=signal_id,
             symbol=snapshot.symbol,

@@ -262,8 +262,28 @@ class TestRefusalsCarryNoNumbers:
 
     A refused plan that still reports an entry and a leverage is indistinguishable
     from an accepted one at a glance, and the glance is what people give it.
+
+    **Dipertajam 2026-08-26: yang dilarang INSTRUKSI, bukan setiap angka.**
+
+    ``net_rr`` dan ``expected_net_pnl`` dulu ikut di daftar ini, dan akibatnya
+    sebuah penolakan berbunyi "net reward adalah 0.24x" sementara kolom
+    ``net_rr`` di barisnya NULL. Angka yang MENENTUKAN putusan hanya hidup di
+    prosa - tidak bisa dikueri, tidak bisa dibandingkan antar hari. Terukur:
+    136 baris penolakan "net reward" dengan ``net_rr`` NULL di semuanya, dan
+    mendiagnosis 134 penolakan berturut-turut menuntut mereproduksi seluruh
+    jalur rencana di mesin produksi.
+
+    Yang membuat pelonggaran ini aman: angkanya SUDAH dicetak di kalimat
+    penolakannya. Menyimpan apa yang sudah diucapkan tidak menambah satu pun
+    pengungkapan baru - ia hanya membuatnya bisa ditanyakan.
+
+    Yang tetap kosong adalah yang bisa ditindaklanjuti: entry, stop, target,
+    quantity, notional, leverage, margin. Itu instruksi, dan sebuah penolakan
+    yang membawanya terlihat seperti ARUNA menyarankan trade yang baru saja ia
+    tolak.
     """
 
+    #: Instruksi. Tidak pernah ada pada penolakan, apa pun sebabnya.
     BLANK = (
         "entry",
         "stop",
@@ -272,8 +292,6 @@ class TestRefusalsCarryNoNumbers:
         "notional",
         "leverage",
         "margin_required",
-        "net_rr",
-        "expected_net_pnl",
     )
 
     def _assert_blank(self, plan: FuturesPlan) -> None:
@@ -284,28 +302,39 @@ class TestRefusalsCarryNoNumbers:
         assert plan.liquidation is None
         assert plan.buffer is None
 
+    def _assert_tanpa_aritmetika(self, plan: FuturesPlan) -> None:
+        """Ditolak SEBELUM aritmetikanya jalan - jadi tidak ada angka putusan.
+
+        Belum terukur bukan nol: sebuah rencana yang ditolak karena datanya
+        tidak koheren tidak punya net_rr, dan mengarangnya nol akan membuatnya
+        terlihat seperti setup yang dihitung lalu kalah.
+        """
+        self._assert_blank(plan)
+        assert plan.net_rr is None
+        assert plan.expected_net_pnl is None
+
     def test_incoherent_inputs_produce_no_signal(self) -> None:
         stale = _snapshot(order_book=_book(as_of=NOW - timedelta(minutes=30)))
         plan = _plan(snapshot=stale)
         assert plan.verdict is PlanVerdict.NO_SIGNAL
-        self._assert_blank(plan)
+        self._assert_tanpa_aritmetika(plan)
 
     def test_a_missing_input_produces_no_signal(self) -> None:
         plan = _plan(snapshot=_snapshot(contract=None))
         assert plan.verdict is PlanVerdict.NO_SIGNAL
-        self._assert_blank(plan)
+        self._assert_tanpa_aritmetika(plan)
 
     def test_a_council_wait_produces_wait_not_a_refusal(self) -> None:
         """These are different statements and must not collapse into one."""
         plan = _plan(decision="WAIT")
         assert plan.verdict is PlanVerdict.WAIT
         assert plan.side is PositionSide.FLAT
-        self._assert_blank(plan)
+        self._assert_tanpa_aritmetika(plan)
 
     def test_no_atr_refuses_rather_than_inventing_a_stop(self) -> None:
         plan = _plan(atr=None)
         assert plan.verdict is PlanVerdict.REFUSED
-        self._assert_blank(plan)
+        self._assert_tanpa_aritmetika(plan)
         assert any("tidak ada pengukuran ATR" in r for r in plan.refusals)
 
     @pytest.mark.parametrize("equity", ["0.01", "50", "100", "180"])
@@ -321,7 +350,7 @@ class TestRefusalsCarryNoNumbers:
         """
         plan = _plan(equity=Decimal(equity))
         assert plan.verdict is PlanVerdict.REFUSED
-        self._assert_blank(plan)
+        self._assert_tanpa_aritmetika(plan)
         joined = " ".join(plan.refusals)
         assert "di bawah minimum venue" in joined
         assert "net reward" not in joined
@@ -339,16 +368,35 @@ class TestRefusalsCarryNoNumbers:
                 assert "None" not in reason, reason
 
     def test_a_reward_that_does_not_clear_the_floor_is_refused(self) -> None:
-        """A target barely past entry: right direction, still not worth taking."""
+        """A target barely past entry: right direction, still not worth taking.
+
+        **Dan angkanya ikut tersimpan.** Ini penolakan yang aritmetikanya
+        BERJALAN, jadi rasio yang menjatuhkan putusannya harus ada di kolomnya -
+        bukan hanya di kalimatnya. Tanpa ini, sebaran penolakan tidak bisa
+        ditanyakan sama sekali, dan mendiagnosisnya menuntut mereproduksi
+        seluruh jalur rencana di mesin produksi.
+        """
         plan = _plan(structure_levels=(ENTRY + Decimal(50),))
         assert plan.verdict is PlanVerdict.REFUSED
         self._assert_blank(plan)
+
+        assert plan.net_rr is not None, (
+            "rasio yang menyebabkan penolakan tidak tersimpan - ia hanya hidup "
+            "di prosa, dan prosa tidak bisa dikueri"
+        )
+        assert plan.expected_net_pnl is not None
+        # Yang tersimpan harus angka yang SAMA dengan yang diucapkan.
+        assert f"{plan.net_rr}x" in " ".join(plan.refusals)
 
     def test_a_book_too_thin_for_the_size_is_refused(self) -> None:
         thin = _snapshot(order_book=_book(depth=Decimal("0.0001")))
         plan = _plan(snapshot=thin)
         assert plan.verdict is PlanVerdict.REFUSED
         self._assert_blank(plan)
+        # Likuiditas diperiksa SESUDAH aritmetika, jadi angkanya sudah ada dan
+        # ikut - penolakan yang berbeda tidak menghapus perhitungan yang sudah
+        # benar-benar terjadi.
+        assert plan.net_rr is not None
 
 
 class TestOrderOfTheGates:
