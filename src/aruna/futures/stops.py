@@ -65,6 +65,40 @@ MIN_TARGET_ATR = Decimal("1.0")
 #: it the stop is further away than the market's own routine range.
 WIDE_STOP_ATR = Decimal("3.0")
 
+#: Sejauh mana satu horizon benar-benar bisa bergerak melawan posisi, dalam ATR.
+#:
+#: **Level struktur di luar ini bukan stop untuk horizon ini - ia level untuk
+#: tesis yang lebih panjang.** Diukur 2026-08-26 atas 9.805 bar 1d, memakai
+#: jangkauan INTRA-bar terhadap penutupan sebelumnya (stop tersentuh oleh sumbu,
+#: bukan oleh harga tutup)::
+#:
+#:     jangkauan melawan posisi, satu interval, dalam ATR
+#:     p50 = 0,38    p90 = 1,01    p95 = 1,26    p99 = 2,11
+#:
+#:     tersentuh dalam satu interval:
+#:       1,0 ATR  10,29%      2,0 ATR  1,22%
+#:       1,5 ATR   3,03%      3,0 ATR  0,33%
+#:
+#: Dua koma nol duduk di p99: sebuah level di luarnya tersentuh sekali per
+#: delapan puluh interval. Terukur di produksi, stop struktural 18,6% pada
+#: ramalan 24 jam tersentuh **0,39%** waktu - satu dari 256 hari. Ia tidak
+#: melindungi apa pun di dalam jendela yang ia klaim lindungi; yang ia lakukan
+#: hanya mengecilkan posisi terhadap risiko yang tidak bisa terjadi.
+#:
+#: **Kenapa ini BUKAN pelanggaran aturan "jangan cap demi rasio".** Catatan di
+#: :data:`WIDE_STOP_ATR` melarang menggeser stop supaya R:R terlihat bagus, dan
+#: larangan itu tetap berdiri. Angka ini tidak diturunkan dari target, dari
+#: reward, atau dari rasio mana pun - ia diturunkan dari waktu dan volatilitas
+#: saja. Mesin stop tetap tidak pernah diperlihatkan target, persis seperti
+#: yang docstring modul ini janjikan.
+#:
+#: Yang terjadi ketika ambang ini terlewat bukan pemotongan level struktur -
+#: itu akan menghasilkan stop yang bukan struktur dan bukan volatilitas.
+#: Levelnya DIBUANG, dan stop jatuh ke :data:`ATR_FALLBACK`, jalur yang sama
+#: persis dengan "tidak ada struktur sama sekali" - karena untuk horizon ini,
+#: memang tidak ada.
+JANGKAUAN_HORIZON_ATR = Decimal("2.0")
+
 
 @dataclass(frozen=True, slots=True)
 class StopLoss:
@@ -140,7 +174,25 @@ def stop_loss(
     findings: list[str] = []
     is_long = side is PositionSide.LONG
 
-    if invalidation_level is not None and _is_beyond(invalidation_level, entry, is_long):
+    # Level yang di luar jangkauan horizon dibuang SEBELUM dipakai. Ia bukan
+    # stop untuk ramalan ini - lihat `JANGKAUAN_HORIZON_ATR`.
+    #
+    # Sisinya diperiksa LEBIH DULU, dan urutan itu bukan gaya: sebuah level di
+    # sisi entry yang salah juga jauh, jadi memeriksa jarak duluan akan
+    # melaporkan "di luar jangkauan" untuk level yang sebenarnya cacat karena
+    # alasan yang sama sekali lain. Diagnosis yang salah lebih buruk daripada
+    # diam, karena ia menghentikan pencarian di tempat yang keliru.
+    sisi_benar = invalidation_level is not None and _is_beyond(
+        invalidation_level, entry, is_long
+    )
+    # Yang diuji jarak stop AKHIRNYA, termasuk padding - itu yang harus
+    # tersentuh, bukan levelnya sendiri.
+    di_luar_jangkauan = sisi_benar and (
+        abs(entry - invalidation_level) + atr * ATR_PADDING  # type: ignore[operator]
+        > atr * JANGKAUAN_HORIZON_ATR
+    )
+
+    if sisi_benar and not di_luar_jangkauan:
         padding = atr * ATR_PADDING
         price = (
             invalidation_level - padding if is_long else invalidation_level + padding
@@ -155,7 +207,17 @@ def stop_loss(
             "yang mengetes level itu tidak menutup posisi"
         )
     else:
-        if invalidation_level is not None:
+        if di_luar_jangkauan:
+            jauh = abs(entry - invalidation_level) / atr  # type: ignore[operator]
+            findings.append(
+                f"level invalidasi {invalidation_level} berjarak {jauh:.1f} ATR - "
+                f"di luar {JANGKAUAN_HORIZON_ATR} ATR yang satu horizon ini "
+                "benar-benar tempuh, jadi ia level untuk tesis yang lebih "
+                "panjang dan bukan stop untuk ramalan ini. Dibuang, bukan "
+                "dipotong: level yang dipotong bukan struktur dan bukan "
+                "volatilitas"
+            )
+        elif invalidation_level is not None:
             findings.append(
                 f"level invalidasi {invalidation_level} yang diberikan ada di "
                 "sisi entry yang salah dan diabaikan"
@@ -187,15 +249,21 @@ def stop_loss(
             "berarti apa-apa"
         )
     elif distance > atr * WIDE_STOP_ATR:
-        # Deliberately a finding, not a cap. The stop is where the idea is
-        # proven wrong, and moving it closer to flatter the ratio would put it
-        # somewhere the structure does not support - which is the exact
-        # tuning F3 built this module to make impossible.
+        # **Tidak lagi terjangkau sejak `JANGKAUAN_HORIZON_ATR` masuk
+        # (2026-08-26), dan sengaja dibiarkan berdiri.**
         #
-        # But a stop this wide is information: it says the level that must hold
-        # is far away, so the position risks a lot per unit of conviction, and
-        # the reward gate will be hard to clear. Silence about that reads as
-        # "nothing unusual here".
+        # Aturan lama: stop lebar DINAMAI, tidak pernah dipotong - "moving it
+        # closer to flatter the ratio would put it somewhere the structure does
+        # not support". Larangan itu masih berlaku, dan yang berubah bukan
+        # jawabannya melainkan pertanyaannya: level di luar jangkauan satu
+        # horizon sekarang DIBUANG lebih dulu, jadi jarak stop tidak pernah
+        # lagi melewati dua ATR dan cabang ini tidak bisa menyala.
+        #
+        # Dibiarkan karena `WIDE_STOP_ATR` mengikat ke `MIN_ATR_TO_LIQUIDATION`
+        # di mesin buffer: menghapusnya di sini menghapus satu-satunya tempat
+        # hubungan itu tertulis. Kalau ambang jangkauan dinaikkan melewati tiga
+        # ATR, cabang ini hidup lagi dengan sendirinya - dan itu memang yang
+        # harus terjadi.
         findings.append(
             f"stop ini {distance / atr:.1f} ATR dari entry - lebar. Level yang "
             "harus bertahan letaknya jauh, jadi posisi ini mempertaruhkan "

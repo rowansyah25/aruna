@@ -82,7 +82,12 @@ class TestStopLoss:
             assert banned not in signature.parameters
 
     def test_a_structural_stop_sits_beyond_the_level(self) -> None:
-        swing = Decimal(49_000)
+        # Satu ATR di bawah entry. Dulu dua ATR, dan sejak
+        # `JANGKAUAN_HORIZON_ATR` masuk (2026-08-26) jarak itu ditambah padding
+        # melewati apa yang satu horizon tempuh, jadi levelnya akan dibuang -
+        # dan test ini akan menguji jalur volatilitas alih-alih jalur struktur
+        # yang jadi pokoknya.
+        swing = ENTRY - ATR
         stop = stop_loss(
             entry=ENTRY, side=PositionSide.LONG, atr=ATR, invalidation_level=swing
         )
@@ -92,7 +97,7 @@ class TestStopLoss:
         assert "level yang harus bertahan" in stop.invalidation
 
     def test_a_short_stop_sits_above_the_level(self) -> None:
-        swing = Decimal(51_000)
+        swing = ENTRY + ATR  # cermin dari test di atas, di dalam jangkauan
         stop = stop_loss(
             entry=ENTRY, side=PositionSide.SHORT, atr=ATR, invalidation_level=swing
         )
@@ -138,16 +143,20 @@ class TestStopLoss:
     def test_rounding_never_flatters_the_stop(self) -> None:
         """A stop rounded toward entry is tighter than intended."""
         contract = _contract(tick_size=Decimal(100))
+        # 49.530 ada 0,94 ATR di bawah entry - di dalam jangkauan horizon, jadi
+        # jalur strukturnya yang diuji. Stop sebelum pembulatan 49.280; kalau
+        # dibulatkan ke ATAS ia jadi 49.300 dan lebih ketat daripada yang
+        # dimaksud, dan itu yang test ini larang.
         stop = stop_loss(
             entry=ENTRY,
             side=PositionSide.LONG,
             atr=ATR,
-            invalidation_level=Decimal(49_050),
+            invalidation_level=Decimal(49_530),
             contract=contract,
         )
         assert stop is not None
         assert stop.price % Decimal(100) == 0
-        assert stop.price <= Decimal(48_800)
+        assert stop.price <= Decimal(49_280)
 
 
 class TestTargetsHaveAFloorNotJustACeiling:
@@ -201,20 +210,61 @@ class TestTargetsHaveAFloorNotJustACeiling:
 
 
 class TestAWideStopIsNamed:
-    def test_a_stop_beyond_three_atr_says_so(self) -> None:
-        """Named, not capped: moving the stop to flatter the ratio would put it
-        where the structure does not support it."""
-        from aruna.futures.stops import WIDE_STOP_ATR, stop_loss
+    def test_level_di_luar_jangkauan_horizon_dibuang(self) -> None:
+        """**Menggantikan `test_a_stop_beyond_three_atr_says_so`.**
+
+        Aturan lama: stop lebar DINAMAI, tidak pernah dipotong - "moving the
+        stop to flatter the ratio would put it where the structure does not
+        support it". Larangan itu masih berdiri; yang berubah pertanyaannya.
+
+        Diukur 2026-08-26 atas 9.805 bar 1d: jangkauan melawan posisi dalam satu
+        interval p99 = 2,11 ATR, dan sebuah stop lima ATR jauhnya tersentuh
+        0,2% waktu. Di produksi, stop struktural 18,6% pada ramalan 24 jam
+        tersentuh 0,39% - satu dari 256 hari. Level seperti itu tidak melindungi
+        apa pun di dalam jendela yang ia klaim lindungi; ia hanya mengecilkan
+        posisi terhadap risiko yang tidak bisa terjadi.
+
+        Jadi ia DIBUANG, bukan dipotong - level yang dipotong bukan struktur dan
+        bukan volatilitas - dan stop jatuh ke jalur volatilitas yang sama persis
+        dengan "tidak ada struktur sama sekali", karena untuk horizon ini memang
+        tidak ada.
+
+        Ambangnya diturunkan dari waktu dan volatilitas saja. Mesin ini tetap
+        tidak pernah diperlihatkan target, persis seperti yang dijanjikan
+        docstring modulnya.
+        """
+        from aruna.futures.stops import ATR_FALLBACK, stop_loss
 
         entry, atr = Decimal(63000), Decimal(252)
-        far = entry - atr * (WIDE_STOP_ATR + Decimal(2))
+        far = entry - atr * Decimal(5)
         stop = stop_loss(
             entry=entry, side=PositionSide.LONG, atr=atr, invalidation_level=far
         )
+
         assert stop is not None
-        assert any("lebar" in f for f in stop.findings)
-        # Still placed at the structure, not pulled in.
-        assert stop.price < far
+        assert stop.from_volatility_only is True, (
+            "level di luar jangkauan masih dipakai sebagai sandaran struktur"
+        )
+        assert stop.distance == atr * ATR_FALLBACK
+        assert any("di luar" in f and "ATR" in f for f in stop.findings)
+        # Jaraknya ikut disebut: operator harus tahu SEBERAPA jauh level itu,
+        # bukan hanya bahwa ia dibuang.
+        assert any("5.0 ATR" in f for f in stop.findings)
+
+    def test_level_di_dalam_jangkauan_tetap_dipakai(self) -> None:
+        """Pasangannya. Tanpa ini, perbaikan di atas bisa lulus dengan membuang
+        SETIAP level struktur - dan itu mematikan seluruh gunanya."""
+        from aruna.futures.stops import stop_loss
+
+        entry, atr = Decimal(63000), Decimal(252)
+        dekat = entry - atr  # satu ATR: di dalam jangkauan satu horizon
+        stop = stop_loss(
+            entry=entry, side=PositionSide.LONG, atr=atr, invalidation_level=dekat
+        )
+
+        assert stop is not None
+        assert stop.from_volatility_only is False
+        assert stop.price < dekat, "stop harus tetap di luar level, bukan di atasnya"
 
     def test_an_ordinary_stop_is_not_flagged(self) -> None:
         from aruna.futures.stops import stop_loss
