@@ -57,7 +57,56 @@ MIN_ATR_DISTANCE = Decimal("0.75")
 #: One ATR because that is the nearest rung the ATR fallback itself offers: a
 #: structural level closer than the fallback's own first step is worse than the
 #: fallback, so preferring it is preferring the weaker basis.
-MIN_TARGET_ATR = Decimal("1.0")
+#:
+#: ---------------------------------------------------------------------------
+#: **2026-08-26: dinaikkan ke dua, dan kali ini DIUKUR.**
+#:
+#: Alasan lama - "rung terdekat yang ditawarkan fallback" - adalah analogi, bukan
+#: pengukuran: angkanya dipilih supaya sepadan dengan tangga fallback, dan
+#: tangga itu sendiri tidak pernah diuji. Korpus 17 bulan sekarang bisa
+#: menjawabnya.
+#:
+#: Nilai harapan per trade dalam satuan R, pada bar yang council pilih BUY
+#: (n=1.086), stop tetap di 1,5 ATR sehingga ukuran posisi TIDAK berubah dan
+#: yang diukur murni letak target::
+#:
+#:     target  1,0 ATR   +0,025      target  4,0 ATR   +0,047
+#:     target  2,0 ATR   +0,042      target  5,0 ATR   +0,047
+#:     target  3,0 ATR   +0,048      target  6,0 ATR   +0,047
+#:
+#: Satu ATR - lantai lama - adalah pilihan TERBURUK di seluruh tangga. Kurvanya
+#: naik sampai tiga lalu datar, karena target di luar tiga ATR praktis tidak
+#: pernah tersentuh (0,61% per hari) dan posisinya berakhir di harga tutup.
+#:
+#: **Dua, bukan tiga**, meski tiga sedikit lebih tinggi. Target yang tersentuh
+#: 0,61% waktu - sekali per 164 hari - jatuh ke keberatan yang sudah tertulis di
+#: :func:`take_profit` sendiri: *"target yang dicapai market sekali per kuartal
+#: bukan sebuah plan"*. Dua ATR memberi 88% dari perbaikannya dan masih
+#: tersentuh 2,05% hari, jadi ia tetap sebuah tujuan dan bukan alasan.
+#:
+#: Diserang sebelum dipakai. Dengan stop dipegang tetap, ketiga potongan waktu
+#: membaik (+0,036->+0,044, -0,087->-0,063, +0,051->+0,088), dua dari tiga
+#: regime membaik - TURUN paling banyak, -0,045->-0,011 - dan kelebihan pilihan
+#: ARUNA atas entri acak naik dari +0,032 ke +0,043. Yang terakhir itu yang
+#: menentukan: kalau entri acak ikut membaik sebanyak ARUNA, yang terukur cuma
+#: efek skala, bukan letak target.
+MIN_TARGET_ATR = Decimal("2.0")
+
+#: Tangga target ketika tidak ada struktur yang bisa dipakai, dalam ATR.
+#:
+#: **Anak tangga pertamanya WAJIB sama dengan** :data:`MIN_TARGET_ATR`, dan
+#: sejak 2026-08-26 hubungan itu ditegakkan mesin alih-alih dijanjikan komentar.
+#: Sebelumnya angkanya ditulis dua kali - konstanta di sini, tuple inline di
+#: dalam :func:`take_profit` - dan sebuah test mengunci literalnya, bukan
+#: hubungannya. Dua literal yang menyatakan satu invarian bebas melenceng, dan
+#: gejalanya bukan galat: level struktur di bawah lantai dibuang, lalu jarak
+#: yang sama persis ditawarkan kembali sebagai fallback. Lantainya sendiri
+#: dibatalkan lewat pintu belakang.
+TANGGA_FALLBACK: tuple[Decimal, ...] = (
+    MIN_TARGET_ATR,
+    MIN_TARGET_ATR + 1,
+    MIN_TARGET_ATR + 2,
+)
 
 #: A stop beyond this many ATR is named as wide. Not capped - see the finding
 #: that uses it. Three ATR because the buffer engine already treats three ATR
@@ -337,7 +386,7 @@ def take_profit(
             "kembali ke kelipatan ATR, dan itu dasar yang lebih lemah daripada "
             "level yang memang dihormati market"
         )
-        for multiple in (Decimal(1), Decimal(2), Decimal(3))[:max_levels]:
+        for multiple in TANGGA_FALLBACK[:max_levels]:
             distance = atr * multiple
             levels.append(entry + distance if is_long else entry - distance)
             reasons.append(f"{multiple} ATR dari entry")

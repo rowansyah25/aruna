@@ -203,10 +203,62 @@ class TestTargetsHaveAFloorNotJustACeiling:
 
     def test_the_floor_matches_the_fallbacks_nearest_rung(self) -> None:
         """A structural level closer than the fallback's own first step is a
-        weaker basis than the fallback, so preferring it is backwards."""
+        weaker basis than the fallback, so preferring it is backwards.
+
+        **Yang dikunci sekarang HUBUNGANNYA, bukan literalnya.** Versi lama
+        menuliskan `Decimal("1.0") == MIN_TARGET_ATR` - dan angka yang sama
+        hidup kedua kalinya sebagai tuple inline di dalam `take_profit`. Dua
+        literal yang menyatakan satu invarian bebas melenceng, dan gejalanya
+        bukan galat: level struktur di bawah lantai dibuang, lalu jarak yang
+        sama persis ditawarkan kembali sebagai fallback, membatalkan lantainya
+        sendiri lewat pintu belakang. Sekarang tangganya diturunkan dari
+        lantainya, jadi keduanya tidak bisa lagi berselisih.
+        """
+        from aruna.futures.stops import MIN_TARGET_ATR, TANGGA_FALLBACK
+
+        assert TANGGA_FALLBACK[0] == MIN_TARGET_ATR
+        assert list(TANGGA_FALLBACK) == sorted(TANGGA_FALLBACK), (
+            "tangga target harus menaik - anak tangga yang lebih dekat "
+            "daripada pendahulunya bukan tangga"
+        )
+
+    def test_target_satu_atr_ditolak_karena_terukur_terburuk(self) -> None:
+        """**Angka lantainya sendiri, bukan hanya hubungannya.**
+
+        Test di atas mengunci "tangga dimulai di lantai", dan itu bertahan di
+        nilai berapa pun - jadi ia tidak menjaga apa pun soal LETAK lantainya.
+        Cabut-uji membuktikannya: mengembalikan lantai ke satu ATR membiarkan
+        seluruh berkas ini hijau.
+
+        Yang dikunci di sini hasil pengukurannya. Nilai harapan per trade dalam
+        satuan R, pada bar yang council pilih BUY (n=1.086), stop dipegang tetap
+        di 1,5 ATR sehingga ukuran posisi tidak ikut berubah::
+
+            target 1,0 ATR  +0,025   <- terburuk di seluruh tangga
+            target 2,0 ATR  +0,042
+            target 3,0 ATR  +0,048   <- puncak, lalu datar
+            target 6,0 ATR  +0,047
+
+        Satu ATR adalah letak target TERBURUK yang terukur. Sebuah level struktur
+        sejauh itu harus dibuang, bukan dipakai.
+        """
         from aruna.futures.stops import MIN_TARGET_ATR
 
-        assert Decimal("1.0") == MIN_TARGET_ATR
+        assert Decimal("1.0") < MIN_TARGET_ATR, (
+            "lantai target kembali ke satu ATR - letak yang terukur PALING "
+            "buruk dari seluruh tangga yang diuji"
+        )
+
+        satu_atr = ENTRY + ATR
+        target = take_profit(
+            entry=ENTRY,
+            side=PositionSide.LONG,
+            atr=ATR,
+            structure_levels=(satu_atr,),
+        )
+
+        assert satu_atr not in target.levels
+        assert any("dibuang" in f for f in target.findings)
 
 
 class TestAWideStopIsNamed:
@@ -280,11 +332,15 @@ class TestAWideStopIsNamed:
 
 class TestTakeProfit:
     def test_structure_ahead_of_price_is_preferred(self) -> None:
-        levels = (Decimal(50_800), Decimal(51_500), Decimal(52_000))
+        # 51.500 ada 3 ATR di depan entry. Dulu fixture ini mulai dari 50.800
+        # (1,6 ATR), dan sejak lantai target dinaikkan ke 2 ATR (2026-08-26)
+        # level itu dibuang - test-nya akan diam-diam berpindah menguji jalur
+        # fallback alih-alih preferensi struktur yang jadi pokoknya.
+        levels = (Decimal(51_500), Decimal(52_000), Decimal(52_500))
         target = take_profit(
             entry=ENTRY, side=PositionSide.LONG, atr=ATR, structure_levels=levels
         )
-        assert target.levels[0] == Decimal(50_800)
+        assert target.levels[0] == Decimal(51_500)
         assert all("struktur di " in r for r in target.reasons)
 
     def test_levels_behind_price_are_not_targets(self) -> None:
