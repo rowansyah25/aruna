@@ -40,7 +40,19 @@ DISENGAJA: dict[str, str] = {
         "(safety score) dan SPEC 25 (liquidation score). Bentuknya sama, "
         "yang diskor berbeda."
     ),
-    "BASE_URL": "dua venue berbeda - Yahoo dan Binance futures.",
+    "BASE_URL": "dua venue berbeda - Yahoo, Binance futures, dan Twelve Data.",
+    "MIN_TARGET_ATR": (
+        "pelajaran yang sama atas dua pasar yang berbeda, dan itu justru "
+        "kenapa keduanya TIDAK boleh berbagi satu konstanta. Futures "
+        "menetapkannya dari hasil futures; XAU M5 harus menetapkannya dari "
+        "hasil XAU. Kalau futures menyetel ulang lantainya - dan modul itu "
+        "memang menyetel diri - sebuah impor akan menggeser ambang XAU "
+        "diam-diam, atas bukti yang bukan miliknya. Angkanya kebetulan sama "
+        "hari ini karena alasannya sama: satu ATR adalah pergerakan khas, "
+        "jadi menargetkan satu ATR berarti menargetkan hasil imbang yang "
+        "terukur paling buruk. Spec XAU juga menuntut modul terpisah, dan "
+        "mengimpor dari `aruna.futures` akan melanggarnya."
+    ),
     "BERARAH": (
         "himpunan yang berbeda atas enum yang berbeda: frozenset[Butir] "
         "tiga anggota di `decision.audit`, frozenset[Jejak] lima anggota di "

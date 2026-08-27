@@ -83,9 +83,24 @@ DISENGAJA: dict[str, str] = {
     ),
     "periksa_kelayakan": (
         "Gerbang NO SIGNAL untuk data basi/hilang/invalid. Pemanggilnya sama "
-        "dengan `rakit_tumpukan` - mesin sinyal Rencana 2. Sengaja TIDAK "
+        "dengan `rakit_tumpukan` - penjadwal XAU di Rencana 5. Sengaja TIDAK "
         "dirangkai ke jalur crypto/futures: spec menuntut modul XAU terpisah, "
         "dan futures memakai kosakata LONG/SHORT yang berbeda."
+    ),
+    "rakit_bukti": (
+        "Rencana XAU 2. Rantainya lengkap dan diuji ujung ke ujung - "
+        "`rakit_bukti` -> `rakit_konteks` -> `putuskan_dari_dewan` - tapi "
+        "yang MEMANGGIL rantai itu tiap siklus baru dibangun di Rencana 5 "
+        "(penjadwalan), setelah Rencana 3 memberi tempat menyimpan hasilnya. "
+        "Merangkainya sekarang berarti keputusan XAU dihitung lalu dibuang, "
+        "yang persis cacat yang daftar ini ada untuk mencegahnya."
+    ),
+    "rakit_konteks": "Mata rantai kedua, lihat `rakit_bukti`.",
+    "putuskan_dari_dewan": (
+        "Mata rantai terakhir, lihat `rakit_bukti`. Ini pintu masuk produksi "
+        "modul XAU: `test_xau_keputusan.TestJalurProduksi` menjalankannya di "
+        "atas `Deliberation` sungguhan supaya perangkaiannya tidak jadi kode "
+        "yang diuji tapi tak pernah dirangkai."
     ),
     "balikkan": (
         "Bagian 23: perubahan parameter otomatis harus bisa dibalikkan. Modulnya "
