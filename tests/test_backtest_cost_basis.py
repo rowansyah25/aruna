@@ -72,6 +72,36 @@ class TestCostBasis:
         for market in COST_MODELS:
             assert len(cost_basis(market)) <= 64
 
+    def test_no_production_caller_iterates_every_market(self) -> None:
+        """`for market in Market` di sekitar `cost_basis` adalah bom waktu.
+
+        Terjadi di produksi 2026-08-27: `recent_runs` mengiterasi seluruh
+        `Market`, FOREX tak punya jadwal biaya, `cost_model` menolak - dan
+        SELURUH laporan riset gagal tiap siklus. Testnya sudah diperbaiki
+        bersamaan dengan `cost_model`; pemanggil produksinya terlewat.
+
+        Dipindai, bukan diingat: yang berikutnya menambahkan market keempat
+        tidak akan membaca komentar ini.
+        """
+        import re
+        from pathlib import Path
+
+        src = Path(__file__).resolve().parent.parent / "src" / "aruna"
+        pelanggar: list[str] = []
+        for path in src.rglob("*.py"):
+            isi = path.read_text(encoding="utf-8")
+            if "cost_basis(" not in isi and "cost_model(" not in isi:
+                continue
+            for baris in isi.splitlines():
+                if re.search(r"for \w+ in Market\b", baris) and (
+                    "cost_basis(" in baris or "cost_model(" in baris
+                ):
+                    pelanggar.append(f"{path.name}: {baris.strip()}")
+        assert not pelanggar, (
+            "mengiterasi seluruh Market di sekitar cost_basis/cost_model "
+            f"menjatuhkan pemanggilnya saat ada market tanpa jadwal biaya: {pelanggar}"
+        )
+
     def test_a_market_without_a_schedule_refuses_instead_of_borrowing(self) -> None:
         """FOREX joined in 2026-08-27 with no measured spread.
 

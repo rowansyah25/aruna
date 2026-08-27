@@ -24,7 +24,7 @@ from aruna.backtest.replay import ReplayResult
 from aruna.core.enums import Market
 from aruna.db.pool import Database
 from aruna.db.types import as_utc, dump_json, load_json, to_mysql_datetime
-from aruna.signals.paper import cost_model, default_capital
+from aruna.signals.paper import COST_MODELS, cost_model, default_capital
 
 
 def cost_basis(market: Market) -> str:
@@ -173,7 +173,16 @@ class BacktestRepository:
         list is empty until new backtests are run, and empty means *not yet
         measured*, not *nothing wrong*.
         """
-        pairs = [(market.value, cost_basis(market)) for market in Market]
+        # Diiterasi atas `COST_MODELS`, bukan atas `Market`. Sebuah market
+        # tanpa jadwal biaya terukur tidak punya `cost_basis` - `cost_model`
+        # menolak alih-alih meminjam jadwal market lain - dan menolak di
+        # tengah pemahaman daftar ini menjatuhkan SELURUH laporan riset.
+        #
+        # Terjadi di produksi 2026-08-27, tiap siklus, sejak FOREX ditambahkan:
+        # `upkeep.research_failed` dengan NotImplementedError. Testnya sudah
+        # diperbaiki bersamaan dengan `cost_model`; baris INI terlewat, dan
+        # itu jenis cacat yang sama - satu pemanggil yang tidak ikut diubah.
+        pairs = [(market.value, cost_basis(market)) for market in COST_MODELS]
         placeholders = ", ".join(["(%s, %s)"] * len(pairs))
         params: list[Any] = [value for pair in pairs for value in pair]
         rows = await self._db.fetch(
