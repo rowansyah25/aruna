@@ -1692,7 +1692,7 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
     "modul terpisah" yang spec tuntut.  Providernya dibangun langsung di sini.
     """
     import asyncio as _asyncio
-    from datetime import timedelta
+    from datetime import UTC, timedelta
 
     from aruna.core.clock import now_utc
     from aruna.data.quality import QualityGate
@@ -1736,7 +1736,18 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
     # Bar terakhir yang sudah dinilai. Tanpa ini, dua tick dalam satu jendela
     # 300 detik menulis dua baris untuk bar yang sama dan melanggar kunci
     # uniknya - dan galat itu mematikan loop yang lalu dinyalakan ulang.
-    as_of_terakhir = None
+    #
+    # **Dibaca dari basis data, bukan dimulai dari None.** Penjaga di memori
+    # hanya menutup drift jadwal di dalam satu proses; restart menghapusnya,
+    # dan proses baru akan menilai ulang bar yang sudah disimpan proses lama.
+    # Diukur di produksi 2026-08-27: crash loop tiga kali beruntun tiap
+    # delapan detik, karena penjaga supervisor menyalakan ulang apa yang baru
+    # saja mati karena tabrakan kunci unik.
+    as_of_terakhir = await repo.as_of_terakhir()
+    if as_of_terakhir is not None:
+        if as_of_terakhir.tzinfo is None:
+            as_of_terakhir = as_of_terakhir.replace(tzinfo=UTC)
+        print(f"  bar terakhir yang sudah dinilai: {as_of_terakhir.isoformat()}")
     try:
         while now_utc() < berhenti:
             hasil = await satu_tick(

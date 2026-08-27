@@ -305,6 +305,48 @@ def _tanpa_komentar(teks: str) -> str:
     )
 
 
+class TestPenjagaBarLintasRestart:
+    """Penjaga di memori tidak selamat dari restart, dan itu MELEDAK.
+
+    Diukur di produksi 2026-08-27: proses baru menilai ulang bar yang sudah
+    disimpan proses lama, menabrak uq_xau_setup_bar, mati - lalu supervisor
+    menyalakannya lagi. Tiga kali beruntun, tiap delapan detik.
+    """
+
+    async def test_membaca_bar_terakhir_dari_basis_data(self) -> None:
+        class DbPalsu:
+            def __init__(self):
+                self.sql = None
+
+            async def fetchval(self, sql, *params):
+                self.sql = sql
+                return datetime(2026, 8, 31, 16, 40, tzinfo=UTC)
+
+        db = DbPalsu()
+        hasil = await XauRepository(db).as_of_terakhir()
+        assert hasil == datetime(2026, 8, 31, 16, 40, tzinfo=UTC)
+        assert "MAX(as_of)" in db.sql
+
+    async def test_basis_data_kosong_mengembalikan_none(self) -> None:
+        """None = belum pernah ada keputusan, jadi bar mana pun boleh dinilai."""
+
+        class DbKosong:
+            async def fetchval(self, sql, *params):
+                return None
+
+        assert await XauRepository(DbKosong()).as_of_terakhir() is None
+
+    def test_loop_menyemainya_saat_menyala(self) -> None:
+        """Kalau pembacaan itu tidak dirangkai, cacatnya kembali utuh."""
+        from pathlib import Path
+
+        cli = (
+            Path(__file__).resolve().parent.parent
+            / "src" / "aruna" / "cli.py"
+        ).read_text(encoding="utf-8")
+        assert "as_of_terakhir = await repo.as_of_terakhir()" in cli
+
+
 class TestSkema:
     @pytest.fixture
     def sql(self) -> str:

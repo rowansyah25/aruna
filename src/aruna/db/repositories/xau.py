@@ -169,6 +169,25 @@ class XauRepository:
         return prediction_id
 
 
+    async def as_of_terakhir(self, symbol: str = "XAU/USD") -> datetime | None:
+        """Bar terakhir yang sudah punya keputusan, atau ``None``.
+
+        **Dibaca saat loop menyala, dan itu memperbaiki cacat yang sudah
+        meledak.**  Penjaga "satu bar dinilai sekali" hidup di memori proses;
+        restart menghapusnya, jadi proses baru menilai ulang bar yang sudah
+        disimpan proses lama dan menabrak ``uq_xau_setup_bar``.  Diukur di
+        produksi 2026-08-27: crash loop tiga kali beruntun, tiap delapan detik,
+        karena supervisor menyalakan ulang apa yang baru saja mati.
+
+        Penjaga di memori menutup drift jadwal; ini yang menutup restart.
+        Keduanya perlu - dan yang kedua tidak bisa disimpulkan dari yang
+        pertama.
+        """
+        return await self._db.fetchval(
+            "SELECT MAX(as_of) FROM xau_predictions WHERE symbol = %s",
+            symbol,
+        )
+
     async def perlu_dinilai(self, *, sejak: datetime) -> list[dict[str, Any]]:
         """Sinyal berarah yang belum punya hasil, sejak ``sejak``.
 
