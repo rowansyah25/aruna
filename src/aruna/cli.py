@@ -1696,6 +1696,7 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
 
     from aruna.core.clock import now_utc
     from aruna.data.http import HttpFetcher
+    from aruna.notify.telegram.sender import sender_from
     from aruna.data.quality import QualityGate
     from aruna.data.registry import build_provider
     from aruna.db.repositories.xau import XauRepository
@@ -1741,6 +1742,14 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
     gate = QualityGate(settings.data, source=provider.name)
     repo = XauRepository(app.db)
     cooldown = Cooldown()
+
+    # Kirim-saja, tidak pernah membaca: bot di `aruna run` yang memegang
+    # getUpdates, dan konsumen kedua akan merusak keduanya. Mengirim tidak
+    # punya eksklusivitas itu - pola yang sama dengan `futures-loop`.
+    pengirim = None if args.quiet else sender_from(settings.telegram)
+    if pengirim is not None and not pengirim.configured:
+        print("  (tidak ada chat Telegram terkonfigurasi - jalan tanpa notifikasi)")
+        pengirim = None
     berhenti = now_utc() + timedelta(hours=args.hours)
 
     print(f"--- xau loop {'-' * 48}")
@@ -1814,6 +1823,7 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
                 as_of_terakhir=as_of_terakhir,
                 dolar=dolar,
                 berita=peristiwa or None,
+                sender=pengirim,
             )
             if hasil.menilai:
                 dinilai += 1
@@ -2788,6 +2798,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=300,
         help="detik antar tick; bawaan 300 = satu bar M5",
+    )
+    xau.add_argument(
+        "--quiet",
+        action="store_true",
+        help="simpan keputusan tanpa mengirim notifikasi Telegram",
     )
     xau.set_defaults(func=cmd_xau_loop)
 

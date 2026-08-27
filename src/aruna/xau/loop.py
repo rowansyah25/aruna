@@ -36,6 +36,7 @@ from aruna.core.logging import get_logger
 from aruna.data.models import Candle, Snapshot
 from aruna.data.provider import MarketDataProvider
 from aruna.data.quality import QualityGate
+from aruna.db.repositories.xau import VERSI_MODEL_XAU
 from aruna.xau.bukti import rakit_bukti
 from aruna.xau.cooldown import Cooldown
 from aruna.xau.geometri import Geometri
@@ -49,6 +50,7 @@ from aruna.xau.koreksi import (
 )
 from aruna.xau.keputusan import SinyalXau, putuskan_dari_dewan
 from aruna.xau.konteks import rakit_konteks
+from aruna.xau.notify import kirim_sinyal, susun_pesan
 from aruna.xau.resolve import nilai_hasil
 from aruna.xau.timeframes import rakit_tumpukan
 
@@ -212,6 +214,7 @@ async def satu_tick(
     as_of_terakhir: datetime | None = None,
     dolar: object | None = None,
     berita: object | None = None,
+    sender: object | None = None,
 ) -> HasilTick:
     """Satu siklus keputusan.  Berhenti di penolakan pertama, tapi menyimpannya.
 
@@ -285,6 +288,27 @@ async def satu_tick(
             alasan=sinyal.alasan,
             setup_id=sinyal.setup_id,
         )
+        # HANYA sinyal berarah yang dikabarkan. XAU memutuskan 288 kali sehari
+        # dan hampir semuanya diam; mengabarkan tiap diam akan mengubur yang
+        # satu-satunya berarti. NO SIGNAL tetap tersimpan lengkap dengan
+        # sebabnya - baris itu catatannya.
+        if sinyal.ada_sinyal and sender is not None:
+            await kirim_sinyal(
+                sender,
+                susun_pesan(
+                    sinyal,
+                    as_of=f"{as_of:%Y-%m-%d %H:%M} UTC",
+                    sesi=FOREX_CALENDAR.session(as_of),
+                    regime=regime,
+                    dolar=dolar,
+                    berita=(
+                        ringkas_berita(berita, sekarang=as_of)
+                        if berita is not None
+                        else None
+                    ),
+                    versi_model=VERSI_MODEL_XAU,
+                ),
+            )
         return HasilTick(
             sinyal=sinyal,
             bar=len(m5),
