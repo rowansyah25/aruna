@@ -315,6 +315,24 @@ def default_children(symbols: str, *, hours: float) -> list[ChildSpec]:
                 "--risk", f"{risiko:g}",
             ],
         ),
+        # Proses ketiga, sejajar futures dan sama-sama berdiri sendiri.
+        #
+        # **Tanpa --equity dan --risk, dan itu disengaja.** ARUNA di jalur XAU
+        # adalah analis arah; ia tidak menghitung ukuran posisi, notional, atau
+        # margin. Menyalin argumen futures ke sini akan membuat dua modul
+        # terlihat berbagi model risiko yang sebenarnya tidak ada di salah
+        # satunya.
+        #
+        # Intervalnya 300 detik karena itu satu bar M5 - cadence keputusannya,
+        # bukan angka yang dipilih supaya terasa sering.
+        ChildSpec(
+            name="xau-loop",
+            args=[
+                "-m", "aruna.cli", "xau-loop",
+                "--hours", str(hours),
+                "--interval", "300",
+            ],
+        ),
     ]
 
 

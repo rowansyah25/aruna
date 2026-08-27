@@ -1673,6 +1673,87 @@ async def _plan(settings: Settings, args: argparse.Namespace) -> int:
         await app.shutdown()
 
 
+def cmd_xau_loop(args: argparse.Namespace) -> int:
+    """Analisa XAUUSD M5 pada timer, lalu berhenti.  ANALISA SAJA."""
+    settings = _load_settings()
+    _setup_cli_logging(settings)
+    return asyncio.run(_xau_loop(settings, args))
+
+
+async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
+    """Satu keputusan XAU per bar M5, disimpan apa adanya.
+
+    Berdiri sendiri dari ``aruna run`` dengan alasan yang sama seperti
+    ``futures-loop``: cadence dan universe-nya sendiri, dan matinya salah satu
+    tidak boleh menyeret yang lain.
+
+    **``ARUNA_ENABLED_MARKETS`` sengaja TIDAK disentuh.**  Menambahkan ``FOREX``
+    di sana akan menyeret XAU ke loop upkeep crypto - persis kebalikan dari
+    "modul terpisah" yang spec tuntut.  Providernya dibangun langsung di sini.
+    """
+    import asyncio as _asyncio
+    from datetime import timedelta
+
+    from aruna.core.clock import now_utc
+    from aruna.data.quality import QualityGate
+    from aruna.data.registry import build_provider
+    from aruna.db.repositories.xau import XauRepository
+    from aruna.xau.cooldown import Cooldown
+    from aruna.xau.loop import SIMBOL, satu_tick
+
+    app = ArunaApplication(settings)
+    try:
+        await app.startup(background=False)
+    except ArunaError as exc:
+        print(f"STARTUP FAILED: {exc}", file=sys.stderr)
+        return EXIT_ERROR
+
+    try:
+        provider = build_provider(
+            Market.FOREX,
+            settings.providers.forex_provider,
+            settings.data,
+            api_key=settings.providers.forex_provider_api_key.get_secret_value(),
+        )
+    except ArunaError as exc:
+        print(f"XAU PROVIDER UNAVAILABLE: {exc}", file=sys.stderr)
+        await app.shutdown()
+        return EXIT_ERROR
+
+    gate = QualityGate(settings.data, source=provider.name)
+    repo = XauRepository(app.db)
+    cooldown = Cooldown()
+    berhenti = now_utc() + timedelta(hours=args.hours)
+
+    print(f"--- xau loop {'-' * 48}")
+    print(f"  simbol:    {SIMBOL}")
+    print(f"  interval:  {args.interval}s")
+    print(f"  sampai:    {berhenti.isoformat()}  ({args.hours}h)")
+    print("  ARUNA menganalisa saja. Tidak ada order, tidak ada dana bergerak.")
+
+    await provider.open()
+    dinilai = tersimpan = dilewati = 0
+    try:
+        while now_utc() < berhenti:
+            hasil = await satu_tick(
+                provider, gate, sekarang=now_utc(), repo=repo, cooldown=cooldown
+            )
+            if hasil.menilai:
+                dinilai += 1
+                tersimpan += 1 if hasil.prediction_id else 0
+            else:
+                dilewati += 1
+            await _asyncio.sleep(args.interval)
+    except (KeyboardInterrupt, _asyncio.CancelledError):
+        pass
+    finally:
+        await provider.close()
+        await app.shutdown()
+
+    print(f"  dinilai {dinilai}, tersimpan {tersimpan}, dilewati {dilewati}")
+    return EXIT_OK
+
+
 def cmd_futures_loop(args: argparse.Namespace) -> int:
     """Plan on a timer for a fixed stretch, then stop (FUTURES SPEC 48)."""
     settings = _load_settings()
@@ -2618,6 +2699,19 @@ def build_parser() -> argparse.ArgumentParser:
         help="store plans without sending any Telegram notification",
     )
     loop.set_defaults(func=cmd_futures_loop)
+
+    xau = sub.add_parser(
+        "xau-loop",
+        help="analisa XAUUSD M5 pada timer, lalu berhenti (analisa saja)",
+    )
+    xau.add_argument("--hours", type=float, default=24.0, help="berapa lama berjalan")
+    xau.add_argument(
+        "--interval",
+        type=int,
+        default=300,
+        help="detik antar tick; bawaan 300 = satu bar M5",
+    )
+    xau.set_defaults(func=cmd_xau_loop)
 
     upkeep = sub.add_parser(
         "upkeep",

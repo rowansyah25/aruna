@@ -307,10 +307,18 @@ class TestMenyalakanUlangYangMati:
 
 
 class TestApaYangDijaga:
-    def test_dua_proses_dan_keduanya_analisis(self) -> None:
+    def test_tiga_proses_dan_ketiganya_analisis(self) -> None:
+        """Himpunan PERSIS, bukan `>=`.
+
+        Dicocokkan tepat karena kedua arah bisa salah dan keduanya sunyi.
+        Sebuah proses yang HILANG - `xau-loop` ditambahkan 2026-08-27 dan
+        `futures-loop` tak sengaja tergeser - hanya terasa sebagai modul yang
+        diam sehari penuh. Sebuah proses yang BERTAMBAH tanpa disadari adalah
+        sesuatu yang dijaga hidup selamanya tanpa seorang pun memutuskannya.
+        """
         children = default_children("BTCUSDT,ETHUSDT", hours=24.0)
         names = {c.name for c in children}
-        assert names == {"aruna-run", "futures-loop"}
+        assert names == {"aruna-run", "futures-loop", "xau-loop"}
 
     def test_tidak_ada_perintah_eksekusi(self) -> None:
         """PASAL 41. Penjaga menyalakan ulang apa pun yang disuruh, jadi daftar

@@ -73,42 +73,12 @@ DISENGAJA: dict[str, str] = {
         "cukup bahannya lewat `TumpukanTimeframe.kurang()`; rincian per-ember "
         "belum ada yang membacanya."
     ),
-    # -- 3b. Rencana XAU 1: lapisan data, pemanggilnya di Rencana 2 ---------
-    "rakit_tumpukan": (
-        "Rencana XAU 1 membangun lapisan datanya saja: menarik M5 dan "
-        "menurunkan M15/H1/H4 darinya. Yang memanggilnya adalah mesin sinyal "
-        "di Rencana 2, yang belum ditulis. Diuji penuh di "
-        "`test_xau_timeframes`, termasuk cabut-uji `require_closed`. "
-        "Keputusan operator 2026-08-27: bangun bertahap, jangan sekali jadi."
-    ),
-    "periksa_kelayakan": (
-        "Gerbang NO SIGNAL untuk data basi/hilang/invalid. Pemanggilnya sama "
-        "dengan `rakit_tumpukan` - penjadwal XAU di Rencana 5. Sengaja TIDAK "
-        "dirangkai ke jalur crypto/futures: spec menuntut modul XAU terpisah, "
-        "dan futures memakai kosakata LONG/SHORT yang berbeda."
-    ),
-    "rakit_bukti": (
-        "Rencana XAU 2. Rantainya lengkap dan diuji ujung ke ujung - "
-        "`rakit_bukti` -> `rakit_konteks` -> `putuskan_dari_dewan` - tapi "
-        "yang MEMANGGIL rantai itu tiap siklus baru dibangun di Rencana 5 "
-        "(penjadwalan), setelah Rencana 3 memberi tempat menyimpan hasilnya. "
-        "Merangkainya sekarang berarti keputusan XAU dihitung lalu dibuang, "
-        "yang persis cacat yang daftar ini ada untuk mencegahnya."
-    ),
-    "rakit_konteks": "Mata rantai kedua, lihat `rakit_bukti`.",
-    "XauRepository": (
-        "Penyimpanan keputusan XAU, mata rantai keempat - lihat `rakit_bukti`. "
-        "Tabelnya sudah ada dan barisnya sudah diuji lewat penulis palsu yang "
-        "merekam SQL beserta parameternya, tapi yang MEMANGGILNYA tiap siklus "
-        "baru dibangun di Rencana 5. Dirangkai sekarang, ia akan menulis "
-        "keputusan yang tidak ada penjadwalnya."
-    ),
-    "putuskan_dari_dewan": (
-        "Mata rantai terakhir, lihat `rakit_bukti`. Ini pintu masuk produksi "
-        "modul XAU: `test_xau_keputusan.TestJalurProduksi` menjalankannya di "
-        "atas `Deliberation` sungguhan supaya perangkaiannya tidak jadi kode "
-        "yang diuji tapi tak pernah dirangkai."
-    ),
+    # Seluruh rantai XAU keluar dari daftar ini 2026-08-27. `xau-loop`
+    # (Rencana 5) memanggil rakit_tumpukan, periksa_kelayakan, rakit_bukti,
+    # rakit_konteks, putuskan_dari_dewan, dan XauRepository tiap bar M5. Yang
+    # dulu tertulis di sini sebagai "pemanggilnya menyusul di Rencana 5" kini
+    # benar-benar ada - dan test di bawah yang menuntut barisnya dicabut,
+    # bukan seseorang yang kebetulan ingat.
     "balikkan": (
         "Bagian 23: perubahan parameter otomatis harus bisa dibalikkan. Modulnya "
         "sendiri menyatakan belum ada parameter hidup yang bisa dibalikkan - yang "
