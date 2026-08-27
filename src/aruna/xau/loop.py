@@ -40,6 +40,7 @@ from aruna.db.repositories.xau import VERSI_MODEL_XAU
 from aruna.xau.bukti import rakit_bukti
 from aruna.xau.cooldown import Cooldown
 from aruna.xau.geometri import Geometri
+from aruna.xau.kabar import nilai_kabar, susun_kabar
 from aruna.xau.kalender import ringkas as ringkas_berita
 from aruna.xau.kelayakan import periksa_kelayakan
 from aruna.xau.koreksi import (
@@ -51,8 +52,8 @@ from aruna.xau.koreksi import (
 from aruna.xau.keputusan import SinyalXau, putuskan_dari_dewan
 from aruna.xau.konteks import rakit_konteks
 from aruna.xau.notify import kirim_sinyal, susun_pesan
-from aruna.xau.resolve import nilai_hasil
-from aruna.xau.timeframes import rakit_tumpukan
+from aruna.xau.resolve import HORIZON_BAR, nilai_hasil
+from aruna.xau.timeframes import TumpukanTimeframe, rakit_tumpukan
 
 log = get_logger(__name__)
 
@@ -166,6 +167,81 @@ async def nilai_yang_tertunda(repo: object, m5: list[Candle]) -> int:
     if dinilai:
         await koreksi_kalau_saatnya(repo, sebelum + dinilai)
     return dinilai
+
+
+async def kabari_yang_berjalan(
+    repo: object,
+    m5: list[Candle],
+    tumpukan: TumpukanTimeframe,
+    *,
+    sender: object | None = None,
+) -> int:
+    """Kabari sinyal yang masih berjalan - hanya saat keadaannya BERGANTI.
+
+    Struktur dibaca ulang dari bar terbaru, bukan dari yang tersimpan saat
+    sinyal terbit: seluruh gunanya adalah menanyakan "apakah alasannya masih
+    ada", dan alasan yang dibaca dari catatan lama akan selalu menjawab ya.
+    """
+    if not m5:
+        return 0
+
+    bukti = rakit_bukti(tumpukan)
+    if bukti is None:
+        return 0
+
+    harga = m5[-1].close
+    sekarang = m5[-1].close_time
+    dikabarkan = 0
+
+    for baris in await repo.sinyal_berjalan(sejak=m5[0].open_time):
+        as_of = baris["as_of"]
+        if as_of.tzinfo is None:
+            as_of = as_of.replace(tzinfo=UTC)
+        lewat = max(0, int((sekarang - as_of).total_seconds() // 300))
+        sisa = HORIZON_BAR - lewat
+        if sisa <= 0:
+            # Horizonnya habis: yang menilainya adalah resolver, bukan kabar.
+            continue
+
+        kabar = nilai_kabar(
+            arah=Decision(baris["keputusan"]),
+            entry=baris["entry"],
+            stop=baris["stop"],
+            target=baris["target"],
+            atr=baris["atr"],
+            harga=harga,
+            struktur=bukti.m5.structure,
+            sisa_bar=sisa,
+        )
+        # Hanya PERUBAHAN. Tanpa syarat ini, satu gagasan berhorizon empat jam
+        # mengirim empat puluh delapan pesan yang sama.
+        if not kabar.perlu_dikabarkan:
+            continue
+        if kabar.keadaan.value == baris.get("keadaan_terakhir"):
+            continue
+
+        terkirim = False
+        if sender is not None:
+            terkirim = await kirim_sinyal(
+                sender,
+                susun_kabar(
+                    kabar,
+                    arah=Decision(baris["keputusan"]),
+                    as_of=f"{sekarang:%Y-%m-%d %H:%M} UTC",
+                ),
+            )
+        await repo.simpan_kabar(
+            baris["id"], baris["keputusan"], kabar, terkirim=terkirim
+        )
+        dikabarkan += 1
+        log.info(
+            "xau.kabar",
+            prediction_id=baris["id"],
+            keadaan=kabar.keadaan.value,
+            tutup=kabar.menyarankan_tutup,
+            alasan=kabar.alasan,
+        )
+    return dikabarkan
 
 
 async def koreksi_kalau_saatnya(repo: object, hasil_terselesaikan: int) -> None:
@@ -344,6 +420,7 @@ async def satu_tick(
     # jadi horizon 4 jam milik prediksi mana pun di dalamnya sudah lengkap.
     if repo is not None:
         await nilai_yang_tertunda(repo, m5)
+        await kabari_yang_berjalan(repo, m5, tumpukan, sender=sender)
 
     konteks = rakit_konteks(bukti, _snapshot_dari_bar(m5, gate))
     deliberation = (engine or DeliberationEngine()).deliberate(konteks)

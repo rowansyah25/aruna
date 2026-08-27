@@ -258,6 +258,54 @@ class XauRepository:
             to_mysql_datetime(sejak),
         )
 
+    async def sinyal_berjalan(self, *, sejak: datetime) -> list[dict[str, Any]]:
+        """Sinyal berarah yang belum punya hasil, beserta kabar terakhirnya.
+
+        ``keadaan_terakhir`` dibaca dari basis data, bukan dari memori proses.
+        Alasannya sudah dibayar sekali di modul ini: penjaga yang hidup di
+        variabel proses hilang saat restart, dan supervisor mengubah akibatnya
+        jadi crash loop.  Di sini akibatnya cuma pesan ganda - tapi sebabnya
+        sama persis, dan sudah diketahui.
+        """
+        return await self._db.fetch(
+            """
+            SELECT p.id, p.keputusan, p.as_of, p.entry, p.stop, p.target, p.atr,
+                   (SELECT k.keadaan FROM xau_kabar k
+                     WHERE k.prediction_id = p.id
+                     ORDER BY k.id DESC LIMIT 1) AS keadaan_terakhir
+            FROM xau_predictions p
+            LEFT JOIN xau_results r ON r.prediction_id = p.id
+            WHERE r.id IS NULL
+              AND p.keputusan <> 'NO_SIGNAL'
+              AND p.as_of >= %s
+            ORDER BY p.as_of
+            """,
+            to_mysql_datetime(sejak),
+        )
+
+    async def simpan_kabar(
+        self, prediction_id: int, keputusan: str, kabar: Any, *, terkirim: bool
+    ) -> int:
+        """Catat satu PERUBAHAN keadaan.  Bukan tiap tick."""
+        return await self._db.insert(
+            """
+            INSERT INTO xau_kabar
+                (prediction_id, keputusan, keadaan, alasan, harga, sisa_bar,
+                 ke_target_atr, ke_stop_atr, disarankan_tutup, terkirim)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            prediction_id,
+            keputusan,
+            kabar.keadaan.value,
+            kabar.alasan[:255],
+            _desimal(kabar.harga, SKALA_HARGA),
+            kabar.sisa_bar,
+            _desimal(kabar.ke_target_atr),
+            _desimal(kabar.ke_stop_atr),
+            kabar.menyarankan_tutup,
+            terkirim,
+        )
+
     async def baris_keandalan(self) -> list[dict[str, Any]]:
         """Suara berarah yang sudah punya hasil, siap untuk ``build_reliability``.
 

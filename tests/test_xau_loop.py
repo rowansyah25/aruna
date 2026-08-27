@@ -77,6 +77,8 @@ class RepoPalsu:
         self.sejak_diminta = None
         self.koreksi: list[dict] = []
         self.baris: list[dict] = []
+        self.berjalan: list[dict] = []
+        self.kabar: list[dict] = []
 
     async def perlu_dinilai(self, *, sejak):
         self.sejak_diminta = sejak
@@ -90,6 +92,16 @@ class RepoPalsu:
     #    bidangnya menyimpang menghijaukan suite di atas bug produksi.
     async def hitung_hasil(self):
         return len(self.hasil)
+
+    async def sinyal_berjalan(self, *, sejak):
+        return self.berjalan
+
+    async def simpan_kabar(self, prediction_id, keputusan, kabar, *, terkirim):
+        self.kabar.append(
+            {"prediction_id": prediction_id, "keadaan": kabar.keadaan.value,
+             "tutup": kabar.menyarankan_tutup, "terkirim": terkirim}
+        )
+        return len(self.kabar)
 
     async def koreksi_terakhir(self):
         return self.koreksi[-1] if self.koreksi else None
