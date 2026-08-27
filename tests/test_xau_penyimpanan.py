@@ -158,6 +158,45 @@ class TestBarisYangDitulis:
         await XauRepository(db).simpan(_sinyal(), as_of=SAAT, decided_at=SAAT)
         assert "as_of" in db.kolom()
 
+    async def test_desimal_dibulatkan_ke_skala_kolomnya(self, db) -> None:
+        """MySQL memangkas diam-diam dan memperingatkan tiap baris.
+
+        Diukur di produksi 2026-08-27: ATR datang sebagai 4.647307316048187 ke
+        kolom DECIMAL(24,8), dan lima kolom memicu "Data truncated" pada SETIAP
+        keputusan. Bagian bulatnya tak pernah terancam - yang berbahaya adalah
+        dinding peringatan yang mengajari operator mengabaikan peringatan
+        sungguhan.
+        """
+        panjang = Geometri(
+            entry=Decimal("4605.123456789012345"),
+            stop=Decimal("4598.987654321098765"),
+            target=Decimal("4612.111111111111111"),
+            atr=Decimal("4.647307316048187"),
+            sentuhan_target=5,
+        )
+        await XauRepository(db).simpan(
+            _sinyal(geometri=panjang), as_of=SAAT, decided_at=SAAT
+        )
+        baris = db.nilai()
+        assert baris["atr"].as_tuple().exponent == -8
+        assert baris["entry"].as_tuple().exponent == -8
+        assert baris["rr"].as_tuple().exponent == -4
+        assert baris["target_atr"].as_tuple().exponent == -4
+
+    async def test_pembulatan_tidak_menyentuh_bagian_bulat(self, db) -> None:
+        """DECIMAL(24,8) memuat enam belas digit di depan koma; emas butuh empat."""
+        panjang = Geometri(
+            entry=Decimal("4605.123456789012345"),
+            stop=Decimal("4598.9"),
+            target=Decimal("4612.1"),
+            atr=Decimal("4.647307316048187"),
+            sentuhan_target=5,
+        )
+        await XauRepository(db).simpan(
+            _sinyal(geometri=panjang), as_of=SAAT, decided_at=SAAT
+        )
+        assert int(db.nilai()["entry"]) == 4605
+
     async def test_versi_model_tercatat(self, db) -> None:
         """Tanpa versi, hasil dari dua model berbeda tak bisa dipisahkan."""
         await XauRepository(db).simpan(_sinyal(), as_of=SAAT, decided_at=SAAT)

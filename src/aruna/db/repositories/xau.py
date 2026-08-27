@@ -24,7 +24,7 @@ diam-diam menang.
 from __future__ import annotations
 
 from datetime import datetime
-from decimal import Decimal
+from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
 from aruna.core.logging import get_logger
@@ -44,8 +44,28 @@ VERSI_MODEL_XAU = "xau-m5-1"
 BacaanBukti = dict[str, dict[str, tuple[float | None, int, int]]]
 
 
-def _desimal(nilai: float | None) -> Decimal | None:
-    return None if nilai is None else Decimal(str(nilai))
+#: Skala kolom, disalin dari `migrations/0046_xau_sinyal.sql`.
+#:
+#: Dibulatkan di Python, bukan diserahkan ke MySQL. Diukur di produksi
+#: 2026-08-27: ATR datang sebagai 4.647307316048187 - lima belas angka desimal
+#: ke kolom berkapasitas delapan - dan tiap baris memicu lima peringatan
+#: "Data truncated". Bagian bulatnya tidak pernah terancam (DECIMAL(24,8)
+#: memuat enam belas digit di depan koma, emas butuh empat), jadi yang hilang
+#: cuma presisi yang tak ada artinya. Yang berbahaya adalah peringatannya:
+#: dinding peringatan yang selalu menyala mengajari operator mengabaikan
+#: peringatan yang sungguhan.
+SKALA_HARGA = Decimal("0.00000001")  # DECIMAL(24,8)
+SKALA_RASIO = Decimal("0.0001")  # DECIMAL(10,4) dan DECIMAL(6,4)
+
+
+def _desimal(
+    nilai: float | Decimal | None, skala: Decimal = SKALA_RASIO
+) -> Decimal | None:
+    """``None`` tetap ``None``; sisanya dibulatkan ke skala kolomnya."""
+    if nilai is None:
+        return None
+    angka = nilai if isinstance(nilai, Decimal) else Decimal(str(nilai))
+    return angka.quantize(skala, rounding=ROUND_HALF_EVEN)
 
 
 class XauRepository:
@@ -86,12 +106,12 @@ class XauRepository:
             rekap.menentang if rekap else 0,
             rekap.netral if rekap else 0,
             _desimal(rekap.kontradiksi) if rekap else None,
-            geo.entry if geo else None,
-            geo.stop if geo else None,
-            geo.target if geo else None,
-            geo.atr if geo else None,
+            _desimal(geo.entry, SKALA_HARGA) if geo else None,
+            _desimal(geo.stop, SKALA_HARGA) if geo else None,
+            _desimal(geo.target, SKALA_HARGA) if geo else None,
+            _desimal(geo.atr, SKALA_HARGA) if geo else None,
             _desimal(geo.rr) if geo else None,
-            geo.target_atr if geo else None,
+            _desimal(geo.target_atr) if geo else None,
             geo.sentuhan_target if geo else None,
             None,
             sinyal.spread_diukur,
