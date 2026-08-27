@@ -96,6 +96,72 @@ class TestTesisBatal:
         assert k.keadaan is not Keadaan.TESIS_BATAL
 
 
+class TestRezimMelawanMembatalkan:
+    """Keputusan operator 2026-08-28, sesudah tiga SELL kena stop.
+
+    Pilihannya: memperketat perlakuan dekat-stop, atau membuat pembatalan
+    lebih peka. Yang kedua dipilih - stop adalah garis yang operator tetapkan
+    sebagai batas salah, dan memindahkannya diam-diam membuat RR yang
+    dijanjikan saat sinyal terbit tidak lagi berlaku.
+    """
+
+    def _rezim(self, nama: str, keyakinan: float = 0.8):
+        from aruna.core.enums import Regime
+
+        class Bacaan:
+            regime = Regime(nama)
+            confidence = keyakinan
+
+        return Bacaan()
+
+    def test_sell_dibatalkan_saat_pasar_trending_bullish(self) -> None:
+        """SELL di pasar yang naik bukan sedang lambat - premisnya hilang."""
+        k = _nilai(arah=Decision.SELL, stop=Decimal("1010"), target=Decimal("970"),
+                   struktur=_struktur(970.0, support=True),
+                   regime=self._rezim("TRENDING_BULLISH"))
+        assert k.keadaan is Keadaan.TESIS_BATAL
+        assert "melawan arah SELL" in k.alasan
+
+    def test_buy_dibatalkan_saat_pasar_trending_bearish(self) -> None:
+        k = _nilai(regime=self._rezim("TRENDING_BEARISH"))
+        assert k.keadaan is Keadaan.TESIS_BATAL
+
+    def test_breakout_membatalkan_sell(self) -> None:
+        k = _nilai(arah=Decision.SELL, stop=Decimal("1010"), target=Decimal("970"),
+                   struktur=_struktur(970.0, support=True),
+                   regime=self._rezim("BREAKOUT"))
+        assert k.keadaan is Keadaan.TESIS_BATAL
+
+    def test_rezim_searah_TIDAK_membatalkan(self) -> None:
+        k = _nilai(arah=Decision.SELL, stop=Decimal("1010"), target=Decimal("970"),
+                   struktur=_struktur(970.0, support=True),
+                   regime=self._rezim("TRENDING_BEARISH"))
+        assert k.keadaan is not Keadaan.TESIS_BATAL
+
+    def test_ranging_TIDAK_membatalkan(self) -> None:
+        """RANGING berarti tidak terbaca, bukan terbaca-melawan - dan ia 30,8%
+        dari korpus. Membatalkan di sana akan membatalkan hampir semuanya."""
+        assert _nilai(regime=self._rezim("RANGING")).keadaan is not Keadaan.TESIS_BATAL
+
+    def test_uncertain_TIDAK_membatalkan(self) -> None:
+        k = _nilai(regime=self._rezim("UNCERTAIN", 0.2))
+        assert k.keadaan is not Keadaan.TESIS_BATAL
+
+    def test_keyakinan_tipis_TIDAK_cukup_membatalkan(self) -> None:
+        """Rezim yang nyaris tak terbaca tidak cukup kuat untuk membatalkan
+        gagasan yang levelnya masih berdiri."""
+        k = _nilai(regime=self._rezim("TRENDING_BEARISH", 0.3))
+        assert k.keadaan is not Keadaan.TESIS_BATAL
+
+    def test_tanpa_rezim_tidak_membatalkan(self) -> None:
+        assert _nilai(regime=None).keadaan is Keadaan.BERJALAN
+
+    def test_level_hilang_tetap_diperiksa_lebih_dulu(self) -> None:
+        """Dua sebab pembatalan; yang pertama tetap yang paling menentukan."""
+        k = _nilai(struktur=_struktur(1200.0), regime=self._rezim("TRENDING_BEARISH"))
+        assert "sudah tidak terbaca lagi" in k.alasan
+
+
 class TestKedekatan:
     def test_dekat_stop_dikabarkan(self) -> None:
         k = _nilai(harga=Decimal("992"))  # 2 dari stop = 0,4 ATR

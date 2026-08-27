@@ -45,6 +45,33 @@ SISA_HAMPIR_HABIS = 6
 #: tick.
 TOLERANSI_LEVEL_ATR = Decimal("0.75")
 
+#: Rezim yang secara langsung melawan arah sebuah sinyal.
+#:
+#: **Ditambahkan atas keputusan operator 2026-08-28**, sesudah tiga SELL kena
+#: stop.  Pilihannya: memperketat perlakuan dekat-stop, atau membuat
+#: pembatalan lebih peka.  Yang kedua dipilih, dan alasannya kuat - stop adalah
+#: garis yang operator tetapkan sebagai "gagasan ini terbukti salah", dan
+#: memindahkannya diam-diam membuat RR yang dijanjikan saat sinyal terbit tidak
+#: lagi berlaku.
+#:
+#: Sebuah SELL yang pasarnya kini membaca TRENDING_BULLISH bukan sedang lambat;
+#: premisnya sudah hilang.  ``RANGING`` dan ``UNCERTAIN`` sengaja TIDAK di
+#: sini: keduanya berarti tidak terbaca, bukan terbaca-melawan, dan
+#: membatalkan gagasan karena pasar sedang tidak jelas akan membatalkan hampir
+#: semuanya - RANGING saja 30,8% dari korpus.
+REGIME_MELAWAN: dict[str, frozenset[str]] = {
+    "BUY": frozenset({"TRENDING_BEARISH", "BREAKDOWN"}),
+    "SELL": frozenset({"TRENDING_BULLISH", "BREAKOUT"}),
+}
+
+#: Keyakinan minimum sebelum rezim yang melawan dianggap membatalkan.
+#:
+#: Diukur atas 396 jendela: keyakinan saat rezim TERBACA punya p10 = 0,511.
+#: Ambang 0,5 karena itu menerima hampir seluruh bacaan yang sungguhan dan
+#: menolak yang di ambang - sebuah rezim yang nyaris tak terbaca tidak cukup
+#: kuat untuk membatalkan gagasan yang levelnya masih berdiri.
+MIN_KEYAKINAN_BATAL = 0.5
+
 
 class Keadaan(StrEnum):
     """Keadaan sebuah sinyal yang masih berjalan."""
@@ -96,6 +123,22 @@ def _level_masih_ada(
     return any(abs(Decimal(str(lvl.price)) - target) <= toleransi for lvl in kandidat)
 
 
+def _regime_melawan(regime: object | None, arah: Decision) -> str | None:
+    """Nama rezim kalau ia melawan ``arah`` dengan keyakinan cukup.
+
+    ``None`` berarti tidak melawan - termasuk saat rezimnya tidak terbaca sama
+    sekali.  Rezim yang tidak terbaca BUKAN rezim yang melawan: membatalkan
+    gagasan karena pasar sedang tidak jelas akan membatalkan hampir semuanya.
+    """
+    if regime is None:
+        return None
+    nama = getattr(getattr(regime, "regime", None), "value", None)
+    if nama not in REGIME_MELAWAN.get(arah.value, frozenset()):
+        return None
+    keyakinan = getattr(regime, "confidence", 0.0) or 0.0
+    return nama if keyakinan >= MIN_KEYAKINAN_BATAL else None
+
+
 def nilai_kabar(
     *,
     arah: Decision,
@@ -106,11 +149,16 @@ def nilai_kabar(
     harga: Decimal,
     struktur: StructureReport,
     sisa_bar: int,
+    regime: object | None = None,
 ) -> Kabar:
     """Baca keadaan satu sinyal yang masih berjalan.
 
     Urutannya disengaja: yang paling menentukan lebih dulu.  Sebuah tesis yang
     sudah batal tidak perlu dilaporkan sebagai "mendekati target".
+
+    ``regime`` adalah pembacaan rezim M5 terbaru.  Rezim yang kini membaca
+    LAWAN arah sinyal membatalkan gagasannya sama seperti level yang hilang -
+    keduanya berarti alasannya tidak ada lagi, bukan bahwa ia lambat.
     """
     if not arah.is_directional:
         raise ValueError(f"hanya sinyal berarah yang dikabari, bukan {arah.value}")
@@ -137,6 +185,19 @@ def nilai_kabar(
             alasan=(
                 f"level {target:,.2f} yang jadi alasan sinyal ini sudah tidak "
                 "terbaca lagi di struktur"
+            ),
+            **dasar,
+        )
+
+    # 1b. Pasar kini membaca LAWAN arah sinyal. Sebuah SELL di pasar yang
+    #     TRENDING_BULLISH bukan sedang lambat - premisnya sudah hilang.
+    melawan = _regime_melawan(regime, arah)
+    if melawan is not None:
+        return Kabar(
+            keadaan=Keadaan.TESIS_BATAL,
+            alasan=(
+                f"rezim kini {melawan} - melawan arah {arah.value}, "
+                "jadi premis sinyal ini sudah tidak berdiri"
             ),
             **dasar,
         )
@@ -331,6 +392,8 @@ def susun_penutup(
 
 __all__ = [
     "AMBANG_DEKAT_ATR",
+    "MIN_KEYAKINAN_BATAL",
+    "REGIME_MELAWAN",
     "SISA_HAMPIR_HABIS",
     "TOLERANSI_LEVEL_ATR",
     "Kabar",

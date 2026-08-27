@@ -291,6 +291,9 @@ async def kabari_yang_berjalan(
             harga=harga,
             struktur=bukti.m5.structure,
             sisa_bar=sisa,
+            # Rezim terbaru ikut: pasar yang kini membaca LAWAN arah sinyal
+            # membatalkan premisnya, sama seperti level yang hilang.
+            regime=bukti.m5.regime,
         )
         # Hanya PERUBAHAN. Tanpa syarat ini, satu gagasan berhorizon empat jam
         # mengirim empat puluh delapan pesan yang sama.
