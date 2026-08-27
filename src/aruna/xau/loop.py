@@ -139,11 +139,20 @@ async def satu_tick(
 
     tumpukan = rakit_tumpukan(m5)
 
-    async def simpan(sinyal: SinyalXau, as_of: datetime) -> HasilTick:
+    async def simpan(
+        sinyal: SinyalXau, as_of: datetime, bacaan: dict | None = None
+    ) -> HasilTick:
         prediction_id = None
         if repo is not None:
             prediction_id = await repo.simpan(
-                sinyal, as_of=as_of, decided_at=sekarang, symbol=symbol
+                sinyal,
+                as_of=as_of,
+                decided_at=sekarang,
+                symbol=symbol,
+                # Bukti ikut disimpan supaya keputusan bisa DIPUTAR ULANG.
+                # Sebuah prediksi yang salah tanpa buktinya cuma memberi tahu
+                # bahwa ia salah; dengan buktinya, ia memberi tahu kenapa.
+                bukti=bacaan,
             )
         log.info(
             "xau.keputusan",
@@ -190,7 +199,7 @@ async def satu_tick(
         symbol=symbol,
         cooldown=cooldown,
     )
-    return await simpan(sinyal, bukti.as_of)
+    return await simpan(sinyal, bukti.as_of, bukti.bacaan())
 
 
 __all__ = ["BAR_DIBUTUHKAN", "SIMBOL", "HasilTick", "satu_tick"]

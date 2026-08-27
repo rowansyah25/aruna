@@ -46,6 +46,29 @@ class BuktiXau:
         """Close bar M5 tersettle terbaru.  Lihat docstring modul."""
         return self.m5.as_of
 
+    def bacaan(self) -> dict[str, dict[str, tuple[float | None, int, int]]]:
+        """Seluruh bacaan indikator, siap disimpan.
+
+        ``sample_size`` dan ``required`` ikut karena sebuah indikator yang
+        bahannya kurang BUKAN indikator yang nilainya kecil - dan tanpa
+        keduanya, ``reliable`` tidak bisa dihitung ulang saat keputusan ini
+        diputar ulang.  ``value`` boleh ``None``: tidak terhitung, bukan nol.
+        """
+        peta = {
+            Horizon.M5: self.m5,
+            Horizon.M15: self.m15,
+            Horizon.H1: self.h1,
+            Horizon.H4: self.h4,
+        }
+        return {
+            tf.value: {
+                nama: (r.value, r.sample_size, r.required)
+                for nama, r in snap.readings.items()
+            }
+            for tf, snap in peta.items()
+            if snap is not None
+        }
+
     def tersedia(self) -> tuple[Horizon, ...]:
         """Timeframe yang buktinya benar-benar terhitung."""
         peta = {

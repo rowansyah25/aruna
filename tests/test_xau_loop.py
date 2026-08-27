@@ -73,9 +73,16 @@ class RepoPalsu:
     def __init__(self) -> None:
         self.disimpan: list[dict] = []
 
-    async def simpan(self, sinyal, *, as_of, decided_at, symbol="XAU/USD"):
+    async def simpan(
+        self, sinyal, *, as_of, decided_at, symbol="XAU/USD", bukti=None
+    ):
         self.disimpan.append(
-            {"sinyal": sinyal, "as_of": as_of, "decided_at": decided_at}
+            {
+                "sinyal": sinyal,
+                "as_of": as_of,
+                "decided_at": decided_at,
+                "bukti": bukti,
+            }
         )
         return len(self.disimpan)
 
@@ -186,6 +193,40 @@ class TestKegagalanTarikBukanPenilaian:
         )
         assert hasil.menilai is False
         assert repo.disimpan == []
+
+
+class TestBuktiIkutTersimpan:
+    """Diukur di produksi 2026-08-27: `xau_evidence` NOL baris sesudah dua
+    keputusan. Tabelnya ada dan loop tidak pernah mengoper isinya - persis
+    "tabel ada bukan berarti terisi"."""
+
+    async def test_bacaan_indikator_ikut(self) -> None:
+        repo = RepoPalsu()
+        await satu_tick(
+            ProviderPalsu(_candles()), _gate(), sekarang=SEKARANG, repo=repo
+        )
+        bukti = repo.disimpan[0]["bukti"]
+        assert bukti, "bukti tidak dioper; xau_evidence akan selamanya kosong"
+        assert "5m" in bukti
+        assert "atr" in bukti["5m"]
+
+    async def test_bacaan_membawa_sample_size_dan_required(self) -> None:
+        """Indikator yang bahannya kurang BUKAN indikator yang nilainya kecil."""
+        repo = RepoPalsu()
+        await satu_tick(
+            ProviderPalsu(_candles()), _gate(), sekarang=SEKARANG, repo=repo
+        )
+        nilai, sample_size, required = repo.disimpan[0]["bukti"]["5m"]["atr"]
+        assert nilai is not None
+        assert sample_size > 0
+        assert required > 0
+
+    async def test_timeframe_besar_ikut(self) -> None:
+        repo = RepoPalsu()
+        await satu_tick(
+            ProviderPalsu(_candles()), _gate(), sekarang=SEKARANG, repo=repo
+        )
+        assert set(repo.disimpan[0]["bukti"]) >= {"5m", "15m", "1h"}
 
 
 class TestBarBelumBerganti:
