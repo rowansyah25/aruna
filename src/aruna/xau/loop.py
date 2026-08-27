@@ -198,7 +198,10 @@ async def satu_tick(
     tumpukan = rakit_tumpukan(m5)
 
     async def simpan(
-        sinyal: SinyalXau, as_of: datetime, bacaan: dict | None = None
+        sinyal: SinyalXau,
+        as_of: datetime,
+        bacaan: dict | None = None,
+        regime: object | None = None,
     ) -> HasilTick:
         prediction_id = None
         if repo is not None:
@@ -207,6 +210,10 @@ async def satu_tick(
                 as_of=as_of,
                 decided_at=sekarang,
                 symbol=symbol,
+                # Rezim M5: gerbang UNKNOWN_REGIME memblokir 17,4% keputusan
+                # (diukur atas 17 hari), dan tanpa kolom ini angka itu tak
+                # pernah bisa disandingkan dengan hasil keputusannya.
+                regime=regime,
                 # Bukti ikut disimpan supaya keputusan bisa DIPUTAR ULANG.
                 # Sebuah prediksi yang salah tanpa buktinya cuma memberi tahu
                 # bahwa ia salah; dengan buktinya, ia memberi tahu kenapa.
@@ -263,7 +270,7 @@ async def satu_tick(
         symbol=symbol,
         cooldown=cooldown,
     )
-    return await simpan(sinyal, bukti.as_of, bukti.bacaan())
+    return await simpan(sinyal, bukti.as_of, bukti.bacaan(), bukti.m5.regime)
 
 
 __all__ = [

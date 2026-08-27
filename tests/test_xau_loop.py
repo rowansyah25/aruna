@@ -85,7 +85,7 @@ class RepoPalsu:
         return len(self.hasil)
 
     async def simpan(
-        self, sinyal, *, as_of, decided_at, symbol="XAU/USD", bukti=None
+        self, sinyal, *, as_of, decided_at, symbol="XAU/USD", bukti=None, regime=None
     ):
         self.disimpan.append(
             {
@@ -93,6 +93,7 @@ class RepoPalsu:
                 "as_of": as_of,
                 "decided_at": decided_at,
                 "bukti": bukti,
+                "regime": regime,
             }
         )
         return len(self.disimpan)
@@ -286,6 +287,19 @@ class TestBuktiIkutTersimpan:
     """Diukur di produksi 2026-08-27: `xau_evidence` NOL baris sesudah dua
     keputusan. Tabelnya ada dan loop tidak pernah mengoper isinya - persis
     "tabel ada bukan berarti terisi"."""
+
+    async def test_rezim_ikut_tersimpan(self) -> None:
+        """Gerbang UNKNOWN_REGIME memblokir 17,4% keputusan - diukur atas 17
+        hari, 396 jendela M5. Tanpa kolomnya, angka itu tak pernah bisa
+        disandingkan dengan hasil keputusannya."""
+        repo = RepoPalsu()
+        await satu_tick(
+            ProviderPalsu(_candles()), _gate(), sekarang=SEKARANG, repo=repo
+        )
+        regime = repo.disimpan[0]["regime"]
+        assert regime is not None
+        assert regime.regime.value
+        assert regime.evidence_available > 0
 
     async def test_bacaan_indikator_ikut(self) -> None:
         repo = RepoPalsu()

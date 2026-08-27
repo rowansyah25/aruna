@@ -81,6 +81,7 @@ class XauRepository:
         decided_at: datetime,
         symbol: str = "XAU/USD",
         bukti: BacaanBukti | None = None,
+        regime: Any = None,
     ) -> int:
         """Tulis satu keputusan beserta suara dan buktinya.  Kembalikan id-nya."""
         geo = sinyal.geometri
@@ -93,9 +94,10 @@ class XauRepository:
                  keputusan, alasan_kosong,
                  confidence, setuju, menentang, netral, kontradiksi,
                  entry, stop, target, atr, rr, target_atr, sentuhan_target,
-                 spread_bps, spread_diukur, model_version)
+                 spread_bps, spread_diukur, model_version,
+                 regime, regime_confidence, bukti_dipakai, bukti_tersedia)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             symbol,
             sinyal.setup_id,
@@ -121,6 +123,13 @@ class XauRepository:
             None,
             sinyal.spread_diukur,
             VERSI_MODEL_XAU,
+            # Rezim ikut supaya "akurasi per rezim" bisa dijawab tanpa
+            # menghitung ulang dari luar - dan supaya UNCERTAIN, yang memblokir
+            # 17,4% keputusan, bisa disandingkan dengan hasilnya.
+            regime.regime.value if regime is not None else None,
+            _desimal(regime.confidence) if regime is not None else None,
+            regime.evidence_used if regime is not None else None,
+            regime.evidence_available if regime is not None else None,
         )
 
         if rekap is not None:
