@@ -106,6 +106,21 @@ class PlanResult:
     #: True when price reached the liquidation level at any point, whether or
     #: not the stop would have fired first.
     touched_liquidation: bool = False
+    #: Apakah pasar bergerak ke arah yang dipanggil, diukur pada tutup horizon.
+    #:
+    #: **Sumbu yang terpisah dari bagaimana trade-nya berakhir**, dan
+    #: pemisahan itu adalah seluruh alasan kolom ini ada. "Apakah arahnya
+    #: benar" itu pertanyaan ramalan; "stop atau target yang kena lebih dulu"
+    #: itu pertanyaan eksekusi. Sebuah LONG yang kena stop di jam pertama lalu
+    #: ditutup horizon 3% di atas entry SALAH sebagai trade dan BENAR sebagai
+    #: ramalan - dan yang harus diperbaiki pada kasus itu stop-nya, bukan
+    #: agennya. Taksonomi lama tidak bisa membedakan keduanya, jadi 92% plan
+    #: mendarat di ``EXPIRED`` dan tidak ada akurasi arah yang bisa dihitung
+    #: sama sekali di jalur futures.
+    #:
+    #: ``None`` berarti tidak terukur: tidak ada jalur harga (``OPEN``), atau
+    #: baris yang ditulis sebelum kolom ini ada.
+    direction_correct: bool | None = None
     findings: tuple[str, ...] = field(default_factory=tuple)
 
     @property
@@ -130,6 +145,7 @@ class PlanResult:
                 else None
             ),
             "touched_liquidation": self.touched_liquidation,
+            "direction_correct": self.direction_correct,
             "findings": list(self.findings),
         }
 
@@ -278,6 +294,16 @@ def score_plan(plan: FuturesPlan, path: list[PriceBar]) -> PlanResult | None:
         )
 
     is_long = plan.side is PositionSide.LONG
+
+    # Diukur SEKALI, dari bar terakhir yang tutup di dalam horizon, dan
+    # dipasang ke setiap akhir. `path[-1].close` tersedia di semua cabang -
+    # termasuk yang keluar lebih awal karena stop atau liquidation - jadi sumbu
+    # ramalan tetap terukur pada plan yang trade-nya sudah selesai jauh sebelum
+    # horizonnya habis. Menghitungnya di dalam loop, pada bar tempat posisi
+    # ditutup, akan menjawab pertanyaan yang berbeda: "ke mana harga bergerak
+    # sampai stop kena", yang selalu melawan menurut definisi.
+    arah_benar = _arah_benar(plan.entry, path[-1].close, is_long)
+
     liquidation = plan.liquidation.price if plan.liquidation else None
     worst = plan.entry
     touched_liquidation = False
@@ -307,6 +333,7 @@ def score_plan(plan: FuturesPlan, path: list[PriceBar]) -> PlanResult | None:
                 exit_price=liquidation,
                 max_adverse_pct=_pct(plan.entry, worst),
                 touched_liquidation=True,
+                direction_correct=arah_benar,
                 findings=tuple(findings),
             )
 
@@ -325,6 +352,7 @@ def score_plan(plan: FuturesPlan, path: list[PriceBar]) -> PlanResult | None:
                 exit_price=plan.stop,
                 max_adverse_pct=_pct(plan.entry, worst),
                 touched_liquidation=touched_liquidation,
+                direction_correct=arah_benar,
                 findings=(
                     "stop terisi: idenya salah, dan itu memang hasil yang sudah "
                     "direncanakan sejak awal",
@@ -342,6 +370,7 @@ def score_plan(plan: FuturesPlan, path: list[PriceBar]) -> PlanResult | None:
                 exit_price=plan.target,
                 max_adverse_pct=_pct(plan.entry, worst),
                 touched_liquidation=touched_liquidation,
+                direction_correct=arah_benar,
             )
 
     return PlanResult(
@@ -353,12 +382,24 @@ def score_plan(plan: FuturesPlan, path: list[PriceBar]) -> PlanResult | None:
         exit_price=path[-1].close,
         max_adverse_pct=_pct(plan.entry, worst),
         touched_liquidation=touched_liquidation,
+        direction_correct=arah_benar,
         findings=(
-            "horizon habis tanpa satu level pun tersentuh, jadi ini tidak "
-            "mengatakan apa pun soal arah - hanya bahwa move-nya tidak datang "
-            "dalam waktu yang diklaim",
+            "horizon habis tanpa satu level pun tersentuh: yang meleset adalah "
+            "besar move-nya atau waktunya, bukan dengan sendirinya arahnya - "
+            "arah dinilai terpisah di direction_correct",
         ),
     )
+
+
+def _arah_benar(entry: Decimal, tutup_horizon: Decimal, is_long: bool) -> bool:
+    """Apakah pasar berpihak pada arah yang dipanggil, pada tutup horizon.
+
+    **Diam berarti salah.** Harga yang berakhir persis di entry tidak
+    membenarkan panggilan apa pun, dan menghitungnya sebagai benar akan
+    menaikkan akurasi setiap kali pasar tidak melakukan apa-apa - yaitu persis
+    pada kasus yang paling sering terjadi.
+    """
+    return tutup_horizon > entry if is_long else tutup_horizon < entry
 
 
 def _reached(bar: PriceBar, level: Decimal, downward: bool) -> bool:
@@ -412,6 +453,41 @@ class FuturesLearningReport:
         )
 
     @property
+    def direction_measured(self) -> tuple[PlanResult, ...]:
+        """Hasil yang sumbu arahnya terukur.
+
+        Bukan sama dengan :attr:`resolved`: baris yang ditulis sebelum kolom
+        ``direction_correct`` ada tidak pernah mengukurnya, dan memperlakukan
+        ``None`` sebagai salah akan menekan akurasi dengan baris yang tidak
+        pernah menjawab pertanyaannya.
+        """
+        return tuple(r for r in self.resolved if r.direction_correct is not None)
+
+    @property
+    def direction_correct_count(self) -> int:
+        return sum(1 for r in self.direction_measured if r.direction_correct)
+
+    @property
+    def direction_accuracy(self) -> float | None:
+        """Seberapa sering arahnya benar pada tutup horizon.
+
+        ``None`` di bawah ambang sample, sama seperti :attr:`win_rate`. Ambang
+        yang sama sengaja dipakai: keduanya rasio atas sample yang sama, dan
+        dua ambang berbeda akan membuat satu angka boleh diklaim sementara
+        angka sebelahnya tidak.
+
+        Ini BUKAN win rate dan tidak boleh dibaca sebagai win rate. Sebuah
+        sistem bisa benar arah 70% dan tetap rugi kalau stop-nya terlalu ketat
+        untuk jalur yang dilewati - dan pemisahan itulah yang membuat
+        pertanyaan "yang salah agennya atau stop-nya" bisa ditanyakan sama
+        sekali.
+        """
+        diukur = self.direction_measured
+        if len(diukur) < MIN_SAMPLE:
+            return None
+        return round(self.direction_correct_count / len(diukur), 4)
+
+    @property
     def sufficient(self) -> bool:
         return self.total >= MIN_SAMPLE
 
@@ -421,6 +497,31 @@ class FuturesLearningReport:
         if not self.sufficient or self.total == 0:
             return None
         return self.wins / self.total
+
+    @property
+    def arah_verdict(self) -> str:
+        """Kalimat akurasi arah, atau kenapa belum ada kalimatnya.
+
+        Dipisah dari :attr:`verdict` dan tidak pernah digabung ke dalamnya.
+        Win rate menjawab "apakah trade-nya menghasilkan"; akurasi arah
+        menjawab "apakah bacaan pasarnya benar". Satu paragraf yang memuat
+        keduanya sebagai satu angka adalah persis cara jalur spot berhenti
+        bisa menjawab keduanya.
+        """
+        diukur = len(self.direction_measured)
+        if diukur < MIN_SAMPLE:
+            return (
+                f"ARAH: belum terukur - {diukur} hasil punya sumbu arah, "
+                f"{MIN_SAMPLE} dibutuhkan. Hasil yang dinilai sebelum sumbu ini "
+                "ada tidak pernah mengukurnya dan tidak dihitung"
+            )
+        rate = self.direction_accuracy or 0.0
+        return (
+            f"ARAH: {rate:.0%} benar dari {diukur} hasil, diukur pada tutup "
+            "horizon. Ini bukan win rate: arah yang benar dengan stop yang "
+            "terlalu ketat tetap kalah, dan yang harus diperbaiki pada kasus "
+            "itu stop-nya"
+        )
 
     @property
     def verdict(self) -> str:
@@ -454,6 +555,9 @@ class FuturesLearningReport:
             "total_resolved": self.total,
             "wins": self.wins,
             "win_rate": self.win_rate,
+            "direction_measured": len(self.direction_measured),
+            "direction_correct": self.direction_correct_count,
+            "direction_accuracy": self.direction_accuracy,
             "sufficient_sample": self.sufficient,
             "liquidations": [r.to_dict() for r in self.liquidations],
             "near_liquidations": [r.to_dict() for r in self.near_liquidations],
@@ -503,6 +607,7 @@ def daily_report(
         lines.append("")
 
     lines.append(report.verdict)
+    lines.append(report.arah_verdict)
 
     if report.liquidations:
         lines += ["", "LIQUIDATED:"]

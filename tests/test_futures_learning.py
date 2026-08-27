@@ -28,6 +28,19 @@ from test_futures_plan import ENTRY, _plan
 NOW = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 
 
+def _hasil(**kwargs) -> PlanResult:
+    """Satu hasil yang sudah selesai, untuk menguji agregat laporan."""
+    params = {
+        "signal_id": "sig-0001",
+        "symbol": "BTCUSDT",
+        "side": PositionSide.LONG,
+        "outcome": PlanOutcome.EXPIRED,
+        "entry": Decimal(63000),
+        "exit_price": Decimal(63100),
+    }
+    return PlanResult(**(params | kwargs))
+
+
 def _bars(*levels: tuple[str, str]) -> list[PriceBar]:
     """Bars from (low, high) pairs, one hour apart."""
     return [
@@ -112,9 +125,105 @@ class TestTheExchangeActsFirst:
         )
         assert result is not None
         assert result.outcome is PlanOutcome.EXPIRED
-        assert any(
-            "tidak mengatakan apa pun soal arah" in f for f in result.findings
+        assert any("besar move-nya atau waktunya" in f for f in result.findings)
+
+
+class TestArahDinilaiTerpisahDariTrade:
+    """Dua sumbu, karena keduanya menunjuk perbaikan yang berbeda.
+
+    Taksonomi lama hanya bertanya level apa yang tersentuh lebih dulu. Diukur
+    2026-08-25 atas 218 hasil futures: 201 EXPIRED - sembilan dari sepuluh plan
+    mendarat di satu ember yang menyatakan dirinya tidak berkata apa pun soal
+    arah, jadi jalur futures tidak punya akurasi arah sama sekali.
+    """
+
+    def test_stop_kena_tapi_horizon_tutup_searah_tetap_arah_benar(self) -> None:
+        """Kasus yang persis hilang di taksonomi lama.
+
+        LONG yang kena stop di jam pertama lalu ditutup horizon DI ATAS entry
+        salah sebagai trade dan benar sebagai ramalan. Yang harus diperbaiki di
+        sini stop-nya, bukan agennya - dan satu angka gabungan menghapus tepat
+        perbedaan yang menentukan mana dari keduanya.
+        """
+        plan = _plan()
+        result = score_plan(
+            plan,
+            [
+                # Jam pertama menembus stop: trade selesai di sini.
+                PriceBar(
+                    NOW, high=ENTRY, low=Decimal(61000), close=Decimal(62000)
+                ),
+                # Horizon tutup di atas entry, tanpa menyentuh target.
+                PriceBar(
+                    NOW + timedelta(hours=1),
+                    high=ENTRY + Decimal(1000),
+                    low=ENTRY,
+                    close=ENTRY + Decimal(1000),
+                ),
+            ],
         )
+        assert result is not None
+        assert result.outcome is PlanOutcome.STOPPED_OUT
+        assert result.won is False
+        assert result.direction_correct is True
+
+    def test_expired_di_bawah_entry_adalah_arah_salah(self) -> None:
+        plan = _plan()
+        result = score_plan(
+            plan,
+            [
+                PriceBar(
+                    NOW,
+                    high=ENTRY + Decimal(10),
+                    low=ENTRY - Decimal(10),
+                    close=ENTRY - Decimal(10),
+                )
+            ],
+        )
+        assert result is not None
+        assert result.outcome is PlanOutcome.EXPIRED
+        assert result.direction_correct is False
+
+    def test_tutup_persis_di_entry_bukan_arah_benar(self) -> None:
+        """Diam berarti salah: pasar yang tidak bergerak tidak membenarkan
+        panggilan apa pun, dan menghitungnya benar akan menaikkan akurasi
+        justru pada kasus yang paling sering terjadi."""
+        plan = _plan()
+        result = score_plan(
+            plan,
+            [
+                PriceBar(
+                    NOW, high=ENTRY + Decimal(10), low=ENTRY - Decimal(10), close=ENTRY
+                )
+            ],
+        )
+        assert result is not None
+        assert result.direction_correct is False
+
+    def test_tanpa_jalur_harga_arah_tidak_terukur(self) -> None:
+        result = score_plan(_plan(), [])
+        assert result is not None
+        assert result.direction_correct is None
+
+    def test_akurasi_arah_mengabaikan_baris_yang_tidak_terukur(self) -> None:
+        """``None`` bukan salah. Baris yang ditulis sebelum kolomnya ada tidak
+        pernah menjawab pertanyaannya, dan memasukkannya ke penyebut akan
+        menekan akurasi dengan sejarah yang diam."""
+        benar = [_hasil(direction_correct=True) for _ in range(MIN_SAMPLE)]
+        salah = [_hasil(direction_correct=False) for _ in range(MIN_SAMPLE)]
+        diam = [_hasil(direction_correct=None) for _ in range(200)]
+        report = FuturesLearningReport(results=tuple(benar + salah + diam))
+
+        assert len(report.direction_measured) == MIN_SAMPLE * 2
+        assert report.direction_accuracy == 0.5
+
+    def test_akurasi_arah_diam_di_bawah_ambang_sample(self) -> None:
+        report = FuturesLearningReport(
+            results=tuple(
+                _hasil(direction_correct=True) for _ in range(MIN_SAMPLE - 1)
+            )
+        )
+        assert report.direction_accuracy is None
 
 
 class TestLiquidationIsExemptFromTheSampleThreshold:
@@ -215,6 +324,39 @@ class TestDailyReport:
         )
         assert "LIQUIDATED:" in text
         assert "sig-x" in text
+
+    def test_akurasi_arah_punya_barisnya_sendiri(self) -> None:
+        """Terpisah dari win rate, dan tidak pernah dilebur ke dalamnya.
+
+        Satu angka gabungan tidak bisa membedakan agen yang salah baca pasar
+        dari stop yang terlalu ketat untuk bacaan yang benar.
+        """
+        report = FuturesLearningReport(
+            results=tuple(
+                _hasil(direction_correct=i % 5 != 0) for i in range(MIN_SAMPLE)
+            )
+        )
+        text = daily_report(
+            report,
+            plans_made=1,
+            refusals=0,
+            waits=0,
+            no_signals=0,
+            as_of=NOW,
+        )
+        assert "ARAH: 80% benar dari 50 hasil" in text
+        assert "Ini bukan win rate" in text
+
+    def test_arah_yang_belum_cukup_sample_mengatakan_belum_terukur(self) -> None:
+        text = daily_report(
+            FuturesLearningReport(),
+            plans_made=0,
+            refusals=0,
+            waits=0,
+            no_signals=0,
+            as_of=NOW,
+        )
+        assert "ARAH: belum terukur - 0 hasil" in text
 
     def test_every_report_states_that_aruna_executed_nothing(self) -> None:
         text = daily_report(

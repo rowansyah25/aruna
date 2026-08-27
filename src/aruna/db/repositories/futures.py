@@ -224,14 +224,15 @@ class FuturesRepository:
             """
             INSERT INTO futures_plan_results
                 (signal_id, outcome, entry, exit_price, max_adverse_pct,
-                 touched_liquidation, findings, resolved_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s) AS new
+                 touched_liquidation, direction_correct, findings, resolved_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) AS new
             ON DUPLICATE KEY UPDATE
                 id                  = LAST_INSERT_ID(futures_plan_results.id),
                 outcome             = new.outcome,
                 exit_price          = new.exit_price,
                 max_adverse_pct     = new.max_adverse_pct,
                 touched_liquidation = new.touched_liquidation,
+                direction_correct   = new.direction_correct,
                 findings            = new.findings,
                 resolved_at         = new.resolved_at
             """,
@@ -241,6 +242,11 @@ class FuturesRepository:
             _at_column_scale(result.exit_price),
             result.max_adverse_pct,
             1 if result.touched_liquidation else 0,
+            # Tiga keadaan, bukan dua: None tetap None. `1 if x else 0` akan
+            # menulis 0 untuk yang tidak terukur, dan 0 di kolom ini berarti
+            # "arahnya salah" - klaim yang tidak pernah dibuat.
+            None if result.direction_correct is None
+            else (1 if result.direction_correct else 0),
             dump_json(list(result.findings)),
             to_mysql_datetime(resolved_at),
         )
@@ -349,10 +355,36 @@ class FuturesRepository:
                     else None
                 ),
                 touched_liquidation=bool(row["touched_liquidation"]),
+                direction_correct=(
+                    bool(row["direction_correct"])
+                    if row.get("direction_correct") is not None
+                    else None
+                ),
                 findings=tuple(load_json(row["findings"]) or ()),
             )
             for row in rows
         ]
+
+    async def direction_tally(self) -> dict[str, int]:
+        """Berapa hasil yang arahnya terukur, dan berapa yang benar.
+
+        Dihitung di database alih-alih dengan memuat setiap baris: laporan
+        harian hanya butuh dua angka, dan yang membacanya lewat
+        ``results_between`` akan terbatas pada satu jendela waktu - padahal
+        pertanyaannya tentang seluruh rekam jejak.
+
+        Baris ber-``NULL`` tidak masuk penyebut. Baris itu tidak menjawab
+        pertanyaannya, dan memasukkannya akan membuat akurasi turun setiap
+        kali rekam jejak lama ikut terhitung.
+        """
+        row = await self._db.fetchrow(
+            "SELECT COUNT(direction_correct) AS diukur, "
+            "COALESCE(SUM(direction_correct), 0) AS benar "
+            "FROM futures_plan_results"
+        )
+        if row is None:
+            return {"diukur": 0, "benar": 0}
+        return {"diukur": int(row["diukur"]), "benar": int(row["benar"])}
 
     async def outcome_counts(self) -> dict[str, int]:
         """What the resolved plans came to, for the daily report."""
