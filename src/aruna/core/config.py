@@ -808,6 +808,13 @@ class ProviderSettings(BaseSettings):
     idx_provider: str = "yahoo"
     idx_provider_api_key: SecretStr = SecretStr("")
 
+    #: Valas melayani XAU/USD saja.  Satu adapter terdaftar, dengan alasan yang
+    #: sama seperti crypto di atas: adapter kedua *adalah* jalur substitusi
+    #: diam-diam yang aturan itu ada untuk menutupnya - cukup satu variabel
+    #: lingkungan disunting untuk memilihnya.
+    forex_provider: str = "twelvedata"
+    forex_provider_api_key: SecretStr = SecretStr("")
+
     news_provider: str = "rss"
     news_provider_api_key: SecretStr = SecretStr("")
 
@@ -819,6 +826,7 @@ class ProviderSettings(BaseSettings):
         return {
             "crypto": bool(self.crypto_provider),
             "idx": bool(self.idx_provider),
+            "forex": bool(self.forex_provider),
             "news": bool(self.news_provider),
             "fundamental": bool(self.fundamental_provider),
         }
@@ -864,6 +872,12 @@ class DataSettings(BaseSettings):
     #: Equities feeds are delayed by design; this is measured *on top of* the
     #: provider's declared delay, not from now.
     stale_idx_tick_sec: float = Field(default=300.0, gt=0)
+    #: XAUUSD is read as M5 bars, and one bar only closes every 300 seconds.
+    #: The crypto figure of 60 would mark *every* forex observation stale, so
+    #: this holds two full bars plus network slack - one bar just closed and
+    #: one late - and deliberately stops short of three, because at M5 a price
+    #: from three bars ago is a different market.
+    stale_forex_tick_sec: float = Field(default=660.0, gt=0)
     #: Bid/ask wider than this is ABNORMAL_SPREAD.
     max_spread_bps: float = Field(default=200.0, gt=0)
     #: Move larger than this between consecutive quotes is ABNORMAL_PRICE.

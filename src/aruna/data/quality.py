@@ -312,9 +312,20 @@ class QualityGate:
             )
         return OK
 
+    def staleness_limit(self, market: Market) -> float:
+        """Batas basi untuk ``market``, dalam detik.
+
+        Publik karena bukan cuma gerbang ini yang membutuhkannya: pelapor yang
+        menulis "basi 900 detik, batas 660" harus menyebut angka yang SAMA
+        dengan yang dipakai menolak, bukan salinannya yang bisa menyimpang.
+        """
+        return self._staleness_limit(market)
+
     def _staleness_limit(self, market: Market) -> float:
         if market is Market.IDX:
             return self._settings.stale_idx_tick_sec
+        if market is Market.FOREX:
+            return self._settings.stale_forex_tick_sec
         return self._settings.stale_tick_sec
 
     def _check_latency(
