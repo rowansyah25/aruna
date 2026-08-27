@@ -188,6 +188,58 @@ class TestKegagalanTarikBukanPenilaian:
         assert repo.disimpan == []
 
 
+class TestBarBelumBerganti:
+    """Kunci unik `(setup_id, as_of)` dilanggar kalau satu bar dinilai dua kali.
+
+    Bukan kasus langka: tiap restart supervisor memulai loop dari nol di tengah
+    bar yang sedang berjalan, dan drift jadwal apa pun menghasilkan dua tick
+    dalam satu jendela 300 detik. Akibatnya galat basis data, loop mati,
+    supervisor menyalakan ulang - dan itu crash loop yang menyalakan dirinya
+    sendiri setiap lima menit.
+    """
+
+    async def test_bar_sama_dilewati_tanpa_menulis(self) -> None:
+        candles = _candles()
+        repo = RepoPalsu()
+        provider = ProviderPalsu(candles)
+
+        pertama = await satu_tick(
+            provider, _gate(), sekarang=SEKARANG, repo=repo
+        )
+        kedua = await satu_tick(
+            provider,
+            _gate(),
+            sekarang=SEKARANG + timedelta(seconds=30),
+            repo=repo,
+            as_of_terakhir=candles[-1].close_time,
+        )
+
+        assert pertama.menilai is True
+        assert kedua.menilai is False
+        assert "belum berganti" in kedua.alasan_lewat
+        assert len(repo.disimpan) == 1, "satu bar tidak boleh menghasilkan dua baris"
+
+    async def test_bar_baru_dinilai_lagi(self) -> None:
+        candles = _candles()
+        repo = RepoPalsu()
+        hasil = await satu_tick(
+            ProviderPalsu(candles),
+            _gate(),
+            sekarang=SEKARANG,
+            repo=repo,
+            as_of_terakhir=candles[-1].close_time - timedelta(minutes=5),
+        )
+        assert hasil.menilai is True
+        assert len(repo.disimpan) == 1
+
+    async def test_as_of_dikembalikan_supaya_pemanggil_bisa_mengingatnya(self) -> None:
+        candles = _candles()
+        hasil = await satu_tick(
+            ProviderPalsu(candles), _gate(), sekarang=SEKARANG
+        )
+        assert hasil.as_of == candles[-1].close_time
+
+
 class TestTanpaRepo:
     async def test_berjalan_tanpa_basis_data(self) -> None:
         """Loop harus bisa diuji dan dijalankan kering tanpa MySQL."""

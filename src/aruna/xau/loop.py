@@ -63,6 +63,9 @@ class HasilTick:
     alasan_lewat: str | None = None
     bar: int = 0
     prediction_id: int | None = None
+    #: Close bar M5 terbaru yang terlihat siklus ini.  Dioper balik ke tick
+    #: berikutnya supaya satu bar tidak dinilai dua kali.
+    as_of: datetime | None = None
 
     @property
     def menilai(self) -> bool:
@@ -103,8 +106,17 @@ async def satu_tick(
     cooldown: Cooldown | None = None,
     engine: DeliberationEngine | None = None,
     symbol: str = SIMBOL,
+    as_of_terakhir: datetime | None = None,
 ) -> HasilTick:
-    """Satu siklus keputusan.  Berhenti di penolakan pertama, tapi menyimpannya."""
+    """Satu siklus keputusan.  Berhenti di penolakan pertama, tapi menyimpannya.
+
+    ``as_of_terakhir`` adalah bar yang sudah dinilai siklus sebelumnya.  Tanpa
+    ini, dua tick dalam satu jendela 300 detik - yang terjadi tiap kali
+    supervisor menyalakan ulang di tengah bar - menulis dua baris dengan
+    ``(setup_id, as_of)`` yang sama dan melanggar kunci uniknya.  Galat basis
+    data itu mematikan loop, supervisor menyalakannya lagi, dan hasilnya crash
+    loop yang menyalakan dirinya sendiri tiap lima menit.
+    """
     try:
         m5 = await provider.fetch_candles(symbol, Horizon.M5, limit=BAR_DIBUTUHKAN)
     except DataSourceUnavailableError as exc:
@@ -114,6 +126,16 @@ async def satu_tick(
 
     if not m5:
         return HasilTick(alasan_lewat="venue menjawab tanpa satu bar pun")
+
+    as_of_bar = m5[-1].close_time
+    if as_of_terakhir is not None and as_of_bar <= as_of_terakhir:
+        # Bukan kegagalan: tidak ada bar baru berarti tidak ada yang baru untuk
+        # dinilai. Menilainya lagi akan menulis baris kedua untuk bar yang sama.
+        return HasilTick(
+            alasan_lewat=f"bar belum berganti sejak {as_of_terakhir:%H:%M}",
+            bar=len(m5),
+            as_of=as_of_bar,
+        )
 
     tumpukan = rakit_tumpukan(m5)
 
@@ -129,7 +151,12 @@ async def satu_tick(
             alasan=sinyal.alasan,
             setup_id=sinyal.setup_id,
         )
-        return HasilTick(sinyal=sinyal, bar=len(m5), prediction_id=prediction_id)
+        return HasilTick(
+            sinyal=sinyal,
+            bar=len(m5),
+            prediction_id=prediction_id,
+            as_of=as_of_bar,
+        )
 
     kelayakan = periksa_kelayakan(tumpukan, gate, sekarang=sekarang)
     as_of = m5[-1].close_time

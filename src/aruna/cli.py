@@ -1733,14 +1733,24 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
 
     await provider.open()
     dinilai = tersimpan = dilewati = 0
+    # Bar terakhir yang sudah dinilai. Tanpa ini, dua tick dalam satu jendela
+    # 300 detik menulis dua baris untuk bar yang sama dan melanggar kunci
+    # uniknya - dan galat itu mematikan loop yang lalu dinyalakan ulang.
+    as_of_terakhir = None
     try:
         while now_utc() < berhenti:
             hasil = await satu_tick(
-                provider, gate, sekarang=now_utc(), repo=repo, cooldown=cooldown
+                provider,
+                gate,
+                sekarang=now_utc(),
+                repo=repo,
+                cooldown=cooldown,
+                as_of_terakhir=as_of_terakhir,
             )
             if hasil.menilai:
                 dinilai += 1
                 tersimpan += 1 if hasil.prediction_id else 0
+                as_of_terakhir = hasil.as_of
             else:
                 dilewati += 1
             await _asyncio.sleep(args.interval)
