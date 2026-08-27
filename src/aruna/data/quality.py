@@ -19,7 +19,7 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from itertools import pairwise
 
-from aruna.core.clock import IDX_CALENDAR, now_utc
+from aruna.core.clock import FOREX_CALENDAR, IDX_CALENDAR, now_utc
 from aruna.core.config import DataSettings
 from aruna.core.enums import DataQuality, Market
 from aruna.data.models import Candle, Quote
@@ -475,20 +475,37 @@ def find_candle_gaps(candles: list[Candle]) -> list[tuple[datetime, datetime, in
     return gaps
 
 
+#: Markets whose absent slots must be filtered through a trading calendar.
+#:
+#: A market missing from this map is treated as continuous, which is correct
+#: for crypto and wrong for anything that shuts.  Adding a market here is the
+#: whole of what it takes to stop its closed hours reading as missing data.
+_CALENDARS = {
+    Market.IDX: IDX_CALENDAR,
+    Market.FOREX: FOREX_CALENDAR,
+}
+
+
 def _count_missing_slots(
     start: datetime, end: datetime, step: timedelta, market: Market
 ) -> int:
     """Absent slots between two bars that the venue should have traded."""
     total = int((end - start).total_seconds() // step.total_seconds())
-    if market is not Market.IDX or total <= 0:
+    if total <= 0:
+        return total
+
+    kalender = _CALENDARS.get(market)
+    if kalender is None:
+        # Crypto trades continuously, so every absent slot is genuine.
         return total
 
     # Walk the window and keep only slots inside a trading session. Bounded by
-    # `total` so a long holiday cannot turn into an expensive loop.
+    # `total` so a long holiday - or a forex weekend - cannot turn into an
+    # expensive loop.
     missing = 0
     moment = start
     for _ in range(total):
-        if IDX_CALENDAR.is_open(moment):
+        if kalender.is_open(moment):
             missing += 1
         moment += step
     return missing

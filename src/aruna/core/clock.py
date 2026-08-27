@@ -203,6 +203,59 @@ class IdxCalendar:
 #: exchange changes its hours.
 IDX_CALENDAR = IdxCalendar()
 
+
+class ForexCalendar:
+    """When the spot forex market is dealing, in UTC.
+
+    Forex has no *daily* open and close the way IDX does - it runs straight
+    through from the Sydney open on Sunday evening to the New York close on
+    Friday evening.  What it does have is a weekend, and that weekend is why
+    this class exists: ``find_candle_gaps`` counts absent slots, and without a
+    calendar every Saturday and Sunday reads as roughly 576 missing M5 bars.
+    XAU would then be refused every Monday, permanently, for a gap that is
+    simply the market being shut.
+
+    ``find_candle_gaps`` states the principle: a permanent wall of false alarms
+    "is worse than no detection at all, because it teaches an operator to
+    ignore the real ones".
+
+    **The boundaries are deliberately generous.**  The real open and close
+    track New York local time, so they shift by an hour across US daylight
+    saving.  Rather than pretend to a precision this class does not have, the
+    closed window is widened to cover both sides of that shift: Friday 21:00
+    UTC to Sunday 22:00 UTC.  The cost is that a bar genuinely missing right at
+    the edge is not flagged; the alternative is a false alarm every single
+    week.  Public holidays are not modelled - the market thins on Christmas and
+    New Year but does not formally close.
+    """
+
+    #: Jumat, hitung mundur dari tengah malam UTC.  21:00 mencakup penutupan
+    #: New York baik saat DST aktif maupun tidak.
+    TUTUP_JUMAT_UTC = 21
+
+    #: Minggu.  22:00 mencakup pembukaan Sydney di kedua sisi pergeseran DST.
+    BUKA_MINGGU_UTC = 22
+
+    def is_open(self, value: datetime | None = None) -> bool:
+        """True when spot forex is dealing.  Weekends are closed."""
+        moment = value or now_utc()
+        if moment.tzinfo is None:
+            moment = moment.replace(tzinfo=UTC)
+        moment = moment.astimezone(UTC)
+
+        weekday = moment.weekday()  # Senin=0 .. Minggu=6
+        if weekday == 5:  # Sabtu: tutup penuh
+            return False
+        if weekday == 4:  # Jumat: tutup selepas sore New York
+            return moment.hour < self.TUTUP_JUMAT_UTC
+        if weekday == 6:  # Minggu: buka lagi saat Sydney mulai
+            return moment.hour >= self.BUKA_MINGGU_UTC
+        return True
+
+
+#: Shared forex calendar.  Weekend-aware only; see the class docstring.
+FOREX_CALENDAR = ForexCalendar()
+
 #: Berapa lama sebelum bel pembuka ARUNA mulai bekerja lagi untuk IDX.
 #:
 #: Diminta operator: "jalan lagi 30 menit sebelum market buka, dan fast

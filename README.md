@@ -360,19 +360,26 @@ than manufactured: Binance spot has no 10m, so
 `! BTC/USDT 10m: not offered by binance-spot` and stores nothing. Binance spot
 does publish 3m, so crypto 3m bars come from the venue.
 
-**Resampling exists as machinery, and nothing calls it.** `aruna/data/resample.py`
+**Resampling has exactly one caller, and it is XAUUSD.** `aruna/data/resample.py`
 can aggregate a whole number of small bars into a larger one, drops any bucket
 missing a constituent bar, and stamps the result `source:resampled(<base>)` so a
-derived candle can never be read as one the venue published. It has no caller
-anywhere in `src/` — zero rows in `candles` carry a resampled source, and zero
-rows carry `10m`. Said here because the previous version of this paragraph
-promised the
-opposite, and a horizon nobody can score is a smaller failure than a horizon
-scored from bars ARUNA said it had built and had not. Nothing needs it today:
-a 10m prediction samples the stored 1m series (`sampling_intervals(M10)` is
-`(1m, 10m)`), and SPEC 3's 3-day and 5-day IDX horizons are *trading-day*
-prediction windows evaluated over daily candles, not bar sizes — calendar
-buckets spanning a weekend would hold fewer sessions than they claim.
+derived candle can never be read as one the venue published. Since 2026-08-27
+`aruna/xau/timeframes.py` calls it to build M15, H1 and H4 out of the M5 series
+the forex adapter fetches — so **every XAU bar above M5 carries a resampled
+source**, by design. Crypto and IDX still call it from nowhere: zero of their
+rows carry a resampled source, and zero rows carry `10m`.
+
+Deriving rather than fetching is a leakage control, not only a way to spend
+fewer API credits. Four timeframes pulled separately can disagree: an H1 bar
+that arrives a second later may contain movement the M5 series did not have
+when the decision was taken, and nothing about that bar looks wrong on its own.
+Built from one M5 series, no timeframe can know more than the bars that made it.
+
+Nothing else needs it: a 10m prediction samples the stored 1m series
+(`sampling_intervals(M10)` is `(1m, 10m)`), and SPEC 3's 3-day and 5-day IDX
+horizons are *trading-day* prediction windows evaluated over daily candles, not
+bar sizes — calendar buckets spanning a weekend would hold fewer sessions than
+they claim.
 
 **Indicators are evidence, not truth.** Every computation returns its value
 *with* the sample size behind it, and a reading without enough data does not

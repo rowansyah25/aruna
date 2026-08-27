@@ -59,12 +59,34 @@ DISENGAJA: dict[str, str] = {
         "Diuji di `test_runtime_state`. Belum ada fitur yang mendahului fasenya."
     ),
     # -- 3. Kemampuan yang belum ada kebutuhannya --------------------------
-    "resample_candles": (
-        "Horizon yang tidak ditawarkan provider - 10m di Binance spot, 3/5-hari "
-        "di Yahoo. ARUNA aktif di 1m/15m/1h/1d, semuanya native."
+    # `resample_candles` keluar dari daftar ini 2026-08-27: `aruna.xau.timeframes`
+    # memanggilnya untuk merakit M15/H1/H4 dari M5.
+    "is_resampled": (
+        "Penanda sumber turunan pada `Candle.provenance`. `resample_candles` "
+        "menulisnya, tapi belum ada pembaca yang perlu MEMBEDAKAN bar turunan "
+        "dari bar native - modul XAU merakit keempat timeframenya dari satu "
+        "sumber, jadi di sana semuanya turunan kecuali M5."
     ),
-    "is_resampled": "Pendamping `resample_candles`, lihat alasannya.",
-    "incomplete_buckets": "Pendamping `resample_candles`, lihat alasannya.",
+    "incomplete_buckets": (
+        "Menjelaskan ember mana yang dibuang `resample_candles` dan kenapa. "
+        "`aruna.xau.timeframes` cukup melaporkan timeframe mana yang belum "
+        "cukup bahannya lewat `TumpukanTimeframe.kurang()`; rincian per-ember "
+        "belum ada yang membacanya."
+    ),
+    # -- 3b. Rencana XAU 1: lapisan data, pemanggilnya di Rencana 2 ---------
+    "rakit_tumpukan": (
+        "Rencana XAU 1 membangun lapisan datanya saja: menarik M5 dan "
+        "menurunkan M15/H1/H4 darinya. Yang memanggilnya adalah mesin sinyal "
+        "di Rencana 2, yang belum ditulis. Diuji penuh di "
+        "`test_xau_timeframes`, termasuk cabut-uji `require_closed`. "
+        "Keputusan operator 2026-08-27: bangun bertahap, jangan sekali jadi."
+    ),
+    "periksa_kelayakan": (
+        "Gerbang NO SIGNAL untuk data basi/hilang/invalid. Pemanggilnya sama "
+        "dengan `rakit_tumpukan` - mesin sinyal Rencana 2. Sengaja TIDAK "
+        "dirangkai ke jalur crypto/futures: spec menuntut modul XAU terpisah, "
+        "dan futures memakai kosakata LONG/SHORT yang berbeda."
+    ),
     "balikkan": (
         "Bagian 23: perubahan parameter otomatis harus bisa dibalikkan. Modulnya "
         "sendiri menyatakan belum ada parameter hidup yang bisa dibalikkan - yang "

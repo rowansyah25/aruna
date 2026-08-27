@@ -72,14 +72,28 @@ def _pemanggil_resample() -> list[str]:
 
 
 class TestKlaimResamplingDiReadme:
-    def test_resample_memang_belum_punya_pemanggil(self) -> None:
-        """Kalau ini merah, resampling SUDAH tersambung - perbarui README.
+    def test_pemanggil_resample_hanya_xau(self) -> None:
+        """README menyebut SATU pemanggil; kalau bertambah, README kedaluwarsa.
 
-        Bukan kegagalan kode. Ia berarti kalimat jujur yang sekarang ada di
-        README ("nothing calls it") sudah kedaluwarsa dan harus diganti dengan
-        deskripsi jalur yang baru, lengkap dengan penandaan turunannya.
+        Sampai 2026-08-27 tes ini menuntut nol pemanggil dan README berkata
+        "nothing calls it". `aruna.xau.timeframes` kini memanggilnya untuk
+        merakit M15/H1/H4 dari M5, jadi klaimnya berubah - bukan dilonggarkan.
+        Yang dijaga tetap sama: tiap pemanggil harus tertulis di README lengkap
+        dengan akibatnya pada penandaan sumber turunan.
+
+        Pemanggil KEDUA yang muncul tanpa memperbarui README akan membuat
+        kalimat "every XAU bar above M5 carries a resampled source" jadi
+        setengah benar - dan setengah benar di README adalah yang membuat
+        paragraf ini ditulis ulang dua kali sebelumnya.
         """
-        assert _pemanggil_resample() == []
+        pemanggil = _pemanggil_resample()
+        assert len(pemanggil) == 1, f"README menyebut satu pemanggil, ada: {pemanggil}"
+        assert pemanggil[0].replace("\\", "/") == "src/aruna/xau/timeframes.py"
+
+    def test_readme_menyebut_xau_sebagai_pemanggilnya(self) -> None:
+        teks = _readme_satu_baris()
+        assert "aruna/xau/timeframes.py" in teks
+        assert "nothing calls it" not in teks
 
     def test_readme_tidak_menjanjikan_interval_turunan(self) -> None:
         teks = _readme_satu_baris()
@@ -98,6 +112,15 @@ class TestKlaimResamplingDiReadme:
         assert sampling_intervals(Horizon.M10) == (Horizon.M1, Horizon.M10)
         assert "`sampling_intervals(M10)` is `(1m, 10m)`" in _readme_satu_baris()
 
-    def test_readme_menyebut_ketiadaan_pemanggil_itu_apa_adanya(self) -> None:
-        """Nol berarti "belum ada", bukan "bersih" - dan itu harus tertulis."""
-        assert "no caller anywhere in `src/`" in _readme_satu_baris()
+    def test_readme_menyebut_akibat_turunannya_apa_adanya(self) -> None:
+        """Punya pemanggil berarti ada AKIBAT, dan akibatnya harus tertulis.
+
+        Sebelum 2026-08-27 kalimatnya "no caller anywhere in `src/`" dan yang
+        dijaga adalah kejujuran soal nol. Sekarang ada satu pemanggil, jadi
+        yang dijaga adalah kejujuran soal konsekuensinya: bar XAU di atas M5
+        BUKAN bar yang diterbitkan venue, dan pembaca README harus tahu itu
+        tanpa membuka kodenya.
+        """
+        teks = _readme_satu_baris()
+        assert "every XAU bar above M5 carries a resampled source" in teks
+        assert "Crypto and IDX still call it from nowhere" in teks
