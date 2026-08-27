@@ -390,6 +390,25 @@ async def satu_tick(
     if not m5:
         return HasilTick(alasan_lewat="venue menjawab tanpa satu bar pun")
 
+    tumpukan = rakit_tumpukan(m5)
+
+    # **Urusan lama diselesaikan SEBELUM gerbang keputusan apa pun.**
+    #
+    # Sebelumnya blok ini duduk di belakang gerbang "bar belum berganti" dan
+    # "data tidak layak", jadi tiap tick yang tidak jadi memutuskan ikut
+    # melewatkan penilaian sinyal yang sudah kena stop. Diukur dari kerugian
+    # nyata operator 2026-08-28: tiga sinyal kena stop dan tetap tak tercatat
+    # walau loop berjalan normal - karena barnya belum berganti.
+    #
+    # Menilai hasil dan mengabari sinyal berjalan tidak ada hubungannya dengan
+    # bisa-tidaknya keputusan BARU dibuat. Menggabungkan keduanya membuat
+    # keheningan di satu sisi membungkam sisi yang lain.
+    if repo is not None:
+        segar = rakit_bukti(tumpukan)
+        struktur = segar.m5.structure if segar is not None else None
+        await nilai_yang_tertunda(repo, m5, struktur=struktur, sender=sender)
+        await kabari_yang_berjalan(repo, m5, tumpukan, sender=sender)
+
     as_of_bar = m5[-1].close_time
     if as_of_terakhir is not None and as_of_bar <= as_of_terakhir:
         # Bukan kegagalan: tidak ada bar baru berarti tidak ada yang baru untuk
@@ -399,8 +418,6 @@ async def satu_tick(
             bar=len(m5),
             as_of=as_of_bar,
         )
-
-    tumpukan = rakit_tumpukan(m5)
 
     async def simpan(
         sinyal: SinyalXau,
@@ -497,15 +514,6 @@ async def satu_tick(
     # Nilai sinyal lama SEBELUM membuat yang baru, memakai bar yang sudah di
     # tangan - nol panggilan API tambahan. Jendela 250 bar M5 adalah ~20 jam,
     # jadi horizon 4 jam milik prediksi mana pun di dalamnya sudah lengkap.
-    if repo is not None:
-        # Struktur segar dioper ke keduanya: penilaian horizon dan kabar
-        # sama-sama bertanya "apakah alasannya masih ada", dan alasan yang
-        # dibaca dari catatan lama akan selalu menjawab ya.
-        segar = rakit_bukti(tumpukan)
-        struktur = segar.m5.structure if segar is not None else None
-        await nilai_yang_tertunda(repo, m5, struktur=struktur, sender=sender)
-        await kabari_yang_berjalan(repo, m5, tumpukan, sender=sender)
-
     konteks = rakit_konteks(bukti, _snapshot_dari_bar(m5, gate))
     deliberation = (engine or DeliberationEngine()).deliberate(konteks)
     # Keandalan terukur dari koreksi diri. Kosong sampai sepuluh hasil pertama

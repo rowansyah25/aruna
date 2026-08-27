@@ -330,6 +330,56 @@ class TestPenilaianTersambung:
         assert repo.penutup[0]["tahan"] in (True, False)
         assert repo.penutup[0]["alasan"]
 
+    async def test_dinilai_walau_bar_belum_berganti(self) -> None:
+        """Penilaian TIDAK boleh duduk di belakang gerbang keputusan.
+
+        Diukur dari kerugian nyata operator 2026-08-28: tiga sinyal kena stop
+        dan tetap tak tercatat walau loop berjalan normal - karena barnya belum
+        berganti, dan tick yang tidak jadi memutuskan ikut melewatkan
+        penilaian. Menyelesaikan urusan lama tidak ada hubungannya dengan
+        bisa-tidaknya keputusan BARU dibuat.
+        """
+        candles = _candles()
+        repo = RepoPalsu()
+        repo.tertunda = [
+            {
+                "id": 7, "keputusan": "BUY", "as_of": candles[-60].open_time,
+                "entry": Decimal("1000"), "stop": Decimal("900"),
+                "target": Decimal("1100"), "atr": Decimal("5"),
+                "sentuhan_target": 4,
+            }
+        ]
+        hasil = await satu_tick(
+            ProviderPalsu(candles),
+            _gate(),
+            sekarang=SEKARANG,
+            repo=repo,
+            as_of_terakhir=candles[-1].close_time,  # bar belum berganti
+        )
+        assert hasil.menilai is False, "prasyarat: tick ini memang tidak memutuskan"
+        assert len(repo.hasil) == 1, "sinyal lama tetap harus dinilai"
+
+    async def test_dinilai_walau_data_tidak_layak(self) -> None:
+        """Data yang tidak layak menghentikan keputusan BARU, bukan penilaian
+        sinyal yang sudah terbit."""
+        candles = _candles()
+        repo = RepoPalsu()
+        repo.tertunda = [
+            {
+                "id": 8, "keputusan": "BUY", "as_of": candles[-60].open_time,
+                "entry": Decimal("1000"), "stop": Decimal("900"),
+                "target": Decimal("1100"), "atr": Decimal("5"),
+                "sentuhan_target": 4,
+            }
+        ]
+        await satu_tick(
+            ProviderPalsu(candles),
+            _gate(),
+            sekarang=SEKARANG + timedelta(hours=3),  # data jadi basi
+            repo=repo,
+        )
+        assert len(repo.hasil) == 1
+
     async def test_horizon_belum_tuntas_dilewati_bukan_dinilai(self) -> None:
         """Dinilai sekarang = tiap sinyal yang masih berjalan dihitung gagal."""
         candles = _candles()
