@@ -18,28 +18,36 @@ from enum import StrEnum
 
 
 class Market(StrEnum):
-    """The only two markets ARUNA covers.
+    """The markets ARUNA covers.
 
-    Forex was removed from the specification entirely.  There is deliberately
-    no ``FOREX`` member, and :func:`parse_market` rejects the string, so a
-    stray config value cannot quietly reintroduce it.
+    ``FOREX`` was reopened on 2026-08-27 for the XAUUSD M5 module, and only in
+    that one canonical spelling.  Its old aliases stay in
+    :data:`FORBIDDEN_MARKETS`, so the original guard was *narrowed* rather than
+    removed: a mistyped config value still fails at startup instead of quietly
+    becoming a different market.
     """
 
     CRYPTO = "CRYPTO"
     IDX = "IDX"
+    FOREX = "FOREX"
 
 
 #: Rejected market names, kept explicit so the error message can say why.
-FORBIDDEN_MARKETS: frozenset[str] = frozenset({"FOREX", "FX", "CURRENCY", "FOREIGN_EXCHANGE"})
+#:
+#: ``FOREX`` deliberately left this set on 2026-08-27.  The other three stay
+#: because they are ambiguous - ``FX`` and ``CURRENCY`` meant different things
+#: in older notes - and because one legal spelling means a
+#: ``WHERE market_code = 'FOREX'`` can never silently miss a row.
+FORBIDDEN_MARKETS: frozenset[str] = frozenset({"FX", "CURRENCY", "FOREIGN_EXCHANGE"})
 
 
 def parse_market(raw: str) -> Market:
-    """Parse a market name, refusing the removed forex market by name."""
+    """Parse a market name, refusing the ambiguous aliases by name."""
     value = raw.strip().upper()
     if value in FORBIDDEN_MARKETS:
         raise ValueError(
-            f"market {value!r} is not supported: forex was removed from ARUNA. "
-            f"Valid markets: {', '.join(m.value for m in Market)}"
+            f"market {value!r} is not used here: write FOREX for the foreign "
+            f"exchange market. Valid markets: {', '.join(m.value for m in Market)}"
         )
     try:
         return Market(value)

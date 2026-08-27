@@ -108,8 +108,34 @@ DEFAULT_CAPITAL: dict[Market, Decimal] = {
 }
 
 
+#: Fee schedule per market.  A lookup, not a branch.
+#:
+#: ``return CRYPTO_COSTS if market is Market.CRYPTO else IDX_COSTS`` stood here
+#: until 2026-08-27 and was correct only while exactly two markets existed.
+#: The moment ``FOREX`` joined for XAUUSD it began handing Indonesian
+#: sell-side levies - quoted in rupiah - to gold, and nothing would have
+#: contradicted it: a cost is only ever multiplied, so a wrong schedule
+#: produces a plausible number instead of an error.
+COST_MODELS: dict[Market, CostModel] = {
+    Market.CRYPTO: CRYPTO_COSTS,
+    Market.IDX: IDX_COSTS,
+}
+
+
 def cost_model(market: Market) -> CostModel:
-    return CRYPTO_COSTS if market is Market.CRYPTO else IDX_COSTS
+    """Fee schedule for ``market``.
+
+    Raises for a market with no measured schedule rather than borrowing
+    another's, for the same reason :func:`default_capital` is a lookup.
+    """
+    try:
+        return COST_MODELS[market]
+    except KeyError:
+        raise NotImplementedError(
+            f"no cost model for {market.value}: retail XAU cost is the bid/ask "
+            "spread, and the spread is not measured yet. Refusing rather than "
+            "borrowing another market's fee schedule."
+        ) from None
 
 
 def default_capital(market: Market) -> Decimal:

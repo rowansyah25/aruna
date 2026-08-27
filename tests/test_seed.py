@@ -136,10 +136,11 @@ class TestOverrideFile:
         assert len(universe) == 1
         assert universe[0].symbol == "UNVR"
 
-    def test_forex_in_the_override_is_rejected(self, tmp_path: Path) -> None:
+    def test_forex_alias_in_the_override_is_rejected(self, tmp_path: Path) -> None:
+        """``FOREX`` is legal since 2026-08-27; its aliases still are not."""
         path = tmp_path / "universe.json"
         path.write_text(
-            json.dumps([{"market": "FOREX", "symbol": "EURUSD", "asset_class": "FX"}]),
+            json.dumps([{"market": "FX", "symbol": "EURUSD", "asset_class": "FX"}]),
             encoding="utf-8",
         )
         with pytest.raises(ConfigError):

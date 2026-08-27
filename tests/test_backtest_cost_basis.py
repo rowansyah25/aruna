@@ -60,9 +60,26 @@ class TestCostBasis:
 
     def test_a_basis_fits_the_column(self) -> None:
         """VARCHAR(64) in migration 0021. Strict mode would reject an overlong
-        value at insert time, losing the run rather than truncating it."""
-        for market in Market:
+        value at insert time, losing the run rather than truncating it.
+
+        Iterates ``COST_MODELS`` rather than ``Market``: a market with no
+        measured fee schedule has no basis to check, and reading the source of
+        truth means a market added later is covered here the moment it gains
+        one - without anybody remembering to edit this test."""
+        from aruna.signals.paper import COST_MODELS
+
+        assert COST_MODELS, "no market has a cost model; the lookup is empty"
+        for market in COST_MODELS:
             assert len(cost_basis(market)) <= 64
+
+    def test_a_market_without_a_schedule_refuses_instead_of_borrowing(self) -> None:
+        """FOREX joined in 2026-08-27 with no measured spread.
+
+        The binary branch this replaced would have quoted gold PnL on
+        Indonesian sell-side levies in rupiah, and produced a plausible number
+        while doing it."""
+        with pytest.raises(NotImplementedError, match="spread is not measured"):
+            cost_basis(Market.FOREX)
 
     def test_a_cosmetic_decimal_rewrite_is_not_a_new_regime(self) -> None:
         """0.10 and 0.1 are the same fee. Reading them as different schedules

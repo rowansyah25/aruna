@@ -26,12 +26,14 @@ from aruna.core.enums import (
 
 
 class TestMarket:
-    def test_only_two_markets_exist(self) -> None:
-        assert {m.value for m in Market} == {"CRYPTO", "IDX"}
+    def test_exactly_three_markets_exist(self) -> None:
+        """FOREX joined on 2026-08-27 for XAUUSD; nothing else did."""
+        assert {m.value for m in Market} == {"CRYPTO", "IDX", "FOREX"}
 
-    @pytest.mark.parametrize("value", ["FOREX", "fx", "Currency", "FOREIGN_EXCHANGE"])
-    def test_forex_names_are_rejected_with_an_explanation(self, value: str) -> None:
-        with pytest.raises(ValueError, match="forex was removed"):
+    @pytest.mark.parametrize("value", ["fx", "Currency", "FOREIGN_EXCHANGE"])
+    def test_forex_aliases_are_rejected_with_an_explanation(self, value: str) -> None:
+        """Only the canonical spelling is legal; the aliases stay shut."""
+        with pytest.raises(ValueError, match="write FOREX"):
             parse_market(value)
 
     def test_parsing_is_case_and_space_insensitive(self) -> None:

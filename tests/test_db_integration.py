@@ -221,7 +221,7 @@ class TestMigrations:
 class TestMarkets:
     async def test_only_crypto_and_idx_are_seeded(self, db: Database) -> None:
         markets = await UniverseRepository(db).markets()
-        assert {m.code for m in markets} == {Market.CRYPTO, Market.IDX}
+        assert {m.code for m in markets} == {Market.CRYPTO, Market.IDX, Market.FOREX}
 
     async def test_crypto_is_continuous_and_idx_is_not(self, db: Database) -> None:
         by_code = {m.code: m for m in await UniverseRepository(db).markets()}
@@ -229,12 +229,23 @@ class TestMarkets:
         assert by_code[Market.IDX].is_continuous is False
         assert by_code[Market.IDX].timezone == "Asia/Jakarta"
 
-    async def test_the_database_refuses_a_third_market(self, db: Database) -> None:
-        """Forex must be impossible even for a direct SQL writer."""
+    async def test_forex_is_continuous_and_quoted_in_usd(self, db: Database) -> None:
+        """XAUUSD runs Sunday 22:00 UTC to Friday 22:00 UTC with no daily break."""
+        by_code = {m.code: m for m in await UniverseRepository(db).markets()}
+        assert by_code[Market.FOREX].is_continuous is True
+        assert by_code[Market.FOREX].quote_currency == "USD"
+
+    async def test_the_database_refuses_an_unlisted_market(self, db: Database) -> None:
+        """FOREX joined in 0044; the guard narrowed, so a fourth stays impossible.
+
+        The alias spellings are refused in Python by ``parse_market``; this is
+        the storage half of the same rule, and it must keep holding for a
+        direct SQL writer that never goes through Python at all.
+        """
         with pytest.raises(DatabaseError):
             await db.execute(
                 "INSERT INTO markets (code, display_name, timezone, is_continuous, "
-                "quote_currency) VALUES ('FOREX', 'Forex', 'UTC', TRUE, 'USD')"
+                "quote_currency) VALUES ('SAHAM_US', 'US Equities', 'UTC', TRUE, 'USD')"
             )
 
 

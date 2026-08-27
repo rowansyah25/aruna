@@ -43,12 +43,32 @@ class TestDiscovery:
         ):
             assert f"CREATE TABLE {table}" in sql
 
-    def test_markets_table_forbids_a_third_market(self) -> None:
-        """Forex must be impossible at the storage layer, not just in Python."""
+    def test_the_original_guard_is_still_on_the_record(self) -> None:
+        """0001 is history and must not be rewritten.
+
+        FOREX was reopened in 0044, not by editing this file.  A migration
+        already applied on a live database cannot be changed retroactively -
+        rewriting it would leave production and source disagreeing silently.
+        """
         sql = discover_migrations()[0].sql
         assert "code IN ('CRYPTO', 'IDX')" in sql
-        # Comments explain the removal; executable SQL must not name it.
-        assert "FOREX" not in _strip_comments(sql).upper()
+
+    def test_storage_admits_exactly_three_markets(self) -> None:
+        """The guard was narrowed for XAUUSD, not opened wide.
+
+        Read across ALL migrations, not just 0001: the constraint that is
+        actually in force is the last one applied.  Asserting against 0001
+        alone would stay green no matter what a later migration permitted.
+        """
+        semua = "\n".join(m.sql for m in discover_migrations())
+        executable = _strip_comments(semua).upper()
+
+        assert "CHECK (CODE IN ('CRYPTO', 'IDX', 'FOREX'))" in executable
+
+        # The ambiguous aliases must never reach executable SQL - one legal
+        # spelling means WHERE market_code = 'FOREX' cannot miss a row.
+        for alias in ("'FX'", "'CURRENCY'", "'FOREIGN_EXCHANGE'"):
+            assert alias not in executable
 
     def test_audit_log_is_append_only(self) -> None:
         sql = discover_migrations()[0].sql

@@ -45,11 +45,16 @@ class TestMarkets:
         app = AppSettings(_env_file=None, enabled_markets="IDX")
         assert app.enabled_markets == (Market.IDX,)
 
-    @pytest.mark.parametrize("value", ["FOREX", "CRYPTO,FOREX", "fx", "foreign_exchange"])
-    def test_forex_is_refused(self, value: str) -> None:
-        """Forex was removed from the spec; config must not reintroduce it."""
-        with pytest.raises(ValidationError, match="forex was removed"):
+    @pytest.mark.parametrize("value", ["FX", "CRYPTO,FX", "fx", "foreign_exchange"])
+    def test_forex_aliases_are_refused(self, value: str) -> None:
+        """Only ``FOREX`` is legal; the ambiguous aliases stay refused."""
+        with pytest.raises(ValidationError, match="write FOREX"):
             AppSettings(_env_file=None, enabled_markets=value)
+
+    def test_canonical_forex_is_accepted(self) -> None:
+        """XAUUSD M5 needs the market that was reopened on 2026-08-27."""
+        settings = AppSettings(_env_file=None, enabled_markets="CRYPTO,FOREX")
+        assert Market.FOREX in settings.enabled_markets
 
     def test_unknown_market_is_refused(self) -> None:
         with pytest.raises(ValidationError, match="unknown market"):
