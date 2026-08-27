@@ -1,0 +1,147 @@
+"""Penyimpanan keputusan XAUUSD M5.
+
+**Penolakan disimpan sama lengkapnya dengan sinyal.**  Spec menuntutnya
+("simpan seluruh hasil"), tapi alasannya lebih dalam dari kepatuhan: sebuah
+`NO SIGNAL` yang hanya berbunyi "ditolak" tidak bisa dibantah dan tidak bisa
+dipelajari.  Enam bulan kemudian, "XAU diam sepanjang Maret" bisa berarti
+gerbangnya terlalu ketat atau pasarnya memang sepi, dan tanpa angkanya tidak
+ada yang bisa membedakan.  Karena itu ``rr``, ``kontradiksi``, dan
+``confidence`` tetap ditulis pada baris yang ditolak - terutama pada baris yang
+ditolak.
+
+**``None`` menjadi ``NULL``, tidak pernah ``0``.**  Nol adalah sebuah harga;
+tidak diukur adalah ketiadaan harga.  ``kontradiksi`` NULL berarti tak seorang
+agen pun mengambil arah, yang berbeda dari perselisihan yang diukur lalu
+hasilnya nol - dan menyamakan keduanya akan membuat sinyal yang tak seorang pun
+mendukung terbaca sebagai kesepakatan bulat.
+
+**Tidak ada ``ON DUPLICATE KEY UPDATE``**, dengan alasan yang sama seperti
+``futures_plans``: penulisan kedua atas setup dan bar yang sama adalah upaya
+mengubah keputusan yang sudah diambil, dan itu harus gagal keras alih-alih
+diam-diam menang.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from decimal import Decimal
+from typing import Any
+
+from aruna.core.logging import get_logger
+from aruna.db.types import to_mysql_datetime
+from aruna.xau.keputusan import SinyalXau
+
+log = get_logger(__name__)
+
+#: Versi model XAU yang menghasilkan sebuah baris.
+#:
+#: Bukan hiasan: tanpa ini, hasil dari dua model berbeda bercampur dalam satu
+#: agregat dan perbandingan apa pun di Rencana 3 kembali melingkar.  Dinaikkan
+#: saat gerbang, ambang, atau geometrinya berubah - bukan saat kodenya dirapikan.
+VERSI_MODEL_XAU = "xau-m5-1"
+
+#: Bacaan indikator: ``{horizon_code: {nama: (nilai, sample_size, required)}}``.
+BacaanBukti = dict[str, dict[str, tuple[float | None, int, int]]]
+
+
+def _desimal(nilai: float | None) -> Decimal | None:
+    return None if nilai is None else Decimal(str(nilai))
+
+
+class XauRepository:
+    def __init__(self, db: Any) -> None:
+        self._db = db
+
+    async def simpan(
+        self,
+        sinyal: SinyalXau,
+        *,
+        as_of: datetime,
+        decided_at: datetime,
+        symbol: str = "XAU/USD",
+        bukti: BacaanBukti | None = None,
+    ) -> int:
+        """Tulis satu keputusan beserta suara dan buktinya.  Kembalikan id-nya."""
+        geo = sinyal.geometri
+        rekap = sinyal.rekap
+
+        prediction_id = await self._db.insert(
+            """
+            INSERT INTO xau_predictions
+                (symbol, setup_id, as_of, decided_at, keputusan, alasan_kosong,
+                 confidence, setuju, menentang, netral, kontradiksi,
+                 entry, stop, target, atr, rr, target_atr, sentuhan_target,
+                 spread_bps, spread_diukur, model_version)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s, %s, %s, %s)
+            """,
+            symbol,
+            sinyal.setup_id,
+            to_mysql_datetime(as_of),
+            to_mysql_datetime(decided_at),
+            sinyal.keputusan.value,
+            sinyal.alasan,
+            _desimal(sinyal.confidence),
+            rekap.setuju if rekap else 0,
+            rekap.menentang if rekap else 0,
+            rekap.netral if rekap else 0,
+            _desimal(rekap.kontradiksi) if rekap else None,
+            geo.entry if geo else None,
+            geo.stop if geo else None,
+            geo.target if geo else None,
+            geo.atr if geo else None,
+            _desimal(geo.rr) if geo else None,
+            geo.target_atr if geo else None,
+            geo.sentuhan_target if geo else None,
+            None,
+            sinyal.spread_diukur,
+            VERSI_MODEL_XAU,
+        )
+
+        if rekap is not None:
+            for agen in rekap.rincian:
+                await self._db.insert(
+                    """
+                    INSERT INTO xau_agent_votes
+                        (prediction_id, role, suara, decision, confidence,
+                         abstained)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    prediction_id,
+                    agen.role.value,
+                    agen.suara.value,
+                    # Kosakata dewan apa adanya - termasuk WAIT. Ini BUKAN
+                    # keluaran XAU: yang sampai ke operator adalah
+                    # `xau_predictions.keputusan`, yang CHECK-nya menolak WAIT.
+                    agen.decision.value,
+                    _desimal(agen.confidence),
+                    agen.abstained,
+                )
+
+        for horizon_code, bacaan in (bukti or {}).items():
+            for nama, (nilai, sample_size, required) in bacaan.items():
+                await self._db.insert(
+                    """
+                    INSERT INTO xau_evidence
+                        (prediction_id, horizon_code, nama, nilai,
+                         sample_size, required)
+                    VALUES (%s, %s, %s, %s, %s, %s)
+                    """,
+                    prediction_id,
+                    horizon_code,
+                    nama,
+                    _desimal(nilai),
+                    sample_size,
+                    required,
+                )
+
+        log.info(
+            "xau.tersimpan",
+            keputusan=sinyal.keputusan.value,
+            setup_id=sinyal.setup_id,
+            alasan=sinyal.alasan,
+        )
+        return prediction_id
+
+
+__all__ = ["BacaanBukti", "VERSI_MODEL_XAU", "XauRepository"]

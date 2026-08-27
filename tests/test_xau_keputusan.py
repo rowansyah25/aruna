@@ -35,7 +35,7 @@ from aruna.xau.keputusan import (
     setup_id_untuk,
 )
 from aruna.xau.konteks import rakit_konteks
-from aruna.xau.suara import RekapSuara, Suara
+from aruna.xau.suara import RekapSuara, Suara, SuaraAgen
 from aruna.xau.timeframes import rakit_tumpukan
 
 SAAT = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
@@ -44,8 +44,20 @@ PROV = Provenance(source="twelvedata")
 
 
 def _rekap_bagus() -> RekapSuara:
+    """Rincian memakai bentuk yang sama dengan produksi.
+
+    Tuple `(role, suara)` yang lebih ringkas akan lolos seluruh test di berkas
+    ini - tak ada yang mengiterasinya - lalu meledak di repositori yang membaca
+    `.decision`. Palsu yang bidangnya menyimpang dari yang asli menghijaukan
+    suite di atas bug produksi.
+    """
     return RekapSuara(
-        setuju=4, menentang=0, netral=5, rincian=((AgentRole.TECHNICAL, Suara.AGREE),)
+        setuju=4,
+        menentang=0,
+        netral=5,
+        rincian=(
+            SuaraAgen(AgentRole.TECHNICAL, Suara.AGREE, Decision.BUY, 0.8, False),
+        ),
     )
 
 

@@ -59,13 +59,33 @@ def suara_terhadap(opinion: AgentOpinion, arah: Decision) -> Suara:
 
 
 @dataclass(frozen=True, slots=True)
+class SuaraAgen:
+    """Sikap satu agen, beserta apa yang ia katakan sendiri.
+
+    ``suara`` dan ``decision`` menjawab pertanyaan berbeda dan keduanya perlu
+    disimpan.  ``suara`` adalah SIKAP terhadap arah yang diusulkan - bahan
+    untuk mengukur kontradiksi.  ``decision`` adalah apa yang agen itu sendiri
+    katakan - bahan untuk menilai agennya di Rencana 3.
+
+    Menyimpan sikapnya saja membuat seluruh baris NEUTRAL terbaca seolah
+    agennya mengembalikan "NEUTRAL", yang bukan sebuah :class:`Decision`.
+    """
+
+    role: AgentRole
+    suara: Suara
+    decision: Decision
+    confidence: float
+    abstained: bool
+
+
+@dataclass(frozen=True, slots=True)
 class RekapSuara:
     """Hitungan sikap seluruh agen terhadap satu arah."""
 
     setuju: int
     menentang: int
     netral: int
-    rincian: tuple[tuple[AgentRole, Suara], ...]
+    rincian: tuple[SuaraAgen, ...]
 
     @property
     def bersuara(self) -> int:
@@ -86,8 +106,17 @@ class RekapSuara:
 
 def rekap(deliberation: Deliberation, arah: Decision) -> RekapSuara:
     """Rekap sikap seluruh agen ronde satu terhadap ``arah``."""
-    rincian = tuple((o.role, suara_terhadap(o, arah)) for o in deliberation.opinions)
-    hitung = [s for _role, s in rincian]
+    rincian = tuple(
+        SuaraAgen(
+            role=o.role,
+            suara=suara_terhadap(o, arah),
+            decision=o.decision,
+            confidence=o.confidence,
+            abstained=o.abstained,
+        )
+        for o in deliberation.opinions
+    )
+    hitung = [s.suara for s in rincian]
     return RekapSuara(
         setuju=hitung.count(Suara.AGREE),
         menentang=hitung.count(Suara.DISAGREE),
@@ -101,4 +130,11 @@ def ke_keputusan_xau(decision: Decision) -> Decision:
     return Decision.NO_SIGNAL if decision is Decision.WAIT else decision
 
 
-__all__ = ["RekapSuara", "Suara", "ke_keputusan_xau", "rekap", "suara_terhadap"]
+__all__ = [
+    "RekapSuara",
+    "Suara",
+    "SuaraAgen",
+    "ke_keputusan_xau",
+    "rekap",
+    "suara_terhadap",
+]

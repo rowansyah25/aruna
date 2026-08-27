@@ -96,6 +96,13 @@ DISENGAJA: dict[str, str] = {
         "yang persis cacat yang daftar ini ada untuk mencegahnya."
     ),
     "rakit_konteks": "Mata rantai kedua, lihat `rakit_bukti`.",
+    "XauRepository": (
+        "Penyimpanan keputusan XAU, mata rantai keempat - lihat `rakit_bukti`. "
+        "Tabelnya sudah ada dan barisnya sudah diuji lewat penulis palsu yang "
+        "merekam SQL beserta parameternya, tapi yang MEMANGGILNYA tiap siklus "
+        "baru dibangun di Rencana 5. Dirangkai sekarang, ia akan menulis "
+        "keputusan yang tidak ada penjadwalnya."
+    ),
     "putuskan_dari_dewan": (
         "Mata rantai terakhir, lihat `rakit_bukti`. Ini pintu masuk produksi "
         "modul XAU: `test_xau_keputusan.TestJalurProduksi` menjalankannya di "
