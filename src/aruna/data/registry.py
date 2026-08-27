@@ -14,10 +14,35 @@ from aruna.core.config import DataSettings, ProviderSettings
 from aruna.core.enums import Market
 from aruna.core.errors import ConfigError
 from aruna.data.crypto.binance import BinanceSpotProvider
+from aruna.data.forex.twelvedata import TwelveDataForexProvider
 from aruna.data.idx.yahoo import YahooIdxProvider
 from aruna.data.provider import MarketDataProvider
 
-ProviderFactory = Callable[[DataSettings], MarketDataProvider]
+ProviderFactory = Callable[[DataSettings, str], MarketDataProvider]
+
+
+def _tanpa_kunci(cls: type[MarketDataProvider]) -> ProviderFactory:
+    """Adapter yang tidak memerlukan kredensial.
+
+    Kuncinya diterima lalu diabaikan, dan itu ditulis di sini alih-alih di
+    konstruktor adapter: Binance dan Yahoo tidak punya kredensial sama sekali,
+    dan menambahkan parameter kosong ke keduanya hanya untuk menyeragamkan
+    tanda tangan akan membuat keduanya terlihat seolah bisa dikonfigurasi.
+    """
+
+    def factory(settings: DataSettings, _api_key: str) -> MarketDataProvider:
+        return cls(settings)
+
+    return factory
+
+
+def _dengan_kunci(cls: type[MarketDataProvider]) -> ProviderFactory:
+    """Adapter yang kredensialnya wajib sampai."""
+
+    def factory(settings: DataSettings, api_key: str) -> MarketDataProvider:
+        return cls(settings, api_key=api_key)
+
+    return factory
 
 #: Registered adapters, by market and configured name.
 #:
@@ -34,8 +59,12 @@ ProviderFactory = Callable[[DataSettings], MarketDataProvider]
 #: silent-substitution path the rule exists to close.  If Binance is
 #: unreachable, ARUNA reports ``DATA SOURCE UNAVAILABLE`` and stops (SPEC 4).
 PROVIDERS: dict[Market, dict[str, ProviderFactory]] = {
-    Market.CRYPTO: {"binance-spot": BinanceSpotProvider},
-    Market.IDX: {"yahoo": YahooIdxProvider},
+    Market.CRYPTO: {"binance-spot": _tanpa_kunci(BinanceSpotProvider)},
+    Market.IDX: {"yahoo": _tanpa_kunci(YahooIdxProvider)},
+    #: Valas punya satu entri dengan alasan yang sama seperti crypto: adapter
+    #: kedua yang terdaftar *adalah* jalur substitusi diam-diam, dan XAU/USD
+    #: yang dikutip dua venue berbeda bukan angka yang sama.
+    Market.FOREX: {"twelvedata": _dengan_kunci(TwelveDataForexProvider)},
 }
 
 
@@ -44,7 +73,7 @@ def available(market: Market) -> tuple[str, ...]:
 
 
 def build_provider(
-    market: Market, name: str, settings: DataSettings
+    market: Market, name: str, settings: DataSettings, *, api_key: str = ""
 ) -> MarketDataProvider:
     factories = PROVIDERS.get(market)
     if not factories:
@@ -63,7 +92,19 @@ def build_provider(
             f"unknown {market.value} provider {name!r}; "
             f"available: {', '.join(available(market))}"
         )
-    return factory(settings)
+
+    provider = factory(settings, api_key)
+
+    # An adapter that declares it needs credentials and did not get any would
+    # otherwise fail one request at a time, hours later, as an authentication
+    # error that reads like a venue outage.  Refusing here means the operator
+    # learns at startup, which is the only moment they can still fix it.
+    if provider.capabilities.requires_credentials and not api_key.strip():
+        raise ConfigError(
+            f"{market.value} provider {key!r} requires an API key but none is set. "
+            f"Set ARUNA_{market.value}_PROVIDER_API_KEY in .env"
+        )
+    return provider
 
 
 def build_providers(
@@ -78,13 +119,26 @@ def build_providers(
     a different market's feed.
     """
     selected: dict[Market, MarketDataProvider] = {}
-    names = {Market.CRYPTO: providers.crypto_provider, Market.IDX: providers.idx_provider}
+    names = {
+        Market.CRYPTO: providers.crypto_provider,
+        Market.IDX: providers.idx_provider,
+        Market.FOREX: providers.forex_provider,
+    }
+    #: Read here rather than inside the adapters: the key lives in
+    #: ``ProviderSettings`` and the factories only ever receive
+    #: ``DataSettings``, so before this map a mandatory credential could never
+    #: reach the adapter that needs it.
+    kunci = {
+        Market.FOREX: providers.forex_provider_api_key.get_secret_value(),
+    }
 
     for market in markets:
         name = names.get(market, "")
         if not name.strip():
             continue
-        selected[market] = build_provider(market, name, data)
+        selected[market] = build_provider(
+            market, name, data, api_key=kunci.get(market, "")
+        )
     return selected
 
 
