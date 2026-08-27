@@ -29,6 +29,7 @@ from datetime import datetime
 from datetime import UTC
 
 from aruna.agents.deliberation import DeliberationEngine
+from aruna.core.clock import FOREX_CALENDAR
 from aruna.core.enums import DataQuality, Decision, Horizon, Market
 from aruna.core.errors import DataSourceUnavailableError
 from aruna.core.logging import get_logger
@@ -80,11 +81,17 @@ def _snapshot_dari_bar(candles: list, quality: QualityGate) -> Snapshot:
     """Snapshot dari bar tersettle terbaru - lihat docstring modul.
 
     ``bid``/``ask``/``spread_bps`` sengaja ``None``: Twelve Data tidak
-    menerbitkannya, dan sebuah bar tidak punya dua sisi harga.  ``session`` dan
-    ``market_open`` juga ``None`` sampai Rencana 4 mengukurnya.
+    menerbitkannya, dan sebuah bar tidak punya dua sisi harga.
+
+    ``session`` dan ``market_open`` diukur dari kalender, bukan ditanyakan ke
+    venue - keduanya fungsi dari waktu bar itu sendiri.  Diambil pada
+    ``close_time`` bar, bukan pada jam sistem: sesi yang melekat pada sebuah
+    keputusan adalah sesi saat barnya tutup, dan keduanya berbeda tiap kali
+    tick terlambat.
     """
     terakhir = candles[-1]
     verdict = quality.evaluate_candle(terakhir)
+    saat_bar = terakhir.close_time
     return Snapshot(
         market=Market.FOREX,
         symbol=terakhir.symbol,
@@ -96,8 +103,8 @@ def _snapshot_dari_bar(candles: list, quality: QualityGate) -> Snapshot:
         bid=None,
         ask=None,
         spread_bps=None,
-        session=None,
-        market_open=None,
+        session=FOREX_CALENDAR.session(saat_bar),
+        market_open=FOREX_CALENDAR.is_open(saat_bar),
     )
 
 

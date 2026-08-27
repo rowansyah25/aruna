@@ -236,13 +236,55 @@ class ForexCalendar:
     #: Minggu.  22:00 mencakup pembukaan Sydney di kedua sisi pergeseran DST.
     BUKA_MINGGU_UTC = 22
 
-    def is_open(self, value: datetime | None = None) -> bool:
-        """True when spot forex is dealing.  Weekends are closed."""
+    #: Batas sesi dalam UTC: (jam mulai, nama).  Dibaca melingkar dari 21:00.
+    #:
+    #: **Angkanya perkiraan, dan itu dinyatakan di sini alih-alih disembunyikan.**
+    #: Pusat perdagangan buka menurut jam lokalnya masing-masing, jadi batas
+    #: UTC-nya bergeser satu jam saat daylight saving berlaku di Eropa dan
+    #: Amerika - dan keduanya tidak bergeser pada tanggal yang sama.  Memodelkan
+    #: itu persis butuh kalender DST dua benua; yang dipakai di sini adalah
+    #: batas yang cukup benar untuk MENGELOMPOKKAN keputusan, bukan untuk
+    #: memicunya.
+    #:
+    #: Itu perbedaan yang menentukan: sesi di sini adalah BUKTI yang direkam
+    #: supaya kelak bisa dijawab "apakah XAU lebih baik di LONDON", bukan aturan
+    #: yang menyalakan sinyal.  Spec melarang keras "London = BUY, New York =
+    #: SELL", dan sebuah batas yang meleset satu jam merusak pengelompokan jauh
+    #: lebih ringan daripada merusak pemicu.
+    SESI_UTC: tuple[tuple[int, str], ...] = (
+        (21, "ASIA"),  # Sydney membuka pekan, lalu Tokyo menyusul
+        (7, "LONDON"),
+        (12, "OVERLAP"),  # London dan New York sama-sama buka - jam teramai
+        (16, "NEW_YORK"),
+    )
+
+    #: Dikembalikan saat pasar tutup.  Bukan ``None``: tutup adalah keadaan yang
+    #: TERUKUR, sedangkan ``None`` berarti tidak ada yang mengukur.
+    TUTUP = "TUTUP"
+
+    def session(self, value: datetime | None = None) -> str:
+        """Sesi perdagangan yang sedang berjalan, atau ``TUTUP``."""
+        moment = self._utc(value)
+        if not self.is_open(moment):
+            return self.TUTUP
+        jam = moment.hour
+        # Dibaca dari batas terbesar yang tidak melewati jam sekarang; 21:00
+        # membungkus lewat tengah malam, jadi ia jadi jawaban bawaan.
+        for mulai, nama in sorted(self.SESI_UTC, key=lambda b: -b[0]):
+            if jam >= mulai:
+                return nama
+        return "ASIA"
+
+    @staticmethod
+    def _utc(value: datetime | None) -> datetime:
         moment = value or now_utc()
         if moment.tzinfo is None:
             moment = moment.replace(tzinfo=UTC)
-        moment = moment.astimezone(UTC)
+        return moment.astimezone(UTC)
 
+    def is_open(self, value: datetime | None = None) -> bool:
+        """True when spot forex is dealing.  Weekends are closed."""
+        moment = self._utc(value)
         weekday = moment.weekday()  # Senin=0 .. Minggu=6
         if weekday == 5:  # Sabtu: tutup penuh
             return False

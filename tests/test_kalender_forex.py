@@ -23,9 +23,11 @@ from aruna.data.quality import find_candle_gaps
 
 
 def _saat(hari: str, jam: int, menit: int = 0) -> datetime:
-    """Jumat 2026-08-28 .. Senin 2026-08-31 (2026-08-28 adalah Jumat)."""
-    peta = {"jumat": 28, "sabtu": 29, "minggu": 30, "senin": 31}
-    return datetime(2026, 8, peta[hari], jam, menit, tzinfo=UTC)
+    """Jumat 2026-08-28 .. Selasa 2026-09-01 (2026-08-28 adalah Jumat)."""
+    peta = {"jumat": (8, 28), "sabtu": (8, 29), "minggu": (8, 30),
+            "senin": (8, 31), "selasa": (9, 1)}
+    bulan, tanggal = peta[hari]
+    return datetime(2026, bulan, tanggal, jam, menit, tzinfo=UTC)
 
 
 class TestKalenderForex:
@@ -47,6 +49,61 @@ class TestKalenderForex:
     def test_minggu_malam_sudah_buka_lagi(self) -> None:
         assert FOREX_CALENDAR.is_open(_saat("minggu", 20)) is False
         assert FOREX_CALENDAR.is_open(_saat("minggu", 23)) is True
+
+
+class TestSesi:
+    """Sesi adalah BUKTI yang direkam, bukan aturan yang memicu.
+
+    Spec melarang keras "London = BUY, New York = SELL". Yang dibangun di sini
+    hanya pengelompokan, supaya kelak bisa dijawab "apakah XAU lebih baik di
+    LONDON" - dan jawaban itu harus datang dari data, bukan dari kode.
+    """
+
+    @pytest.mark.parametrize(
+        "jam,diharapkan",
+        [
+            (0, "ASIA"),
+            (3, "ASIA"),
+            (6, "ASIA"),
+            (7, "LONDON"),
+            (11, "LONDON"),
+            (12, "OVERLAP"),
+            (15, "OVERLAP"),
+            (16, "NEW_YORK"),
+            (20, "NEW_YORK"),
+        ],
+    )
+    def test_sesi_menurut_jam_utc(self, jam: int, diharapkan: str) -> None:
+        assert FOREX_CALENDAR.session(_saat("senin", jam)) == diharapkan
+
+    def test_dini_hari_membungkus_ke_asia(self) -> None:
+        """21:00 membungkus lewat tengah malam; tanpa itu jam 0-6 tak bersesi."""
+        assert FOREX_CALENDAR.session(_saat("senin", 22)) == "ASIA"
+        assert FOREX_CALENDAR.session(_saat("selasa", 1)) == "ASIA"
+
+    def test_akhir_pekan_tutup_bukan_none(self) -> None:
+        """Tutup adalah keadaan TERUKUR; None berarti tak ada yang mengukur."""
+        assert FOREX_CALENDAR.session(_saat("sabtu", 12)) == "TUTUP"
+        assert FOREX_CALENDAR.session(_saat("minggu", 12)) == "TUTUP"
+
+    def test_seluruh_sesi_yang_spec_minta_bisa_muncul(self) -> None:
+        keluar = {
+            FOREX_CALENDAR.session(_saat("senin", j)) for j in range(24)
+        }
+        assert {"ASIA", "LONDON", "NEW_YORK", "OVERLAP"} <= keluar
+
+    def test_tidak_ada_jam_tanpa_jawaban(self) -> None:
+        """Sebuah jam yang jatuh ke celah akan menghasilkan sesi kosong senyap."""
+        for hari in ("senin", "selasa"):
+            for jam in range(24):
+                assert FOREX_CALENDAR.session(_saat(hari, jam))
+
+    def test_zona_waktu_lain_dinormalkan(self) -> None:
+        from datetime import timedelta, timezone
+
+        wib = timezone(timedelta(hours=7))
+        # Senin 19:00 WIB = Senin 12:00 UTC = OVERLAP
+        assert FOREX_CALENDAR.session(_saat("senin", 12).astimezone(wib)) == "OVERLAP"
 
 
 class TestLubangAkhirPekan:

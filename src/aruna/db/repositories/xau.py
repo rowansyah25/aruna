@@ -27,6 +27,7 @@ from datetime import datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
 
+from aruna.core.clock import FOREX_CALENDAR
 from aruna.core.logging import get_logger
 from aruna.db.types import to_mysql_datetime
 from aruna.xau.keputusan import SinyalXau
@@ -88,16 +89,20 @@ class XauRepository:
         prediction_id = await self._db.insert(
             """
             INSERT INTO xau_predictions
-                (symbol, setup_id, as_of, decided_at, keputusan, alasan_kosong,
+                (symbol, setup_id, as_of, sesi, pasar_buka, decided_at,
+                 keputusan, alasan_kosong,
                  confidence, setuju, menentang, netral, kontradiksi,
                  entry, stop, target, atr, rr, target_atr, sentuhan_target,
                  spread_bps, spread_diukur, model_version)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             symbol,
             sinyal.setup_id,
             to_mysql_datetime(as_of),
+            # Diukur dari kalender pada close bar keputusan, bukan jam sistem.
+            FOREX_CALENDAR.session(as_of),
+            FOREX_CALENDAR.is_open(as_of),
             to_mysql_datetime(decided_at),
             sinyal.keputusan.value,
             sinyal.alasan,

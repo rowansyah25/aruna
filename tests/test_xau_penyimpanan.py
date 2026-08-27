@@ -197,6 +197,35 @@ class TestBarisYangDitulis:
         )
         assert int(db.nilai()["entry"]) == 4605
 
+    async def test_sesi_direkam_sebagai_bukti(self, db) -> None:
+        """Spec melarang "London = BUY". Merekamnya adalah cara menaati
+        larangan itu: pertanyaannya dijawab data kelak, bukan kode hari ini."""
+        # 2026-08-31 adalah Senin; 12:00 UTC = OVERLAP.
+        senin_siang = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
+        await XauRepository(db).simpan(
+            _sinyal(), as_of=senin_siang, decided_at=senin_siang
+        )
+        baris = db.nilai()
+        assert baris["sesi"] == "OVERLAP"
+        assert baris["pasar_buka"] is True
+
+    async def test_sesi_diukur_pada_bar_bukan_jam_sistem(self, db) -> None:
+        """Keduanya berbeda tiap kali tick terlambat."""
+        bar = datetime(2026, 8, 31, 3, 0, tzinfo=UTC)  # ASIA
+        jauh_kemudian = datetime(2026, 8, 31, 14, 0, tzinfo=UTC)  # OVERLAP
+        await XauRepository(db).simpan(
+            _sinyal(), as_of=bar, decided_at=jauh_kemudian
+        )
+        assert db.nilai()["sesi"] == "ASIA"
+
+    async def test_akhir_pekan_tercatat_tutup_bukan_null(self, db) -> None:
+        """Tutup adalah keadaan TERUKUR; NULL berarti tak ada yang mengukur."""
+        sabtu = datetime(2026, 8, 29, 12, 0, tzinfo=UTC)
+        await XauRepository(db).simpan(_sinyal(), as_of=sabtu, decided_at=sabtu)
+        baris = db.nilai()
+        assert baris["sesi"] == "TUTUP"
+        assert baris["pasar_buka"] is False
+
     async def test_versi_model_tercatat(self, db) -> None:
         """Tanpa versi, hasil dari dua model berbeda tak bisa dipisahkan."""
         await XauRepository(db).simpan(_sinyal(), as_of=SAAT, decided_at=SAAT)
