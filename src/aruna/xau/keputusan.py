@@ -147,15 +147,22 @@ def putuskan_dari_dewan(
     symbol: str = "XAU/USD",
     spread_bps: Decimal | None = None,
     cooldown: Cooldown | None = None,
+    bobot: dict[str, float] | None = None,
 ) -> SinyalXau:
-    """Jalur produksi: hasil dewan → sinyal XAU."""
+    """Jalur produksi: hasil dewan → sinyal XAU.
+
+    ``bobot`` adalah keandalan terukur per agen dari koreksi diri.  Ia
+    menimbang kontradiksi: perbedaan pendapat dari agen yang terbukti membaca
+    pasar dengan benar berbobot lebih.  Kosong sampai sepuluh hasil pertama
+    terselesaikan, dan saat kosong tiap suara bernilai sama.
+    """
     arah = ke_keputusan_xau(deliberation.outcome)
     berarah = arah.is_directional
     return putuskan(
         symbol=symbol,
         arah=arah,
         confidence=deliberation.confidence,
-        rekap_suara=rekap(deliberation, arah) if berarah else None,
+        rekap_suara=rekap(deliberation, arah, bobot) if berarah else None,
         geometri=rakit_geometri(bukti, arah, harga) if berarah else None,
         saat=deliberation.decided_at,
         spread_bps=spread_bps,

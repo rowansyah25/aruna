@@ -23,6 +23,7 @@ diam-diam menang.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from decimal import ROUND_HALF_EVEN, Decimal
 from typing import Any
@@ -255,6 +256,68 @@ class XauRepository:
             ORDER BY p.as_of
             """,
             to_mysql_datetime(sejak),
+        )
+
+    async def baris_keandalan(self) -> list[dict[str, Any]]:
+        """Suara berarah yang sudah punya hasil, siap untuk ``build_reliability``.
+
+        Bentuknya sengaja persis seperti yang mesin keandalan crypto minta -
+        ``agent``, ``agent_decision``, ``council_decision``,
+        ``direction_correct`` - supaya XAU memakai pengukur yang sama alih-alih
+        yang kedua.  Dua implementasi keandalan menghasilkan dua angka yang
+        tidak bisa dibandingkan, dan yang salah tak akan pernah ketahuan.
+
+        Suara yang abstain tidak ikut: menolak membaca bukti yang tipis adalah
+        tindakan yang sah, bukan kegagalan yang perlu dihukum.
+        """
+        return await self._db.fetch(
+            """
+            SELECT v.role AS agent,
+                   v.decision AS agent_decision,
+                   p.keputusan AS council_decision,
+                   r.arah_benar AS direction_correct
+            FROM xau_results r
+            JOIN xau_predictions p ON p.id = r.prediction_id
+            JOIN xau_agent_votes v ON v.prediction_id = p.id
+            WHERE r.arah_benar IS NOT NULL
+              AND v.abstained = FALSE
+              AND v.decision IN ('BUY', 'SELL')
+            """
+        )
+
+    async def hitung_hasil(self) -> int:
+        """Berapa hasil yang sudah terselesaikan.  Pemicu putaran koreksi."""
+        return int(await self._db.fetchval("SELECT COUNT(*) FROM xau_results") or 0)
+
+    async def koreksi_terakhir(self) -> dict[str, Any] | None:
+        """Putaran koreksi terakhir, atau ``None`` kalau belum pernah."""
+        baris = await self._db.fetch(
+            "SELECT versi, dipicu_oleh, bobot, diterapkan FROM xau_model_versions "
+            "ORDER BY id DESC LIMIT 1"
+        )
+        return baris[0] if baris else None
+
+    async def simpan_koreksi(self, hasil: Any) -> int:
+        """Tulis satu putaran koreksi - termasuk yang tidak diterapkan.
+
+        Yang gagal karena sampelnya tipis TETAP ditulis: tanpa barisnya,
+        "belum cukup bahan" dan "tidak pernah dijalankan" terlihat sama persis.
+        """
+        return await self._db.insert(
+            """
+            INSERT INTO xau_model_versions
+                (versi, versi_sebelumnya, dipicu_oleh, sampel, garis_dasar,
+                 diterapkan, alasan, bobot)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            hasil.versi,
+            hasil.versi_sebelumnya,
+            hasil.dipicu_oleh,
+            hasil.sampel,
+            _desimal(hasil.garis_dasar),
+            hasil.diterapkan,
+            hasil.alasan,
+            json.dumps(hasil.bobot) if hasil.bobot else None,
         )
 
     async def simpan_hasil(self, hasil: Any, keputusan: str) -> int:

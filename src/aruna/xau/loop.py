@@ -41,6 +41,12 @@ from aruna.xau.cooldown import Cooldown
 from aruna.xau.geometri import Geometri
 from aruna.xau.kalender import ringkas as ringkas_berita
 from aruna.xau.kelayakan import periksa_kelayakan
+from aruna.xau.koreksi import (
+    KOREKSI_TIAP,
+    bobot_yang_berlaku,
+    hitung_koreksi,
+    perlu_koreksi,
+)
 from aruna.xau.keputusan import SinyalXau, putuskan_dari_dewan
 from aruna.xau.konteks import rakit_konteks
 from aruna.xau.resolve import nilai_hasil
@@ -125,6 +131,7 @@ async def nilai_yang_tertunda(repo: object, m5: list[Candle]) -> int:
         return 0
 
     tertunda = await repo.perlu_dinilai(sejak=m5[0].open_time)
+    sebelum = await repo.hitung_hasil()
     dinilai = 0
     for baris in tertunda:
         arah = Decision(baris["keputusan"])
@@ -153,7 +160,44 @@ async def nilai_yang_tertunda(repo: object, m5: list[Candle]) -> int:
             level=hasil.level_tersentuh.value,
             gerak_pct=float(hasil.gerak_pct),
         )
+
+    if dinilai:
+        await koreksi_kalau_saatnya(repo, sebelum + dinilai)
     return dinilai
+
+
+async def koreksi_kalau_saatnya(repo: object, hasil_terselesaikan: int) -> None:
+    """Jalankan koreksi diri kalau hitungan hasil melewati ambangnya.
+
+    **Tanpa persetujuan operator, dan itu keputusan operator sendiri**
+    (2026-08-28).  Yang membuatnya aman bukan kehati-hatian melainkan apa yang
+    dikoreksi: bobot agen terhadap garis dasar pasar, bukan ambang gerbang
+    terhadap hasilnya sendiri.  Yang kedua adalah overfitting yang spec larang.
+
+    Putaran yang sampelnya kurang TETAP ditulis, supaya "belum cukup bahan"
+    tidak terlihat sama dengan "tidak pernah dijalankan".
+    """
+    terakhir = await repo.koreksi_terakhir()
+    dipicu_sebelumnya = int(terakhir["dipicu_oleh"]) if terakhir else 0
+    if not perlu_koreksi(hasil_terselesaikan, dipicu_sebelumnya):
+        return
+
+    baris = await repo.baris_keandalan()
+    putaran = dipicu_sebelumnya // KOREKSI_TIAP + 1
+    hasil = hitung_koreksi(
+        baris,
+        putaran=putaran,
+        dipicu_oleh=hasil_terselesaikan,
+        versi_sebelumnya=terakhir["versi"] if terakhir else None,
+    )
+    await repo.simpan_koreksi(hasil)
+    log.info(
+        "xau.koreksi",
+        versi=hasil.versi,
+        diterapkan=hasil.diterapkan,
+        sampel=hasil.sampel,
+        ringkas=hasil.ringkas(),
+    )
 
 
 async def satu_tick(
@@ -279,12 +323,18 @@ async def satu_tick(
 
     konteks = rakit_konteks(bukti, _snapshot_dari_bar(m5, gate))
     deliberation = (engine or DeliberationEngine()).deliberate(konteks)
+    # Keandalan terukur dari koreksi diri. Kosong sampai sepuluh hasil pertama
+    # terselesaikan - dan saat kosong tiap suara bernilai sama.
+    bobot = bobot_yang_berlaku(
+        await repo.koreksi_terakhir() if repo is not None else None
+    )
     sinyal = putuskan_dari_dewan(
         deliberation,
         bukti,
         m5[-1].close,
         symbol=symbol,
         cooldown=cooldown,
+        bobot=bobot,
     )
     return await simpan(sinyal, bukti.as_of, bukti.bacaan(), bukti.m5.regime)
 

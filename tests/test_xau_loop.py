@@ -75,6 +75,8 @@ class RepoPalsu:
         self.tertunda: list[dict] = []
         self.hasil: list[dict] = []
         self.sejak_diminta = None
+        self.koreksi: list[dict] = []
+        self.baris: list[dict] = []
 
     async def perlu_dinilai(self, *, sejak):
         self.sejak_diminta = sejak
@@ -83,6 +85,24 @@ class RepoPalsu:
     async def simpan_hasil(self, hasil, keputusan):
         self.hasil.append({"hasil": hasil, "keputusan": keputusan})
         return len(self.hasil)
+
+    # -- koreksi diri. Bentuknya disamakan dengan repositori asli; palsu yang
+    #    bidangnya menyimpang menghijaukan suite di atas bug produksi.
+    async def hitung_hasil(self):
+        return len(self.hasil)
+
+    async def koreksi_terakhir(self):
+        return self.koreksi[-1] if self.koreksi else None
+
+    async def baris_keandalan(self):
+        return self.baris
+
+    async def simpan_koreksi(self, hasil):
+        self.koreksi.append(
+            {"versi": hasil.versi, "dipicu_oleh": hasil.dipicu_oleh,
+             "bobot": hasil.bobot, "diterapkan": hasil.diterapkan}
+        )
+        return len(self.koreksi)
 
     async def simpan(
         self, sinyal, *, as_of, decided_at, symbol="XAU/USD", bukti=None,

@@ -86,6 +86,11 @@ class RekapSuara:
     menentang: int
     netral: int
     rincian: tuple[SuaraAgen, ...]
+    #: Jumlah keyakinan yang SUDAH dikalikan keandalan tiap agen.  Nol berarti
+    #: belum ada bobot terukur - modul XAU baru punya bobot setelah sepuluh
+    #: hasil terselesaikan, dan sebelum itu tiap suara bernilai sama.
+    bobot_setuju: float = 0.0
+    bobot_menentang: float = 0.0
 
     @property
     def bersuara(self) -> int:
@@ -93,19 +98,44 @@ class RekapSuara:
         return self.setuju + self.menentang
 
     @property
+    def berbobot(self) -> bool:
+        """``True`` kalau keandalan agen sudah terukur dan ikut menimbang."""
+        return (self.bobot_setuju + self.bobot_menentang) > 0.0
+
+    @property
     def kontradiksi(self) -> float | None:
         """0 = bulat, 1 = terbelah rata.  ``None`` = tidak ada yang bersuara.
 
         Diukur hanya di antara yang BERSUARA - lihat docstring modul.
+
+        **Dihitung dari BOBOT begitu keandalan terukur.**  Sebelum ada bobot,
+        tiap suara bernilai satu; sesudahnya, perbedaan pendapat dari agen yang
+        terbukti membaca pasar dengan benar berbobot lebih daripada perbedaan
+        pendapat dari agen yang sering meleset.  Menghitung keduanya sama berat
+        berarti koreksi diri tidak pernah mengubah satu keputusan pun - dan
+        bobot yang tidak mengubah apa-apa lebih buruk daripada tak ada bobot,
+        karena laporannya mengaku menyetel diri.
         """
+        if self.berbobot:
+            total = self.bobot_setuju + self.bobot_menentang
+            return 2 * min(self.bobot_setuju, self.bobot_menentang) / total
         if self.bersuara == 0:
             return None
         minoritas = min(self.setuju, self.menentang)
         return 2 * minoritas / self.bersuara
 
 
-def rekap(deliberation: Deliberation, arah: Decision) -> RekapSuara:
-    """Rekap sikap seluruh agen ronde satu terhadap ``arah``."""
+def rekap(
+    deliberation: Deliberation,
+    arah: Decision,
+    bobot: dict[str, float] | None = None,
+) -> RekapSuara:
+    """Rekap sikap seluruh agen ronde satu terhadap ``arah``.
+
+    ``bobot`` adalah keandalan terukur per agen, hasil koreksi diri.  Kosong
+    berarti belum terukur dan tiap suara bernilai sama - keadaan modul XAU
+    sampai sepuluh hasil pertama terselesaikan.
+    """
     rincian = tuple(
         SuaraAgen(
             role=o.role,
@@ -117,11 +147,26 @@ def rekap(deliberation: Deliberation, arah: Decision) -> RekapSuara:
         for o in deliberation.opinions
     )
     hitung = [s.suara for s in rincian]
+    peta = bobot or {}
+    # Keyakinan dikalikan keandalan. Dijumlahkan HANYA saat ada bobot terukur:
+    # menjumlahkan keyakinan mentah tanpa keandalan akan membuat agen yang
+    # percaya diri menang atas agen yang benar.
+    terbobot = {
+        Suara.AGREE: 0.0,
+        Suara.DISAGREE: 0.0,
+    }
+    if peta:
+        for s in rincian:
+            if s.suara in terbobot:
+                terbobot[s.suara] += s.confidence * peta.get(s.role.value, 1.0)
+
     return RekapSuara(
         setuju=hitung.count(Suara.AGREE),
         menentang=hitung.count(Suara.DISAGREE),
         netral=hitung.count(Suara.NEUTRAL),
         rincian=rincian,
+        bobot_setuju=terbobot[Suara.AGREE],
+        bobot_menentang=terbobot[Suara.DISAGREE],
     )
 
 
