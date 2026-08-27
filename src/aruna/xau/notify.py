@@ -105,6 +105,74 @@ def susun_pesan(
     return "\n".join(b for b in baris if b != "" or True).strip()
 
 
+def susun_result(
+    *,
+    arah: Any,
+    entry: Any,
+    target: Any,
+    stop: Any,
+    hasil: Any,
+    hasil_akhir: Any,
+    r: Any,
+    menang: bool | None,
+    penutup: Any = None,
+) -> str:
+    """Laporan hasil satu sinyal yang sudah tuntas.
+
+    **Ketiga dimensi dilaporkan terpisah** - ramalan, eksekusi, dan hasil -
+    karena menyatukannya jadi satu angka menghapus tepat perbedaan yang
+    menentukan apa yang harus diperbaiki.  Arah yang benar dengan stop terlalu
+    ketat menuntut perbaikan yang berbeda dari arah yang salah.
+    """
+    putusan = (
+        "MENANG" if menang is True else "KALAH" if menang is False else "BELUM DINILAI"
+    )
+    baris = [
+        f"XAU/USD — hasil: {putusan}",
+        "",
+        f"sinyal   {arah.value}",
+        f"entry    {entry:,.2f}",
+        f"tutup    {hasil.harga_tutup:,.2f}  ({hasil.gerak_pct:+.2f}%)",
+        f"target   {target:,.2f}   stop {stop:,.2f}",
+        "",
+        "— tiga dimensi, sengaja tidak digabung —",
+        f"ramalan  arah {'BENAR' if hasil.arah_benar else 'meleset'}"
+        if hasil.arah_benar is not None
+        else "ramalan  tidak terukur",
+        f"eksekusi {hasil.level_tersentuh.value} tersentuh lebih dulu",
+        f"hasil    {hasil_akhir.value}"
+        + (f"  ({r:+.2f} R)" if r is not None else "  (R tidak terukur)"),
+    ]
+
+    if menang is None:
+        baris += [
+            "",
+            "Belum dinilai: ARUNA menyarankan MENAHAN, jadi posisinya belum",
+            "ditutup dan hasilnya belum jadi milik siapa pun.",
+        ]
+    elif hasil_akhir.value == "TUTUP_UNTUNG":
+        baris += [
+            "",
+            "Dihitung menang karena ARUNA menyuruh menutup saat untung,",
+            f"dan untungnya {r:.2f} R - di atas ambang setengah R.",
+        ]
+    elif hasil_akhir.value == "TUTUP_RUGI" and r is not None and r > 0:
+        baris += [
+            "",
+            f"Untung {r:.2f} R, tapi di bawah ambang setengah R - itu sebanding",
+            "dengan derau satu bar, jadi TIDAK dihitung menang.",
+        ]
+
+    if penutup is not None and not penutup.tahan and hasil.arah_benar is False:
+        baris.append("Saya salah membaca arahnya.")
+
+    baris += [
+        "",
+        "Tersimpan apa adanya, menang maupun kalah. ARUNA menganalisa saja.",
+    ]
+    return "\n".join(baris)
+
+
 async def kirim_sinyal(sender: Any, pesan: str) -> bool:
     """Kirim, dan jangan pernah menjatuhkan loop karenanya.
 
@@ -120,4 +188,4 @@ async def kirim_sinyal(sender: Any, pesan: str) -> bool:
     return terkirim
 
 
-__all__ = ["kirim_sinyal", "susun_pesan"]
+__all__ = ["kirim_sinyal", "susun_pesan", "susun_result"]

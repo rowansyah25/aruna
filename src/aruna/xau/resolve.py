@@ -49,10 +49,43 @@ from aruna.xau.geometri import Geometri
 HORIZON_BAR = 48
 
 
+#: Untung minimum yang dihitung sebagai kemenangan, dalam satuan R.
+#:
+#: **R = jarak stop.**  Satu R adalah persis yang dipertaruhkan kalau bacaannya
+#: salah, jadi mengukur untung terhadapnya membandingkan hasil dengan risiko
+#: yang benar-benar diambil - bukan dengan nol.
+#:
+#: Setengah R, dan ambang ini yang menjaga angka win rate tetap berarti.
+#: Tanpanya, "tutup saat masih untung" akan menghitung untung sepeser pun
+#: sebagai kemenangan: harga yang bergerak +0,01% adalah derau satu bar, dan
+#: menghitungnya menang membuat win rate naik tanpa satu keputusan pun
+#: membaik.  Itu persis yang spec larang sebagai mengubah histori.
+MIN_R_UNTUK_WIN = Decimal("0.5")
+
+
 class LevelTersentuh(StrEnum):
     TARGET = "TARGET"
     STOP = "STOP"
     TIDAK_SATU_PUN = "TIDAK_SATU_PUN"
+
+
+class HasilAkhir(StrEnum):
+    """Apa yang SEBENARNYA terjadi pada gagasan ini, termasuk saran ARUNA.
+
+    Dimensi ketiga, berdampingan dengan ``arah_benar`` (ramalan) dan
+    ``level_tersentuh`` (eksekusi).  Ia menjawab pertanyaan yang tidak dijawab
+    keduanya: apa yang operator dapat kalau ia mengikuti ARUNA.
+    """
+
+    TARGET = "TARGET"
+    STOP = "STOP"
+    #: Horizon habis, ARUNA menyuruh tutup, dan saat itu untung >= ambang.
+    TUTUP_UNTUNG = "TUTUP_UNTUNG"
+    #: Horizon habis, ARUNA menyuruh tutup, tapi untungnya di bawah ambang
+    #: atau justru rugi.  BUKAN kemenangan.
+    TUTUP_RUGI = "TUTUP_RUGI"
+    #: ARUNA menyuruh menahan: belum ada yang bisa dihitung menang atau kalah.
+    TAHAN = "TAHAN"
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,4 +152,64 @@ def nilai_hasil(
     )
 
 
-__all__ = ["HORIZON_BAR", "HasilXau", "LevelTersentuh", "nilai_hasil"]
+def r_multiple(
+    entry: Decimal, stop: Decimal, harga: Decimal, arah: Decision
+) -> Decimal | None:
+    """Untung/rugi dalam satuan risiko yang dipertaruhkan.
+
+    ``None`` kalau jarak stop nol - tidak ada risiko untuk dibandingkan, dan
+    membagi dengan nol akan mengarang angka tak terhingga.
+    """
+    risiko = abs(entry - stop)
+    if risiko == 0:
+        return None
+    gerak = (harga - entry) if arah is Decision.BUY else (entry - harga)
+    return gerak / risiko
+
+
+def nilai_hasil_akhir(
+    *,
+    level: LevelTersentuh,
+    disuruh_tutup: bool | None,
+    r: Decimal | None,
+) -> tuple[HasilAkhir, bool | None]:
+    """Hasil akhir dan apakah ia menang.  ``None`` = belum bisa dinilai.
+
+    ``disuruh_tutup`` adalah putusan ARUNA saat horizon habis: ``True`` tutup,
+    ``False`` tahan, ``None`` belum ada putusan.
+
+    **Menang butuh dua hal sekaligus**: ARUNA menyuruh menutup, DAN untungnya
+    setidaknya :data:`MIN_R_UNTUK_WIN`.  Menyuruh tutup di untung tipis bukan
+    kemenangan - operator memang diperingatkan, tapi yang didapatnya sebanding
+    dengan derau satu bar.
+    """
+    if level is LevelTersentuh.TARGET:
+        return HasilAkhir.TARGET, True
+    if level is LevelTersentuh.STOP:
+        return HasilAkhir.STOP, False
+
+    if disuruh_tutup is None:
+        return HasilAkhir.TAHAN, None
+    if not disuruh_tutup:
+        # ARUNA menyuruh menahan: posisinya belum ditutup, jadi belum ada
+        # hasil. Menghitungnya kalah akan menghukum kesabaran yang ARUNA
+        # sendiri sarankan.
+        return HasilAkhir.TAHAN, None
+
+    if r is None:
+        return HasilAkhir.TUTUP_RUGI, False
+    if r >= MIN_R_UNTUK_WIN:
+        return HasilAkhir.TUTUP_UNTUNG, True
+    return HasilAkhir.TUTUP_RUGI, False
+
+
+__all__ = [
+    "HORIZON_BAR",
+    "MIN_R_UNTUK_WIN",
+    "HasilAkhir",
+    "HasilXau",
+    "LevelTersentuh",
+    "nilai_hasil",
+    "nilai_hasil_akhir",
+    "r_multiple",
+]

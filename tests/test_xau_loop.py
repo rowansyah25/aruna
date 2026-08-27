@@ -85,8 +85,13 @@ class RepoPalsu:
         self.sejak_diminta = sejak
         return self.tertunda
 
-    async def simpan_hasil(self, hasil, keputusan):
-        self.hasil.append({"hasil": hasil, "keputusan": keputusan})
+    async def simpan_hasil(
+        self, hasil, keputusan, *, hasil_akhir=None, r=None, menang=None
+    ):
+        self.hasil.append(
+            {"hasil": hasil, "keputusan": keputusan,
+             "hasil_akhir": hasil_akhir, "r": r, "menang": menang}
+        )
         return len(self.hasil)
 
     # -- koreksi diri. Bentuknya disamakan dengan repositori asli; palsu yang

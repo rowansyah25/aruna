@@ -56,8 +56,14 @@ from aruna.xau.koreksi import (
 )
 from aruna.xau.keputusan import SinyalXau, putuskan_dari_dewan
 from aruna.xau.konteks import rakit_konteks
-from aruna.xau.notify import kirim_sinyal, susun_pesan
-from aruna.xau.resolve import HORIZON_BAR, LevelTersentuh, nilai_hasil
+from aruna.xau.notify import kirim_sinyal, susun_pesan, susun_result
+from aruna.xau.resolve import (
+    HORIZON_BAR,
+    LevelTersentuh,
+    nilai_hasil,
+    nilai_hasil_akhir,
+    r_multiple,
+)
 from aruna.xau.timeframes import TumpukanTimeframe, rakit_tumpukan
 
 log = get_logger(__name__)
@@ -165,20 +171,12 @@ async def nilai_yang_tertunda(
         hasil = nilai_hasil(baris["id"], geo, arah, jalur)
         if hasil is None:
             continue
-        await repo.simpan_hasil(hasil, baris["keputusan"])
-        dinilai += 1
-        log.info(
-            "xau.dinilai",
-            prediction_id=baris["id"],
-            arah_benar=hasil.arah_benar,
-            level=hasil.level_tersentuh.value,
-            gerak_pct=float(hasil.gerak_pct),
-        )
-
         # Horizon habis tanpa level tersentuh adalah titik keputusan, dan
         # sebelumnya ia berakhir dalam DIAM - justru keadaan tempat kerugian
-        # paling sering dibiarkan tumbuh. Putusannya selalu dikirim: tahan
-        # atau tutup, tidak pernah kosong.
+        # paling sering dibiarkan tumbuh. Putusannya dihitung SEBELUM hasil
+        # disimpan, karena hasil akhirnya bergantung padanya: menyuruh tutup
+        # saat untung adalah kemenangan yang bisa diatribusikan ke ARUNA.
+        penutup = None
         if hasil.level_tersentuh is LevelTersentuh.TIDAK_SATU_PUN and struktur:
             penutup = nilai_penutup(
                 arah=arah,
@@ -188,24 +186,55 @@ async def nilai_yang_tertunda(
                 arah_benar=hasil.arah_benar,
                 gerak_pct=hasil.gerak_pct,
             )
-            terkirim = False
-            if sender is not None:
-                terkirim = await kirim_sinyal(
-                    sender,
-                    susun_penutup(
-                        penutup,
-                        arah=arah,
-                        entry=geo.entry,
-                        harga_tutup=hasil.harga_tutup,
-                        target=geo.target,
-                    ),
-                )
+
+        r = r_multiple(geo.entry, geo.stop, hasil.harga_tutup, arah)
+        hasil_akhir, menang = nilai_hasil_akhir(
+            level=hasil.level_tersentuh,
+            disuruh_tutup=None if penutup is None else not penutup.tahan,
+            r=r,
+        )
+
+        await repo.simpan_hasil(
+            hasil,
+            baris["keputusan"],
+            hasil_akhir=hasil_akhir,
+            r=r,
+            menang=menang,
+        )
+        dinilai += 1
+        log.info(
+            "xau.dinilai",
+            prediction_id=baris["id"],
+            arah_benar=hasil.arah_benar,
+            level=hasil.level_tersentuh.value,
+            hasil_akhir=hasil_akhir.value,
+            r=None if r is None else float(r),
+            menang=menang,
+        )
+
+        if sender is not None:
+            await kirim_sinyal(
+                sender,
+                susun_result(
+                    arah=arah,
+                    entry=geo.entry,
+                    target=geo.target,
+                    stop=geo.stop,
+                    hasil=hasil,
+                    hasil_akhir=hasil_akhir,
+                    r=r,
+                    menang=menang,
+                    penutup=penutup,
+                ),
+            )
+
+        if penutup is not None:
             await repo.simpan_penutup(
                 baris["id"],
                 baris["keputusan"],
                 penutup,
                 harga=hasil.harga_tutup,
-                terkirim=terkirim,
+                terkirim=sender is not None,
             )
             log.info(
                 "xau.penutup",

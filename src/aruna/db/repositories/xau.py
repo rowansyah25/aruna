@@ -399,7 +399,15 @@ class XauRepository:
             json.dumps(hasil.bobot) if hasil.bobot else None,
         )
 
-    async def simpan_hasil(self, hasil: Any, keputusan: str) -> int:
+    async def simpan_hasil(
+        self,
+        hasil: Any,
+        keputusan: str,
+        *,
+        hasil_akhir: Any = None,
+        r: Any = None,
+        menang: bool | None = None,
+    ) -> int:
         """Tulis satu hasil.
 
         ``keputusan`` disalin ke barisnya bukan karena malas menormalkan: ia
@@ -410,8 +418,9 @@ class XauRepository:
             """
             INSERT INTO xau_results
                 (prediction_id, keputusan, arah_benar, level_tersentuh,
-                 harga_tutup, gerak_pct, bar_dipakai, horizon_bar)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                 harga_tutup, gerak_pct, bar_dipakai, horizon_bar,
+                 hasil_akhir, r_multiple, menang)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             hasil.prediction_id,
             keputusan,
@@ -421,6 +430,13 @@ class XauRepository:
             _desimal(hasil.gerak_pct, Decimal("0.000001")),
             hasil.bar_dipakai,
             hasil.horizon_bar,
+            # Dimensi ketiga: apa yang operator dapat kalau mengikuti ARUNA.
+            # `menang` boleh NULL - ARUNA yang menyuruh MENAHAN belum punya
+            # hasil, dan menghitungnya kalah menghukum kesabaran yang ARUNA
+            # sendiri sarankan.
+            hasil_akhir.value if hasil_akhir is not None else None,
+            _desimal(r),
+            menang,
         )
 
 
