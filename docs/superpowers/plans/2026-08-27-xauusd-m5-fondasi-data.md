@@ -1547,7 +1547,9 @@ Rencana 1 berhenti di titik yang bisa berdiri sendiri: **ARUNA punya data XAUUSD
 Dua hal yang **tidak** boleh dikerjakan sampai Rencana 3 selesai dan angkanya keluar:
 
 1. Menyatakan target 80–90% tercapai. Butuh bukti out-of-sample **dan** walk-forward. Kalau hasilnya 72%, yang ditampilkan 72%.
-2. Menyalakan gerbang spread sebagai pengukuran. Twelve Data belum tentu menerbitkan bid/ask untuk XAU/USD; kalau `Quote.spread_bps` mengembalikan `None`, gerbang itu dicatat **"tidak diukur"** dan tidak boleh ditebak dari range candle.
+2. ~~Menyalakan gerbang spread sebagai pengukuran.~~ **Sudah diputuskan oleh pengukuran, 2026-08-27: Twelve Data TIDAK menerbitkan bid/ask untuk XAU/USD.** `/quote` tidak memuat kunci `bid` maupun `ask`, dan `/exchange_rate` hanya mengembalikan satu angka `rate`. Maka `Quote.spread_bps` selalu `None`, gerbang spread **dicatat "tidak diukur" dan tidak dinyalakan**. Ia tidak boleh ditaksir dari range candle: range adalah pergerakan harga, spread adalah biaya transaksi, dan menyamakan keduanya akan membuat gerbangnya menolak justru saat pasar bergerak - kebalikan dari maksudnya.
+
+   Ini berarti syarat spec *"Spread abnormal → NO SIGNAL"* **tidak dapat dipenuhi dengan sumber ini**. Memenuhinya butuh feed broker dengan dua sisi harga. Sampai itu ada, laporan XAU harus menyebut gerbang spread sebagai tidak aktif, bukan sebagai lulus.
 
 ---
 
