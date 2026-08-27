@@ -1695,12 +1695,29 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
     from datetime import UTC, timedelta
 
     from aruna.core.clock import now_utc
+    from aruna.data.http import HttpFetcher
     from aruna.data.quality import QualityGate
     from aruna.data.registry import build_provider
     from aruna.db.repositories.xau import XauRepository
     from aruna.xau.cooldown import Cooldown
     from aruna.xau.dolar import hitung_bukti_dolar, tarik_proksi
     from aruna.xau.loop import BAR_DIBUTUHKAN, SIMBOL, satu_tick
+    from aruna.xau.sumber_kalender import (
+        FF_BASE,
+        FRED_BASE,
+        SUMBER_FF,
+        SUMBER_FRED,
+        tarik_forexfactory,
+        tarik_fred,
+    )
+
+    #: Seri FRED yang paling menggerakkan emas. Sengaja sedikit: tiap seri
+    #: satu permintaan, dan seri yang tak pernah dibaca cuma menambah beban.
+    SERI_FRED = (
+        ("CPIAUCSL", "CPI (FRED)"),
+        ("DFF", "Fed Funds Rate (FRED)"),
+        ("DGS10", "US 10Y Treasury Yield (FRED)"),
+    )
 
     app = ArunaApplication(settings)
     try:
@@ -1740,6 +1757,14 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
     tick_per_tarikan_proksi = max(1, 3600 // max(args.interval, 1))
     tick_ke = 0
     dolar = None
+
+    # Kalender ekonomi, ditarik pada cadence yang sama dengan proksi dolar.
+    # Jadwal rilis bergerak jauh lebih lambat dari harga; menariknya tiap bar
+    # akan membebani sumber pihak ketiga tanpa menambah satu pun keterangan.
+    ff = HttpFetcher(source=SUMBER_FF, base_url=FF_BASE, timeout_sec=20.0)
+    fred = HttpFetcher(source=SUMBER_FRED, base_url=FRED_BASE, timeout_sec=20.0)
+    kunci_fred = settings.providers.fred_api_key.get_secret_value()
+    peristiwa: list = []
     # Bar terakhir yang sudah dinilai. Tanpa ini, dua tick dalam satu jendela
     # 300 detik menulis dua baris untuk bar yang sama dan melanggar kunci
     # uniknya - dan galat itu mematikan loop yang lalu dinyalakan ulang.
@@ -1768,6 +1793,16 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
                         f"  proksi dolar {dolar.simbol}: r={dolar.korelasi} "
                         f"atas {dolar.sampel} return"
                     )
+                # Kalender: ForexFactory selalu, FRED hanya kalau ada kunci.
+                # Keduanya boleh gagal - kalender adalah bukti tambahan, dan
+                # ketiadaannya bukan alasan berhenti menilai.
+                peristiwa = await tarik_forexfactory(ff)
+                for seri, judul in SERI_FRED:
+                    peristiwa += await tarik_fred(
+                        fred, seri=seri, judul=judul, api_key=kunci_fred
+                    )
+                sumber = sorted({p.sumber for p in peristiwa})
+                print(f"  kalender: {len(peristiwa)} peristiwa dari {sumber or '-'}")
             tick_ke += 1
 
             hasil = await satu_tick(
@@ -1778,6 +1813,7 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
                 cooldown=cooldown,
                 as_of_terakhir=as_of_terakhir,
                 dolar=dolar,
+                berita=peristiwa or None,
             )
             if hasil.menilai:
                 dinilai += 1

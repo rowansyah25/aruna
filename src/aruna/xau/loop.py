@@ -39,6 +39,7 @@ from aruna.data.quality import QualityGate
 from aruna.xau.bukti import rakit_bukti
 from aruna.xau.cooldown import Cooldown
 from aruna.xau.geometri import Geometri
+from aruna.xau.kalender import ringkas as ringkas_berita
 from aruna.xau.kelayakan import periksa_kelayakan
 from aruna.xau.keputusan import SinyalXau, putuskan_dari_dewan
 from aruna.xau.konteks import rakit_konteks
@@ -166,6 +167,7 @@ async def satu_tick(
     symbol: str = SIMBOL,
     as_of_terakhir: datetime | None = None,
     dolar: object | None = None,
+    berita: object | None = None,
 ) -> HasilTick:
     """Satu siklus keputusan.  Berhenti di penolakan pertama, tapi menyimpannya.
 
@@ -219,6 +221,15 @@ async def satu_tick(
                 # berarti belum ditarik pada siklus ini - proksi ditarik per
                 # jam, bukan tiap bar, karena korelasi 250-bar bergerak lambat.
                 dolar=dolar,
+                # Kalender ekonomi. Diringkas terhadap `as_of` bar keputusan -
+                # bukan jam sistem - supaya "menit ke rilis" diukur dari saat
+                # keputusan berdiri, dan supaya peristiwa yang belum rilis
+                # tidak pernah menyerahkan `actual`-nya.
+                berita=(
+                    ringkas_berita(berita, sekarang=as_of)
+                    if berita is not None
+                    else None
+                ),
                 # Bukti ikut disimpan supaya keputusan bisa DIPUTAR ULANG.
                 # Sebuah prediksi yang salah tanpa buktinya cuma memberi tahu
                 # bahwa ia salah; dengan buktinya, ia memberi tahu kenapa.

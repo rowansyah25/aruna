@@ -86,9 +86,10 @@ class RepoPalsu:
 
     async def simpan(
         self, sinyal, *, as_of, decided_at, symbol="XAU/USD", bukti=None,
-        regime=None, dolar=None,
+        regime=None, dolar=None, berita=None,
     ):
         self.dolar_terakhir = dolar
+        self.berita_terakhir = berita
         self.disimpan.append(
             {
                 "sinyal": sinyal,

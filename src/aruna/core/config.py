@@ -818,6 +818,16 @@ class ProviderSettings(BaseSettings):
     news_provider: str = "rss"
     news_provider_api_key: SecretStr = SecretStr("")
 
+    #: Kalender ekonomi untuk modul XAU.  Keduanya gratis dan saling menutupi:
+    #: ForexFactory memberi jadwal dan forecast tanpa kunci sama sekali, FRED
+    #: memberi ``actual`` resmi tapi butuh kunci gratis dari
+    #: fred.stlouisfed.org.
+    #:
+    #: Kunci KOSONG bukan kesalahan konfigurasi - ARUNA tetap berjalan dengan
+    #: ForexFactory saja, dan barisnya mencatat sumber mana yang benar-benar
+    #: menjawab.
+    fred_api_key: SecretStr = SecretStr("")
+
     fundamental_provider: str = "yahoo"
     fundamental_provider_api_key: SecretStr = SecretStr("")
 

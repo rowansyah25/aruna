@@ -83,6 +83,7 @@ class XauRepository:
         bukti: BacaanBukti | None = None,
         regime: Any = None,
         dolar: Any = None,
+        berita: Any = None,
     ) -> int:
         """Tulis satu keputusan beserta suara dan buktinya.  Kembalikan id-nya."""
         geo = sinyal.geometri
@@ -97,10 +98,12 @@ class XauRepository:
                  entry, stop, target, atr, rr, target_atr, sentuhan_target,
                  spread_bps, spread_diukur, model_version,
                  regime, regime_confidence, bukti_dipakai, bukti_tersedia,
-                 proksi_simbol, proksi_korelasi, proksi_sampel, proksi_gerak_pct)
+                 proksi_simbol, proksi_korelasi, proksi_sampel, proksi_gerak_pct,
+                 sumber_kalender, menit_ke_rilis, rilis_berikutnya,
+                 dampak_berikutnya, menit_sejak_rilis, dampak_tinggi_24j)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                     %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             symbol,
             sinyal.setup_id,
@@ -143,6 +146,24 @@ class XauRepository:
             _desimal(dolar.gerak_pct, Decimal("0.000001"))
             if dolar is not None
             else None,
+            # Kalender: DIREKAM, tidak ada gerbang yang membacanya. Sumber
+            # kosong berarti "tidak ada kalender", yang berbeda dari "tidak ada
+            # peristiwa" - menyamakannya membuat kegagalan jaringan terbaca
+            # sebagai pasar yang tenang.
+            ",".join(berita.sumber) if berita is not None and berita.sumber else None,
+            _desimal(berita.menit_ke_berikutnya, Decimal("0.1"))
+            if berita is not None
+            else None,
+            berita.berikutnya.judul[:128]
+            if berita is not None and berita.berikutnya
+            else None,
+            berita.berikutnya.dampak.value
+            if berita is not None and berita.berikutnya
+            else None,
+            _desimal(berita.menit_sejak_terakhir, Decimal("0.1"))
+            if berita is not None
+            else None,
+            berita.dampak_tinggi_24j if berita is not None else None,
         )
 
         if rekap is not None:
