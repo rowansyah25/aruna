@@ -164,4 +164,55 @@ class XauRepository:
         return prediction_id
 
 
+    async def perlu_dinilai(self, *, sejak: datetime) -> list[dict[str, Any]]:
+        """Sinyal berarah yang belum punya hasil, sejak ``sejak``.
+
+        Dibatasi ``sejak`` karena penilainya memakai bar M5 yang SUDAH ada di
+        tangan loop - jendela yang sama yang ditarik tiap tick.  Prediksi yang
+        lebih tua dari jendela itu tidak bisa dinilai tanpa menarik ulang jalur
+        harganya, dan menariknya diam-diam akan menghabiskan jatah kredit yang
+        tidak dianggarkan siapa pun.
+
+        ``LEFT JOIN ... IS NULL`` dan bukan ``NOT IN``: yang kedua memindai
+        ulang seluruh tabel hasil untuk tiap baris prediksi.
+        """
+        return await self._db.fetch(
+            """
+            SELECT p.id, p.keputusan, p.as_of, p.entry, p.stop, p.target,
+                   p.atr, p.sentuhan_target
+            FROM xau_predictions p
+            LEFT JOIN xau_results r ON r.prediction_id = p.id
+            WHERE r.id IS NULL
+              AND p.keputusan <> 'NO_SIGNAL'
+              AND p.as_of >= %s
+            ORDER BY p.as_of
+            """,
+            to_mysql_datetime(sejak),
+        )
+
+    async def simpan_hasil(self, hasil: Any, keputusan: str) -> int:
+        """Tulis satu hasil.
+
+        ``keputusan`` disalin ke barisnya bukan karena malas menormalkan: ia
+        yang membuat foreign key gabungan bisa menolak hasil untuk prediksi
+        ``NO_SIGNAL`` - lihat `migrations/0047_xau_hasil.sql`.
+        """
+        return await self._db.insert(
+            """
+            INSERT INTO xau_results
+                (prediction_id, keputusan, arah_benar, level_tersentuh,
+                 harga_tutup, gerak_pct, bar_dipakai, horizon_bar)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """,
+            hasil.prediction_id,
+            keputusan,
+            hasil.arah_benar,
+            hasil.level_tersentuh.value,
+            _desimal(hasil.harga_tutup, SKALA_HARGA),
+            _desimal(hasil.gerak_pct, Decimal("0.000001")),
+            hasil.bar_dipakai,
+            hasil.horizon_bar,
+        )
+
+
 __all__ = ["BacaanBukti", "VERSI_MODEL_XAU", "XauRepository"]

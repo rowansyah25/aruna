@@ -26,18 +26,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from datetime import UTC
+
 from aruna.agents.deliberation import DeliberationEngine
 from aruna.core.enums import DataQuality, Decision, Horizon, Market
 from aruna.core.errors import DataSourceUnavailableError
 from aruna.core.logging import get_logger
-from aruna.data.models import Snapshot
+from aruna.data.models import Candle, Snapshot
 from aruna.data.provider import MarketDataProvider
 from aruna.data.quality import QualityGate
 from aruna.xau.bukti import rakit_bukti
 from aruna.xau.cooldown import Cooldown
-from aruna.xau.keputusan import SinyalXau, putuskan_dari_dewan
+from aruna.xau.geometri import Geometri
 from aruna.xau.kelayakan import periksa_kelayakan
+from aruna.xau.keputusan import SinyalXau, putuskan_dari_dewan
 from aruna.xau.konteks import rakit_konteks
+from aruna.xau.resolve import nilai_hasil
 from aruna.xau.timeframes import rakit_tumpukan
 
 log = get_logger(__name__)
@@ -95,6 +99,53 @@ def _snapshot_dari_bar(candles: list, quality: QualityGate) -> Snapshot:
         session=None,
         market_open=None,
     )
+
+
+async def nilai_yang_tertunda(repo: object, m5: list[Candle]) -> int:
+    """Nilai sinyal berarah yang horizonnya sudah lewat.  Kembalikan jumlahnya.
+
+    Memakai ``m5`` yang sudah ditarik untuk keputusan tick ini - jendela 250
+    bar adalah sekitar dua puluh jam, jadi horizon empat jam milik prediksi
+    mana pun di dalamnya sudah lengkap.  Menariknya lagi per prediksi akan
+    menghabiskan jatah kredit yang tidak dianggarkan siapa pun.
+
+    Sebuah prediksi yang jalur setelahnya belum cukup panjang **dilewati, bukan
+    dinilai** - ``nilai_hasil`` memulangkan ``None`` untuknya, dan ia akan
+    terambil lagi di tick berikutnya sampai horizonnya benar-benar tuntas.
+    """
+    if not m5:
+        return 0
+
+    tertunda = await repo.perlu_dinilai(sejak=m5[0].open_time)
+    dinilai = 0
+    for baris in tertunda:
+        arah = Decision(baris["keputusan"])
+        geo = Geometri(
+            entry=baris["entry"],
+            stop=baris["stop"],
+            target=baris["target"],
+            atr=baris["atr"],
+            sentuhan_target=baris["sentuhan_target"] or 0,
+        )
+        as_of = baris["as_of"]
+        if as_of.tzinfo is None:
+            as_of = as_of.replace(tzinfo=UTC)
+        # Bar SESUDAH bar keputusan. Memasukkan bar keputusannya sendiri akan
+        # menilai sinyal dengan harga yang sudah diketahui saat ia dibuat.
+        jalur = [c for c in m5 if c.open_time >= as_of]
+        hasil = nilai_hasil(baris["id"], geo, arah, jalur)
+        if hasil is None:
+            continue
+        await repo.simpan_hasil(hasil, baris["keputusan"])
+        dinilai += 1
+        log.info(
+            "xau.dinilai",
+            prediction_id=baris["id"],
+            arah_benar=hasil.arah_benar,
+            level=hasil.level_tersentuh.value,
+            gerak_pct=float(hasil.gerak_pct),
+        )
+    return dinilai
 
 
 async def satu_tick(
@@ -190,6 +241,12 @@ async def satu_tick(
             as_of,
         )
 
+    # Nilai sinyal lama SEBELUM membuat yang baru, memakai bar yang sudah di
+    # tangan - nol panggilan API tambahan. Jendela 250 bar M5 adalah ~20 jam,
+    # jadi horizon 4 jam milik prediksi mana pun di dalamnya sudah lengkap.
+    if repo is not None:
+        await nilai_yang_tertunda(repo, m5)
+
     konteks = rakit_konteks(bukti, _snapshot_dari_bar(m5, gate))
     deliberation = (engine or DeliberationEngine()).deliberate(konteks)
     sinyal = putuskan_dari_dewan(
@@ -202,4 +259,10 @@ async def satu_tick(
     return await simpan(sinyal, bukti.as_of, bukti.bacaan())
 
 
-__all__ = ["BAR_DIBUTUHKAN", "SIMBOL", "HasilTick", "satu_tick"]
+__all__ = [
+    "BAR_DIBUTUHKAN",
+    "SIMBOL",
+    "HasilTick",
+    "nilai_yang_tertunda",
+    "satu_tick",
+]

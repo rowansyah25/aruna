@@ -72,6 +72,17 @@ class ProviderPalsu:
 class RepoPalsu:
     def __init__(self) -> None:
         self.disimpan: list[dict] = []
+        self.tertunda: list[dict] = []
+        self.hasil: list[dict] = []
+        self.sejak_diminta = None
+
+    async def perlu_dinilai(self, *, sejak):
+        self.sejak_diminta = sejak
+        return self.tertunda
+
+    async def simpan_hasil(self, hasil, keputusan):
+        self.hasil.append({"hasil": hasil, "keputusan": keputusan})
+        return len(self.hasil)
 
     async def simpan(
         self, sinyal, *, as_of, decided_at, symbol="XAU/USD", bukti=None
@@ -193,6 +204,82 @@ class TestKegagalanTarikBukanPenilaian:
         )
         assert hasil.menilai is False
         assert repo.disimpan == []
+
+
+class TestPenilaianTersambung:
+    """Penilai yang ditulis tapi tak pernah dipanggil = `xau_results` kosong
+    selamanya, dan Rencana 3 tidak punya bahan apa pun."""
+
+    async def test_sinyal_lama_dinilai_tiap_tick(self) -> None:
+        candles = _candles()
+        repo = RepoPalsu()
+        # Prediksi BUY dari 60 bar lalu: horizon 48 bar sudah tuntas.
+        repo.tertunda = [
+            {
+                "id": 7,
+                "keputusan": "BUY",
+                "as_of": candles[-60].open_time,
+                "entry": Decimal("1000"),
+                "stop": Decimal("900"),
+                "target": Decimal("1100"),
+                "atr": Decimal("5"),
+                "sentuhan_target": 4,
+            }
+        ]
+        await satu_tick(
+            ProviderPalsu(candles), _gate(), sekarang=SEKARANG, repo=repo
+        )
+        assert len(repo.hasil) == 1, "penilai tidak terpanggil dari loop"
+        assert repo.hasil[0]["keputusan"] == "BUY"
+
+    async def test_jalur_dimulai_SESUDAH_bar_keputusan(self) -> None:
+        """Memasukkan bar keputusannya sendiri berarti menilai sinyal dengan
+        harga yang sudah diketahui saat ia dibuat - look-ahead terbalik."""
+        candles = _candles()
+        repo = RepoPalsu()
+        repo.tertunda = [
+            {
+                "id": 7,
+                "keputusan": "BUY",
+                "as_of": candles[-60].open_time,
+                "entry": Decimal("1000"),
+                "stop": Decimal("900"),
+                "target": Decimal("1100"),
+                "atr": Decimal("5"),
+                "sentuhan_target": 4,
+            }
+        ]
+        await satu_tick(
+            ProviderPalsu(candles), _gate(), sekarang=SEKARANG, repo=repo
+        )
+        assert repo.sejak_diminta == candles[0].open_time
+
+    async def test_horizon_belum_tuntas_dilewati_bukan_dinilai(self) -> None:
+        """Dinilai sekarang = tiap sinyal yang masih berjalan dihitung gagal."""
+        candles = _candles()
+        repo = RepoPalsu()
+        repo.tertunda = [
+            {
+                "id": 8,
+                "keputusan": "BUY",
+                "as_of": candles[-10].open_time,  # baru 10 bar, horizon 48
+                "entry": Decimal("1000"),
+                "stop": Decimal("900"),
+                "target": Decimal("1100"),
+                "atr": Decimal("5"),
+                "sentuhan_target": 4,
+            }
+        ]
+        await satu_tick(
+            ProviderPalsu(candles), _gate(), sekarang=SEKARANG, repo=repo
+        )
+        assert repo.hasil == []
+
+    async def test_tanpa_repo_tidak_menilai_apa_apa(self) -> None:
+        hasil = await satu_tick(
+            ProviderPalsu(_candles()), _gate(), sekarang=SEKARANG
+        )
+        assert hasil.menilai is True
 
 
 class TestBuktiIkutTersimpan:
