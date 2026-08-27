@@ -40,7 +40,12 @@ from aruna.db.repositories.xau import VERSI_MODEL_XAU
 from aruna.xau.bukti import rakit_bukti
 from aruna.xau.cooldown import Cooldown
 from aruna.xau.geometri import Geometri
-from aruna.xau.kabar import nilai_kabar, susun_kabar
+from aruna.xau.kabar import (
+    nilai_kabar,
+    nilai_penutup,
+    susun_kabar,
+    susun_penutup,
+)
 from aruna.xau.kalender import ringkas as ringkas_berita
 from aruna.xau.kelayakan import periksa_kelayakan
 from aruna.xau.koreksi import (
@@ -52,7 +57,7 @@ from aruna.xau.koreksi import (
 from aruna.xau.keputusan import SinyalXau, putuskan_dari_dewan
 from aruna.xau.konteks import rakit_konteks
 from aruna.xau.notify import kirim_sinyal, susun_pesan
-from aruna.xau.resolve import HORIZON_BAR, nilai_hasil
+from aruna.xau.resolve import HORIZON_BAR, LevelTersentuh, nilai_hasil
 from aruna.xau.timeframes import TumpukanTimeframe, rakit_tumpukan
 
 log = get_logger(__name__)
@@ -118,7 +123,13 @@ def _snapshot_dari_bar(candles: list, quality: QualityGate) -> Snapshot:
     )
 
 
-async def nilai_yang_tertunda(repo: object, m5: list[Candle]) -> int:
+async def nilai_yang_tertunda(
+    repo: object,
+    m5: list[Candle],
+    *,
+    struktur: object | None = None,
+    sender: object | None = None,
+) -> int:
     """Nilai sinyal berarah yang horizonnya sudah lewat.  Kembalikan jumlahnya.
 
     Memakai ``m5`` yang sudah ditarik untuk keputusan tick ini - jendela 250
@@ -163,6 +174,45 @@ async def nilai_yang_tertunda(repo: object, m5: list[Candle]) -> int:
             level=hasil.level_tersentuh.value,
             gerak_pct=float(hasil.gerak_pct),
         )
+
+        # Horizon habis tanpa level tersentuh adalah titik keputusan, dan
+        # sebelumnya ia berakhir dalam DIAM - justru keadaan tempat kerugian
+        # paling sering dibiarkan tumbuh. Putusannya selalu dikirim: tahan
+        # atau tutup, tidak pernah kosong.
+        if hasil.level_tersentuh is LevelTersentuh.TIDAK_SATU_PUN and struktur:
+            penutup = nilai_penutup(
+                arah=arah,
+                target=geo.target,
+                atr=geo.atr,
+                struktur=struktur,
+                arah_benar=hasil.arah_benar,
+                gerak_pct=hasil.gerak_pct,
+            )
+            terkirim = False
+            if sender is not None:
+                terkirim = await kirim_sinyal(
+                    sender,
+                    susun_penutup(
+                        penutup,
+                        arah=arah,
+                        entry=geo.entry,
+                        harga_tutup=hasil.harga_tutup,
+                        target=geo.target,
+                    ),
+                )
+            await repo.simpan_penutup(
+                baris["id"],
+                baris["keputusan"],
+                penutup,
+                harga=hasil.harga_tutup,
+                terkirim=terkirim,
+            )
+            log.info(
+                "xau.penutup",
+                prediction_id=baris["id"],
+                tahan=penutup.tahan,
+                alasan=penutup.alasan,
+            )
 
     if dinilai:
         await koreksi_kalau_saatnya(repo, sebelum + dinilai)
@@ -419,7 +469,12 @@ async def satu_tick(
     # tangan - nol panggilan API tambahan. Jendela 250 bar M5 adalah ~20 jam,
     # jadi horizon 4 jam milik prediksi mana pun di dalamnya sudah lengkap.
     if repo is not None:
-        await nilai_yang_tertunda(repo, m5)
+        # Struktur segar dioper ke keduanya: penilaian horizon dan kabar
+        # sama-sama bertanya "apakah alasannya masih ada", dan alasan yang
+        # dibaca dari catatan lama akan selalu menjawab ya.
+        segar = rakit_bukti(tumpukan)
+        struktur = segar.m5.structure if segar is not None else None
+        await nilai_yang_tertunda(repo, m5, struktur=struktur, sender=sender)
         await kabari_yang_berjalan(repo, m5, tumpukan, sender=sender)
 
     konteks = rakit_konteks(bukti, _snapshot_dari_bar(m5, gate))

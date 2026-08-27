@@ -162,3 +162,103 @@ class TestPenolakan:
     def test_no_signal_tidak_punya_kabar(self) -> None:
         with pytest.raises(ValueError, match="berarah"):
             _nilai(arah=Decision.NO_SIGNAL)
+
+
+class TestPenutupHorizon:
+    """Horizon habis tanpa level tersentuh adalah TITIK KEPUTUSAN.
+
+    Sebelumnya ia berakhir dalam diam - justru keadaan tempat kerugian paling
+    sering dibiarkan tumbuh: bukan saat stop tersentuh (itu jelas), melainkan
+    saat tidak ada yang terjadi dan tidak ada yang mengatakan apa-apa.
+    """
+
+    def _penutup(self, **kw):
+        from aruna.xau.kabar import nilai_penutup
+
+        bawaan = dict(
+            arah=Decision.BUY,
+            target=Decimal("1030"),
+            atr=Decimal("5"),
+            struktur=_struktur(1030.0),
+            arah_benar=True,
+            gerak_pct=Decimal("0.35"),
+        )
+        return nilai_penutup(**{**bawaan, **kw})
+
+    def test_selalu_ada_putusan(self) -> None:
+        """Tidak pernah kosong: tahan atau tutup."""
+        assert self._penutup().tahan in (True, False)
+
+    def test_arah_benar_dan_level_ada_maka_tahan(self) -> None:
+        p = self._penutup()
+        assert p.tahan is True
+        assert "hidup" in p.alasan
+
+    def test_arah_meleset_maka_tutup(self) -> None:
+        """Bertahan pada bacaan yang terbukti meleset adalah menahan kerugian
+        demi terlihat konsisten."""
+        p = self._penutup(arah_benar=False, gerak_pct=Decimal("-0.42"))
+        assert p.tahan is False
+        assert "melawan" in p.alasan
+
+    def test_level_hilang_maka_tutup_walau_arah_benar(self) -> None:
+        """Gagasannya bukan lambat - ia sudah tidak ada."""
+        p = self._penutup(struktur=_struktur(1200.0), arah_benar=True)
+        assert p.tahan is False
+        assert "sudah tidak ada" in p.alasan
+
+    def test_level_diperiksa_sebelum_arah(self) -> None:
+        p = self._penutup(struktur=_struktur(1200.0), arah_benar=False)
+        assert p.level_masih_ada is False
+        assert "tidak terbaca" in p.alasan
+
+    def test_arah_tak_terukur_maka_tutup(self) -> None:
+        """Tidak ada dasar untuk menahan bukan alasan untuk menahan."""
+        assert self._penutup(arah_benar=None).tahan is False
+
+    def test_no_signal_ditolak(self) -> None:
+        with pytest.raises(ValueError, match="berarah"):
+            self._penutup(arah=Decision.NO_SIGNAL)
+
+
+class TestPesanPenutup:
+    def _pesan(self, **kw) -> str:
+        from aruna.xau.kabar import nilai_penutup, susun_penutup
+
+        bawaan = dict(
+            arah=Decision.BUY,
+            target=Decimal("1030"),
+            atr=Decimal("5"),
+            struktur=_struktur(1030.0),
+            arah_benar=True,
+            gerak_pct=Decimal("0.35"),
+        )
+        p = nilai_penutup(**{**bawaan, **kw})
+        return susun_penutup(
+            p,
+            arah=bawaan["arah"],
+            entry=Decimal("1000"),
+            harga_tutup=Decimal("1003.50"),
+            target=Decimal("1030"),
+        )
+
+    def test_menyuruh_tahan_dengan_jelas(self) -> None:
+        assert "TAHAN DULU" in self._pesan()
+
+    def test_menyuruh_tutup_dengan_jelas(self) -> None:
+        assert "SEBAIKNYA DITUTUP" in self._pesan(arah_benar=False)
+
+    def test_mengakui_salah_saat_arah_meleset(self) -> None:
+        assert "salah membaca arahnya" in self._pesan(arah_benar=False)
+
+    def test_menyatakan_target_tidak_tersentuh(self) -> None:
+        assert "tidak tersentuh" in self._pesan()
+
+    def test_tetap_menyatakan_analis_saja(self) -> None:
+        pesan = self._pesan().lower()
+        assert "keputusan tetap di anda" in pesan
+        assert "tidak" in pesan and "order" in pesan
+
+    def test_membawa_angka_geraknya(self) -> None:
+        """Putusan tanpa angkanya tidak bisa dibantah."""
+        assert "+0.35%" in self._pesan()

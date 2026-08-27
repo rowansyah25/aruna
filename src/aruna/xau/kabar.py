@@ -55,6 +55,8 @@ class Keadaan(StrEnum):
     #: Alasan yang melahirkan sinyal ini sudah tidak ada.
     TESIS_BATAL = "TESIS_BATAL"
     HAMPIR_HABIS = "HAMPIR_HABIS"
+    #: Horizon empat jam lewat tanpa target maupun stop tersentuh.
+    HORIZON_HABIS = "HORIZON_HABIS"
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,12 +203,141 @@ def susun_kabar(kabar: Kabar, *, arah: Decision, as_of: str) -> str:
     return "\n".join(baris)
 
 
+@dataclass(frozen=True, slots=True)
+class Penutup:
+    """Putusan saat horizon habis tanpa target maupun stop tersentuh.
+
+    Dua pilihan, dan keduanya harus punya dasar yang bisa dibantah - bukan
+    selera.  Diamkan operator di titik ini dan ia memegang sesuatu tanpa
+    keterangan apa pun, yang justru keadaan tempat kerugian paling sering
+    dibiarkan tumbuh.
+    """
+
+    tahan: bool
+    alasan: str
+    arah_benar: bool | None
+    gerak_pct: Decimal
+    level_masih_ada: bool
+
+
+def nilai_penutup(
+    *,
+    arah: Decision,
+    target: Decimal,
+    atr: Decimal,
+    struktur: StructureReport,
+    arah_benar: bool | None,
+    gerak_pct: Decimal,
+) -> Penutup:
+    """Tahan atau tutup, saat horizon habis tanpa level tersentuh.
+
+    Aturannya dua pertanyaan, dan urutannya menentukan:
+
+    1. **Apakah alasannya masih ada?**  Level yang melahirkan sinyal ini.
+       Kalau hilang, gagasannya tidak "lambat" - ia sudah tidak ada, dan
+       menahannya berarti menunggu sesuatu yang tak lagi diramalkan siapa pun.
+    2. **Apakah arahnya benar?**  Harga bergerak ke arah yang dipanggil, cuma
+       belum sejauh targetnya.  Itu gagasan yang hidup dan lambat - berbeda
+       dari gagasan yang salah.
+
+    Arah yang salah menutup, apa pun levelnya: bertahan pada bacaan yang sudah
+    terbukti meleset adalah menahan kerugian demi terlihat konsisten.
+    """
+    if not arah.is_directional:
+        raise ValueError(f"hanya sinyal berarah yang punya penutup, bukan {arah.value}")
+
+    naik = arah is Decision.BUY
+    masih = _level_masih_ada(struktur, target, atr, naik)
+
+    if not masih:
+        return Penutup(
+            tahan=False,
+            alasan=(
+                f"level {target:,.2f} yang jadi alasannya sudah tidak terbaca; "
+                "gagasannya bukan lambat, ia sudah tidak ada"
+            ),
+            arah_benar=arah_benar,
+            gerak_pct=gerak_pct,
+            level_masih_ada=False,
+        )
+
+    if arah_benar is False:
+        return Penutup(
+            tahan=False,
+            alasan=(
+                f"harga bergerak {gerak_pct:+.2f}% - melawan panggilan, "
+                "jadi bacaannya meleset"
+            ),
+            arah_benar=arah_benar,
+            gerak_pct=gerak_pct,
+            level_masih_ada=True,
+        )
+
+    if arah_benar is None:
+        return Penutup(
+            tahan=False,
+            alasan="arah tidak terukur, jadi tidak ada dasar untuk menahan",
+            arah_benar=None,
+            gerak_pct=gerak_pct,
+            level_masih_ada=True,
+        )
+
+    return Penutup(
+        tahan=True,
+        alasan=(
+            f"harga bergerak {gerak_pct:+.2f}% searah panggilan dan levelnya "
+            "masih terbaca - gagasannya hidup, cuma lebih lambat dari empat jam"
+        ),
+        arah_benar=True,
+        gerak_pct=gerak_pct,
+        level_masih_ada=True,
+    )
+
+
+def susun_penutup(
+    penutup: Penutup,
+    *,
+    arah: Decision,
+    entry: Decimal,
+    harga_tutup: Decimal,
+    target: Decimal,
+) -> str:
+    """Pesan saat horizon habis.  Selalu berisi putusan, tidak pernah diam."""
+    putusan = "TAHAN DULU" if penutup.tahan else "SEBAIKNYA DITUTUP"
+    baris = [
+        "XAU/USD — horizon 4 jam habis, target tidak tercapai",
+        "",
+        f"sinyal   {arah.value}",
+        f"entry    {entry:,.2f}",
+        f"sekarang {harga_tutup:,.2f}  ({penutup.gerak_pct:+.2f}%)",
+        f"target   {target:,.2f}  — tidak tersentuh",
+        f"arah     {'benar' if penutup.arah_benar else 'meleset'}"
+        if penutup.arah_benar is not None
+        else "arah     tidak terukur",
+        f"level    {'masih terbaca' if penutup.level_masih_ada else 'sudah hilang'}",
+        "",
+        f"→ {putusan}",
+        f"  {penutup.alasan}",
+    ]
+    if not penutup.tahan and penutup.arah_benar is False:
+        baris.append("  Saya salah membaca arahnya.")
+    baris += [
+        "",
+        "Keputusan tetap di Anda. ARUNA menganalisa saja dan tidak",
+        "menempatkan order apa pun.",
+    ]
+    return "\n".join(baris)
+
+
 __all__ = [
     "AMBANG_DEKAT_ATR",
     "SISA_HAMPIR_HABIS",
     "TOLERANSI_LEVEL_ATR",
     "Kabar",
     "Keadaan",
+    "Penutup",
     "nilai_kabar",
+    "nilai_penutup",
     "susun_kabar",
+    "susun_penutup",
 ]

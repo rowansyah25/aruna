@@ -306,6 +306,37 @@ class XauRepository:
             terkirim,
         )
 
+    async def simpan_penutup(
+        self,
+        prediction_id: int,
+        keputusan: str,
+        penutup: Any,
+        *,
+        harga: Any,
+        terkirim: bool,
+    ) -> int:
+        """Catat putusan saat horizon habis: tahan atau tutup.
+
+        ``tahan`` disimpan sebagai kolomnya sendiri, bukan dikubur di teks
+        alasan: pertanyaan "berapa kali ARUNA menyuruh menahan, dan berapa di
+        antaranya benar" harus bisa dijawab SQL.
+        """
+        return await self._db.insert(
+            """
+            INSERT INTO xau_kabar
+                (prediction_id, keputusan, keadaan, alasan, harga, sisa_bar,
+                 disarankan_tutup, tahan, terkirim)
+            VALUES (%s, %s, 'HORIZON_HABIS', %s, %s, 0, %s, %s, %s)
+            """,
+            prediction_id,
+            keputusan,
+            penutup.alasan[:255],
+            _desimal(harga, SKALA_HARGA),
+            not penutup.tahan,
+            penutup.tahan,
+            terkirim,
+        )
+
     async def baris_keandalan(self) -> list[dict[str, Any]]:
         """Suara berarah yang sudah punya hasil, siap untuk ``build_reliability``.
 

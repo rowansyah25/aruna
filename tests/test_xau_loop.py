@@ -79,6 +79,7 @@ class RepoPalsu:
         self.baris: list[dict] = []
         self.berjalan: list[dict] = []
         self.kabar: list[dict] = []
+        self.penutup: list[dict] = []
 
     async def perlu_dinilai(self, *, sejak):
         self.sejak_diminta = sejak
@@ -95,6 +96,15 @@ class RepoPalsu:
 
     async def sinyal_berjalan(self, *, sejak):
         return self.berjalan
+
+    async def simpan_penutup(
+        self, prediction_id, keputusan, penutup, *, harga, terkirim
+    ):
+        self.penutup.append(
+            {"prediction_id": prediction_id, "tahan": penutup.tahan,
+             "alasan": penutup.alasan, "terkirim": terkirim}
+        )
+        return len(self.penutup)
 
     async def simpan_kabar(self, prediction_id, keputusan, kabar, *, terkirim):
         self.kabar.append(
@@ -289,6 +299,31 @@ class TestPenilaianTersambung:
             ProviderPalsu(candles), _gate(), sekarang=SEKARANG, repo=repo
         )
         assert repo.sejak_diminta == candles[0].open_time
+
+    async def test_horizon_habis_mengirim_putusan_tahan_atau_tutup(self) -> None:
+        """Lubang yang ditutup: horizon habis tanpa level tersentuh dulunya
+        berakhir DIAM, tepat di titik operator butuh keputusan."""
+        candles = _candles()
+        repo = RepoPalsu()
+        repo.tertunda = [
+            {
+                "id": 9,
+                "keputusan": "BUY",
+                "as_of": candles[-60].open_time,
+                "entry": Decimal("1000"),
+                "stop": Decimal("900"),
+                "target": Decimal("1100"),
+                "atr": Decimal("5"),
+                "sentuhan_target": 4,
+            }
+        ]
+        await satu_tick(
+            ProviderPalsu(candles), _gate(), sekarang=SEKARANG, repo=repo
+        )
+        assert len(repo.hasil) == 1
+        assert len(repo.penutup) == 1, "horizon habis tanpa putusan = operator dibiarkan"
+        assert repo.penutup[0]["tahan"] in (True, False)
+        assert repo.penutup[0]["alasan"]
 
     async def test_horizon_belum_tuntas_dilewati_bukan_dinilai(self) -> None:
         """Dinilai sekarang = tiap sinyal yang masih berjalan dihitung gagal."""
