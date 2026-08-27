@@ -82,6 +82,7 @@ class XauRepository:
         symbol: str = "XAU/USD",
         bukti: BacaanBukti | None = None,
         regime: Any = None,
+        dolar: Any = None,
     ) -> int:
         """Tulis satu keputusan beserta suara dan buktinya.  Kembalikan id-nya."""
         geo = sinyal.geometri
@@ -95,9 +96,11 @@ class XauRepository:
                  confidence, setuju, menentang, netral, kontradiksi,
                  entry, stop, target, atr, rr, target_atr, sentuhan_target,
                  spread_bps, spread_diukur, model_version,
-                 regime, regime_confidence, bukti_dipakai, bukti_tersedia)
+                 regime, regime_confidence, bukti_dipakai, bukti_tersedia,
+                 proksi_simbol, proksi_korelasi, proksi_sampel, proksi_gerak_pct)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    %s, %s, %s, %s)
             """,
             symbol,
             sinyal.setup_id,
@@ -130,6 +133,16 @@ class XauRepository:
             _desimal(regime.confidence) if regime is not None else None,
             regime.evidence_used if regime is not None else None,
             regime.evidence_available if regime is not None else None,
+            # Proksi dolar: DIREKAM, tidak ada gerbang yang membacanya. Spec
+            # melarang "DXY naik = pasti SELL", dan r terukur 0,35 menunjukkan
+            # kenapa. Simbolnya ikut supaya tak pernah ada keraguan tentang apa
+            # yang diukur - ia EUR/USD, bukan DXY.
+            dolar.simbol if dolar is not None else None,
+            _desimal(dolar.korelasi) if dolar is not None else None,
+            dolar.sampel if dolar is not None else None,
+            _desimal(dolar.gerak_pct, Decimal("0.000001"))
+            if dolar is not None
+            else None,
         )
 
         if rekap is not None:

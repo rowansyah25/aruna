@@ -1699,7 +1699,8 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
     from aruna.data.registry import build_provider
     from aruna.db.repositories.xau import XauRepository
     from aruna.xau.cooldown import Cooldown
-    from aruna.xau.loop import SIMBOL, satu_tick
+    from aruna.xau.dolar import hitung_bukti_dolar, tarik_proksi
+    from aruna.xau.loop import BAR_DIBUTUHKAN, SIMBOL, satu_tick
 
     app = ArunaApplication(settings)
     try:
@@ -1733,6 +1734,12 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
 
     await provider.open()
     dinilai = tersimpan = dilewati = 0
+    # Proksi dolar ditarik per JAM, bukan tiap bar. Korelasi 250-bar adalah
+    # statistik dua puluh jam; menariknya tiap lima menit menghabiskan 288
+    # kredit sehari untuk angka yang hampir tidak berubah. Per jam: 24.
+    tick_per_tarikan_proksi = max(1, 3600 // max(args.interval, 1))
+    tick_ke = 0
+    dolar = None
     # Bar terakhir yang sudah dinilai. Tanpa ini, dua tick dalam satu jendela
     # 300 detik menulis dua baris untuk bar yang sama dan melanggar kunci
     # uniknya - dan galat itu mematikan loop yang lalu dinyalakan ulang.
@@ -1750,6 +1757,19 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
         print(f"  bar terakhir yang sudah dinilai: {as_of_terakhir.isoformat()}")
     try:
         while now_utc() < berhenti:
+            if tick_ke % tick_per_tarikan_proksi == 0:
+                proksi = await tarik_proksi(provider, limit=BAR_DIBUTUHKAN)
+                if proksi:
+                    xau_bar = await provider.fetch_candles(
+                        SIMBOL, Horizon.M5, limit=BAR_DIBUTUHKAN
+                    )
+                    dolar = hitung_bukti_dolar(xau_bar, proksi)
+                    print(
+                        f"  proksi dolar {dolar.simbol}: r={dolar.korelasi} "
+                        f"atas {dolar.sampel} return"
+                    )
+            tick_ke += 1
+
             hasil = await satu_tick(
                 provider,
                 gate,
@@ -1757,6 +1777,7 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
                 repo=repo,
                 cooldown=cooldown,
                 as_of_terakhir=as_of_terakhir,
+                dolar=dolar,
             )
             if hasil.menilai:
                 dinilai += 1

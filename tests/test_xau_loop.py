@@ -85,8 +85,10 @@ class RepoPalsu:
         return len(self.hasil)
 
     async def simpan(
-        self, sinyal, *, as_of, decided_at, symbol="XAU/USD", bukti=None, regime=None
+        self, sinyal, *, as_of, decided_at, symbol="XAU/USD", bukti=None,
+        regime=None, dolar=None,
     ):
+        self.dolar_terakhir = dolar
         self.disimpan.append(
             {
                 "sinyal": sinyal,

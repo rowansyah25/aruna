@@ -165,6 +165,7 @@ async def satu_tick(
     engine: DeliberationEngine | None = None,
     symbol: str = SIMBOL,
     as_of_terakhir: datetime | None = None,
+    dolar: object | None = None,
 ) -> HasilTick:
     """Satu siklus keputusan.  Berhenti di penolakan pertama, tapi menyimpannya.
 
@@ -214,6 +215,10 @@ async def satu_tick(
                 # (diukur atas 17 hari), dan tanpa kolom ini angka itu tak
                 # pernah bisa disandingkan dengan hasil keputusannya.
                 regime=regime,
+                # Proksi dolar, kalau pemanggil menyediakannya. `None` di sini
+                # berarti belum ditarik pada siklus ini - proksi ditarik per
+                # jam, bukan tiap bar, karena korelasi 250-bar bergerak lambat.
+                dolar=dolar,
                 # Bukti ikut disimpan supaya keputusan bisa DIPUTAR ULANG.
                 # Sebuah prediksi yang salah tanpa buktinya cuma memberi tahu
                 # bahwa ia salah; dengan buktinya, ia memberi tahu kenapa.
