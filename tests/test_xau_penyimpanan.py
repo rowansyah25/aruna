@@ -31,7 +31,7 @@ from aruna.xau.geometri import Geometri
 from aruna.xau.keputusan import SinyalXau
 from aruna.xau.suara import RekapSuara, Suara, SuaraAgen
 
-MIGRASI = Path(__file__).resolve().parent.parent / "migrations" / "0045_xau_sinyal.sql"
+MIGRASI = Path(__file__).resolve().parent.parent / "migrations" / "0046_xau_sinyal.sql"
 SAAT = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
 
 

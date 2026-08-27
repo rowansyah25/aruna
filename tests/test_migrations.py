@@ -120,6 +120,30 @@ class TestDiscovery:
         with pytest.raises(MigrationError, match="malformed"):
             discover_migrations(tmp_path)
 
+    def test_the_real_directory_has_no_duplicate_versions(self) -> None:
+        """The guard below runs on a tmp_path; this one runs on what ships.
+
+        Found the hard way on 2026-08-27: two sessions each added an ``0044``,
+        one of them straight onto the VPS. ``discover_migrations`` raises for
+        it - so the deploy would not have gone quiet, it would have refused to
+        start ARUNA at all, with a migration already applied under that number
+        and no way forward but a rename. Catching it here costs one test;
+        catching it there costs a service.
+        """
+        versi = [m.version for m in discover_migrations()]
+        ganda = {v for v in versi if versi.count(v) > 1}
+        assert not ganda, f"nomor migrasi dipakai lebih dari sekali: {sorted(ganda)}"
+
+    def test_versions_have_no_gaps(self) -> None:
+        """A gap means a migration exists on some database and in no file.
+
+        That database can never be rebuilt from this repository, and nothing
+        says so out loud until someone tries.
+        """
+        versi = sorted(int(m.version) for m in discover_migrations())
+        hilang = set(range(versi[0], versi[-1] + 1)) - set(versi)
+        assert not hilang, f"nomor migrasi yang hilang: {sorted(hilang)}"
+
     def test_duplicate_versions_are_rejected(self, tmp_path: Path) -> None:
         (tmp_path / "0001_first.sql").write_text("SELECT 1;", encoding="utf-8")
         (tmp_path / "0001_second.sql").write_text("SELECT 2;", encoding="utf-8")
