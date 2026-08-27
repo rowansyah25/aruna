@@ -67,12 +67,16 @@ class SinyalXau:
 
 
 def setup_id_untuk(symbol: str, arah: Decision, target: Decimal) -> str:
-    """Penanda satu gagasan: simbol, arah, dan level yang dituju.
+    """Penanda satu gagasan, untuk DIBACA - bukan untuk dibandingkan.
 
-    Sengaja TIDAK memuat waktu.  Setup yang sama pada dua bar berturut-turut
-    harus punya penanda yang sama, karena itulah yang membuat cooldown bisa
-    menahannya - penanda yang memuat waktu akan berbeda tiap bar dan tidak
-    pernah menahan apa pun.
+    Sengaja TIDAK memuat waktu, supaya baris yang tersimpan bisa dikelompokkan
+    per gagasan saat dibaca kembali.
+
+    **Cooldown TIDAK memakai penanda ini.**  Membandingkan teks selalu punya
+    cacat batas: dua target berdekatan bisa menghasilkan penanda berbeda -
+    yang persis merugikan operator 2026-08-28 - dan membulatkannya ke ember
+    hanya memindahkan batasnya, tidak menghapusnya.  Yang membandingkan JARAK
+    adalah :class:`~aruna.xau.cooldown.Cooldown`.
     """
     return f"{symbol}:{arah.value}:{target:.2f}"
 
@@ -130,12 +134,18 @@ def putuskan(
     if geometri.rr < MIN_RR:
         return tolak(f"RR {geometri.rr:.2f} di bawah {MIN_RR}")
 
-    if cooldown is not None and cooldown.tertahan(setup, saat):
-        sisa = cooldown.sisa(setup, saat)
+    # Dibandingkan berdasarkan JARAK target, bukan kecocokan penanda: level
+    # struktur bergeser sepersekian poin tiap bar, dan penanda yang berbeda
+    # karena itu membuat satu gagasan lolos berkali-kali. Lihat
+    # `aruna.xau.cooldown`.
+    if cooldown is not None and cooldown.tertahan(
+        arah.value, geometri.target, saat, geometri.atr
+    ):
+        sisa = cooldown.sisa(arah.value, geometri.target, saat, geometri.atr)
         return tolak(f"setup ini baru dikabarkan; jeda tersisa {sisa}")
 
     if cooldown is not None:
-        cooldown.catat(setup, saat)
+        cooldown.catat(arah.value, geometri.target, saat)
     return SinyalXau(keputusan=arah, alasan=None, **umum)
 
 

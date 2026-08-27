@@ -133,10 +133,38 @@ def nilai_hasil(
         raise ValueError(
             f"hanya sinyal berarah yang punya hasil, bukan {arah.value}"
         )
-    if len(jalur) < horizon_bar:
-        return None
 
     dipakai = jalur[:horizon_bar]
+    tersentuh = _level_tersentuh(dipakai, geo, arah is Decision.BUY)
+
+    # **Level yang tersentuh mengakhiri gagasannya SEKARANG, bukan saat horizon
+    # habis.**  Diukur dari kerugian nyata operator 2026-08-28: tiga sinyal kena
+    # stop pukul 19:05 dan resolver menunggu sampai 22:10 - tiga jam sebuah
+    # hasil yang sudah pasti menggantung tanpa dicatat, tanpa result terkirim,
+    # dan tak terlihat oleh koreksi diri.  Menunggu tidak mengubah apa pun yang
+    # sudah terjadi; ia hanya menunda operator mengetahuinya.
+    #
+    # `arah_benar` tetap `None` di sini, dan itu bukan kelalaian: ia bertanya ke
+    # mana harga pergi pada TUTUP HORIZON, dan horizon itu belum tutup.
+    # Mengisinya dari harga saat stop tersentuh akan menjawab pertanyaan yang
+    # berbeda dengan nama pertanyaan yang sama.  `lengkapi_arah` mengisinya
+    # belakangan.
+    # Horizon yang SUDAH lengkap selalu lewat jalur biasa di bawah - di sana
+    # `arah_benar` bisa diukur pada tutup horizon, dan itu jawaban yang lebih
+    # lengkap. Jalur dini hanya untuk yang belum tuntas.
+    if len(jalur) < horizon_bar:
+        if tersentuh is LevelTersentuh.TIDAK_SATU_PUN:
+            return None
+        penutup_dini = dipakai[-1].close
+        return HasilXau(
+            prediction_id=prediction_id,
+            arah_benar=None,
+            level_tersentuh=tersentuh,
+            harga_tutup=penutup_dini,
+            gerak_pct=(penutup_dini - geo.entry) / geo.entry * 100,
+            bar_dipakai=len(dipakai),
+            horizon_bar=horizon_bar,
+        )
     naik = arah is Decision.BUY
     penutup = dipakai[-1].close
 
@@ -144,7 +172,7 @@ def nilai_hasil(
         prediction_id=prediction_id,
         # Diukur pada tutup horizon, bukan pada level yang tersentuh.
         arah_benar=(penutup > geo.entry) if naik else (penutup < geo.entry),
-        level_tersentuh=_level_tersentuh(dipakai, geo, naik),
+        level_tersentuh=tersentuh,
         harga_tutup=penutup,
         gerak_pct=(penutup - geo.entry) / geo.entry * 100,
         bar_dipakai=len(dipakai),

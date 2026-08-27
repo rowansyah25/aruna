@@ -210,6 +210,83 @@ class TestCooldown:
         assert menyusul.keputusan is Decision.BUY
 
 
+class TestSetupIdMenahanGagasanYangSama:
+    """Cacat yang merugikan operator sungguhan, 2026-08-28.
+
+    Tiga SELL terbit dalam 45 menit untuk gagasan yang SAMA - target 4595,80
+    lalu 4597,11 lalu 4597,51 - dan ketiganya kena stop. Penandanya berbeda
+    cuma karena level struktur bergeser sepersekian poin tiap bar, jadi
+    cooldown melihat tiga gagasan dan menahan nol.
+    """
+
+    def test_ketiga_target_asli_dianggap_satu_gagasan(self) -> None:
+        """Angka aslinya dari kerugian 2026-08-28, bukan karangan."""
+        cd = Cooldown()
+        atr = Decimal("4")
+        cd.catat("SELL", Decimal("4595.80"), SAAT)
+        for target in (Decimal("4597.11"), Decimal("4597.51")):
+            assert cd.tertahan("SELL", target, SAAT + timedelta(minutes=40), atr), (
+                f"target {target} dianggap gagasan baru; cooldown menahan nol"
+            )
+
+    def test_batas_ember_tidak_lagi_meloloskan(self) -> None:
+        """Membulatkan ke ember memindahkan batasnya, tidak menghapusnya.
+
+        4597,11 dan 4597,51 jatuh di sisi berlawanan garis pembagi saat
+        dibulatkan - dan itu sebabnya cooldown membandingkan JARAK.
+        """
+        cd = Cooldown()
+        cd.catat("SELL", Decimal("4597.11"), SAAT)
+        assert cd.tertahan(
+            "SELL", Decimal("4597.51"), SAAT + timedelta(minutes=5), Decimal("4")
+        )
+
+    def test_gagasan_yang_benar_benar_jauh_tidak_tertahan(self) -> None:
+        """Penjaganya tidak boleh melebar sampai gagasan berbeda ikut tertelan."""
+        cd = Cooldown()
+        cd.catat("SELL", Decimal("4595"), SAAT)
+        assert not cd.tertahan(
+            "SELL", Decimal("4560"), SAAT + timedelta(minutes=5), Decimal("4")
+        )
+
+    def test_arah_berlawanan_tidak_tertahan(self) -> None:
+        cd = Cooldown()
+        cd.catat("SELL", Decimal("4595"), SAAT)
+        assert not cd.tertahan(
+            "BUY", Decimal("4595"), SAAT + timedelta(minutes=5), Decimal("4")
+        )
+
+    def test_cooldown_menahan_sinyal_kedua_yang_levelnya_bergeser(self) -> None:
+        """Ujung ke ujung: inilah yang seharusnya terjadi kemarin."""
+        cd = Cooldown()
+        pertama = _putuskan(
+            arah=Decision.SELL,
+            cooldown=cd,
+            geometri=_geometri(
+                entry="4605.22", stop="4611.21", target="4595.80", atr="4.0"
+            ),
+        )
+        kedua = _putuskan(
+            arah=Decision.SELL,
+            cooldown=cd,
+            saat=SAAT + timedelta(minutes=40),
+            geometri=_geometri(
+                entry="4606.70", stop="4612.02", target="4597.11", atr="4.0"
+            ),
+        )
+        assert pertama.keputusan is Decision.SELL
+        assert kedua.keputusan is Decision.NO_SIGNAL
+        assert "baru dikabarkan" in kedua.alasan
+
+    def test_tanpa_atr_hanya_target_identik_yang_tertahan(self) -> None:
+        """ATR nol tidak boleh membuat seluruh level dianggap satu gagasan."""
+        cd = Cooldown()
+        cd.catat("SELL", Decimal("4595.80"), SAAT)
+        saat = SAAT + timedelta(minutes=5)
+        assert cd.tertahan("SELL", Decimal("4595.80"), saat, None)
+        assert not cd.tertahan("SELL", Decimal("4560.00"), saat, None)
+
+
 class TestSetupId:
     def test_tidak_memuat_waktu(self) -> None:
         """Penanda yang memuat waktu akan berbeda tiap bar dan tak pernah menahan."""

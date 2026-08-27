@@ -147,12 +147,54 @@ class TestSell:
         assert hasil.arah_benar is False
 
 
+class TestStopMengakhiriSekarang:
+    """Level yang tersentuh mengakhiri gagasannya SEKARANG.
+
+    Diukur dari kerugian nyata operator 2026-08-28: tiga sinyal kena stop
+    pukul 19:05 dan resolver menunggu sampai 22:10 - tiga jam sebuah hasil
+    yang sudah pasti menggantung tanpa dicatat, tanpa result terkirim, dan tak
+    terlihat oleh koreksi diri. Menunggu tidak mengubah apa pun yang sudah
+    terjadi; ia hanya menunda operator mengetahuinya.
+    """
+
+    def test_stop_tersentuh_dinilai_sebelum_horizon_habis(self) -> None:
+        jalur = _datar(10)
+        jalur[3] = _bar(3, high="1001", low="985", close="988")
+        hasil = nilai_hasil(1, GEO, Decision.BUY, jalur)
+        assert hasil is not None
+        assert hasil.level_tersentuh is LevelTersentuh.STOP
+        assert hasil.bar_dipakai == 10
+
+    def test_target_tersentuh_dinilai_sebelum_horizon_habis(self) -> None:
+        jalur = _datar(10)
+        jalur[4] = _bar(4, high="1035", low="1000", close="1032")
+        hasil = nilai_hasil(1, GEO, Decision.BUY, jalur)
+        assert hasil is not None
+        assert hasil.level_tersentuh is LevelTersentuh.TARGET
+
+    def test_arah_benar_TIDAK_diisi_saat_dini(self) -> None:
+        """Ia bertanya ke mana harga pergi pada TUTUP HORIZON, dan horizon itu
+        belum tutup. Mengisinya dari harga saat stop tersentuh menjawab
+        pertanyaan yang berbeda dengan nama pertanyaan yang sama."""
+        jalur = _datar(10)
+        jalur[3] = _bar(3, high="1001", low="985", close="988")
+        assert nilai_hasil(1, GEO, Decision.BUY, jalur).arah_benar is None
+
+    def test_horizon_penuh_tetap_mengisi_arah(self) -> None:
+        jalur = _datar()
+        jalur[3] = _bar(3, high="1001", low="985", close="988")
+        jalur[-1] = _bar(HORIZON_BAR - 1, high="1020", low="1015", close="1020")
+        hasil = nilai_hasil(1, GEO, Decision.BUY, jalur)
+        assert hasil.level_tersentuh is LevelTersentuh.STOP
+        assert hasil.arah_benar is True
+
+
 class TestBelumTuntas:
     def test_jalur_kurang_dari_horizon_tidak_menghasilkan_apa_apa(self) -> None:
         """None = belum selesai. TIDAK_SATU_PUN = selesai tanpa menyentuh.
 
-        Menyamakannya akan menghitung tiap sinyal yang masih berjalan sebagai
-        sinyal yang gagal mencapai apa pun.
+        Berlaku HANYA saat belum ada level tersentuh - kalau stop sudah kena,
+        hasilnya sudah pasti dan menundanya cuma menunda operator tahu.
         """
         assert nilai_hasil(1, GEO, Decision.BUY, _datar(HORIZON_BAR - 1)) is None
 
