@@ -117,6 +117,36 @@ def _level_tersentuh(
     return LevelTersentuh.TIDAK_SATU_PUN
 
 
+def _harga_keluar(
+    tersentuh: LevelTersentuh, geo: Geometri, penutup: Decimal
+) -> Decimal:
+    """Harga tempat posisi SEBENARNYA ditutup.
+
+    **Level yang tersentuh adalah tempat keluar, bukan close bar.**  Kalau
+    stop atau target Anda terpasang sebagai order, ia terisi saat harga
+    menyentuhnya - bukan pada harga penutupan bar itu, yang bisa jauh
+    berbeda dan bukan angka yang pernah Anda transaksikan.
+
+    Ditemukan dari pertanyaan operator 2026-08-28 atas sebuah kemenangan yang
+    terlihat janggal: pesannya melaporkan ``tutup 4575,09`` padahal targetnya
+    4574,87 - close bar itu di ATAS target, dan terbaca seperti target yang
+    tak tercapai.  Cacat yang sama membuat tiga kekalahan sebelumnya tercatat
+    -1,65 / -1,58 / -1,82 R, padahal stop-out menurut definisinya adalah
+    -1,00 R.  Kerugiannya dilebih-lebihkan oleh angka yang tak pernah
+    diperdagangkan siapa pun.
+
+    Slippage TIDAK dimodelkan, dan itu dinyatakan alih-alih disembunyikan:
+    venue ini tidak menerbitkan bid/ask, jadi tidak ada dasar untuk
+    mengukurnya.  Yang dilaporkan adalah harga level - asumsi standar, dan
+    optimis pada gap.
+    """
+    if tersentuh is LevelTersentuh.TARGET:
+        return geo.target
+    if tersentuh is LevelTersentuh.STOP:
+        return geo.stop
+    return penutup
+
+
 def nilai_hasil(
     prediction_id: int,
     geo: Geometri,
@@ -155,26 +185,30 @@ def nilai_hasil(
     if len(jalur) < horizon_bar:
         if tersentuh is LevelTersentuh.TIDAK_SATU_PUN:
             return None
-        penutup_dini = dipakai[-1].close
+        keluar = _harga_keluar(tersentuh, geo, dipakai[-1].close)
         return HasilXau(
             prediction_id=prediction_id,
             arah_benar=None,
             level_tersentuh=tersentuh,
-            harga_tutup=penutup_dini,
-            gerak_pct=(penutup_dini - geo.entry) / geo.entry * 100,
+            harga_tutup=keluar,
+            gerak_pct=(keluar - geo.entry) / geo.entry * 100,
             bar_dipakai=len(dipakai),
             horizon_bar=horizon_bar,
         )
     naik = arah is Decision.BUY
     penutup = dipakai[-1].close
+    keluar = _harga_keluar(tersentuh, geo, penutup)
 
     return HasilXau(
         prediction_id=prediction_id,
-        # Diukur pada tutup horizon, bukan pada level yang tersentuh.
+        # Diukur pada tutup horizon dari harga PENUTUP - bukan dari harga
+        # keluar. Keduanya menjawab pertanyaan berbeda: yang ini bertanya ke
+        # mana pasar akhirnya pergi, dan jawabannya tidak berubah karena
+        # posisinya sudah ditutup lebih dulu.
         arah_benar=(penutup > geo.entry) if naik else (penutup < geo.entry),
         level_tersentuh=tersentuh,
-        harga_tutup=penutup,
-        gerak_pct=(penutup - geo.entry) / geo.entry * 100,
+        harga_tutup=keluar,
+        gerak_pct=(keluar - geo.entry) / geo.entry * 100,
         bar_dipakai=len(dipakai),
         horizon_bar=horizon_bar,
     )

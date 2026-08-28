@@ -11,7 +11,12 @@ import pytest
 from aruna.core.enums import Decision, Horizon, Market
 from aruna.data.models import Candle, Provenance
 from aruna.xau.geometri import Geometri
-from aruna.xau.resolve import HORIZON_BAR, LevelTersentuh, nilai_hasil
+from aruna.xau.resolve import (
+    HORIZON_BAR,
+    LevelTersentuh,
+    nilai_hasil,
+    r_multiple,
+)
 
 AWAL = datetime(2026, 8, 31, 12, 0, tzinfo=UTC)
 PROV = Provenance(source="twelvedata")
@@ -248,3 +253,75 @@ class TestHorizonTersimpan:
         hasil = nilai_hasil(1, GEO, Decision.BUY, _datar(30), horizon_bar=24)
         assert hasil.horizon_bar == 24
         assert hasil.bar_dipakai == 24
+
+
+class TestKeluarDiLevel:
+    """Harga tutup adalah level yang tersentuh, bukan close bar sesudahnya.
+
+    Ditemukan dari pertanyaan operator atas sebuah kemenangan yang tampak
+    janggal: pesannya melaporkan tutup di ATAS target pada sinyal SELL.
+    Cacat yang sama membuat tiga stop-out tercatat -1,65 / -1,58 / -1,82 R -
+    kerugian yang dilebih-lebihkan oleh harga yang tak pernah ditransaksikan.
+    """
+
+    @staticmethod
+    def _jalur(*, kena_high: str, kena_low: str, sisa: str) -> list[Candle]:
+        """Bar 0 menyentuh level, sisanya melayang jauh di harga lain."""
+        return [_bar(0, high=kena_high, low=kena_low, close=sisa)] + [
+            _bar(i, high=sisa, low=sisa, close=sisa)
+            for i in range(1, HORIZON_BAR)
+        ]
+
+    def test_stop_kena_persis_minus_satu_r(self) -> None:
+        """Stop-out menurut definisinya -1,00 R.
+
+        Angka lain berarti kerugiannya diukur dari harga yang bukan tempat
+        order stop terisi. Di sini harga terus jatuh ke 970 sesudah stop kena:
+        memakai close bar akan melaporkan -3,00 R atas risiko yang sudah
+        berhenti berjalan di 990.
+        """
+        jalur = self._jalur(kena_high="1000", kena_low="985", sisa="970")
+        hasil = nilai_hasil(1, GEO, Decision.BUY, jalur)
+
+        assert hasil.level_tersentuh is LevelTersentuh.STOP
+        assert hasil.harga_tutup == GEO.stop
+        r = r_multiple(GEO.entry, GEO.stop, hasil.harga_tutup, Decision.BUY)
+        assert r == Decimal("-1")
+
+    def test_target_kena_dipakai_walau_harga_balik(self) -> None:
+        """Target tersentuh di tengah bar lalu harga berbalik.
+
+        Persis bentuk sinyal 134 di produksi: target 4574,87 tersentuh, bar-nya
+        tutup di 4575,09 - DI ATAS target - dan pesannya jadi terbaca seperti
+        target yang tak pernah tercapai.
+        """
+        jalur = self._jalur(kena_high="1035", kena_low="1000", sisa="1005")
+        hasil = nilai_hasil(1, GEO, Decision.BUY, jalur)
+
+        assert hasil.level_tersentuh is LevelTersentuh.TARGET
+        assert hasil.harga_tutup == GEO.target
+        assert hasil.gerak_pct == Decimal("3")
+
+    def test_tanpa_level_tetap_pakai_penutup(self) -> None:
+        """Tidak ada level tersentuh berarti tidak ada order yang terisi.
+
+        Satu-satunya harga yang berarti di sini adalah tempat pasar berada saat
+        horizon habis.
+        """
+        hasil = nilai_hasil(1, GEO, Decision.BUY, _datar(harga="1010"))
+
+        assert hasil.level_tersentuh is LevelTersentuh.TIDAK_SATU_PUN
+        assert hasil.harga_tutup == Decimal("1010")
+
+    def test_arah_tetap_diukur_dari_penutup(self) -> None:
+        """Sumbu ramalan tidak boleh ikut pindah ke harga keluar.
+
+        Kena stop di 990 lalu berbalik dan tutup di 1020: ramalan BENAR dengan
+        stop terlalu ketat. Mengukur arah dari harga keluar akan melaporkannya
+        salah, dan menghapus justru pembedaan yang modul ini ada untuk menjaga.
+        """
+        jalur = self._jalur(kena_high="1000", kena_low="985", sisa="1020")
+        hasil = nilai_hasil(1, GEO, Decision.BUY, jalur)
+
+        assert hasil.harga_tutup == GEO.stop
+        assert hasil.arah_benar is True
