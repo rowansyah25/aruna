@@ -164,3 +164,60 @@ class TestTidakTerukur:
     def test_harga_di_luar_seluruh_level_tidak_ada_geometri(self, bukti) -> None:
         """Harga di atas semua resistance: tak ada target untuk BUY."""
         assert rakit_geometri(bukti, Decision.BUY, Decimal("2000")) is None
+
+
+#: Gerakan MELAWAN terjauh yang khas (MAE p50), dalam ATR, menurut panjang
+#: horizon.  Diukur 2026-08-28 atas 1.646 jendela dari 4.999 bar M5 XAU/USD
+#: sungguhan, kedua arah dihitung.  Angka-angka ini adalah DERAU PASAR: berlaku
+#: tanpa memandang siapa yang memilih arahnya.
+PENGEMBARAAN_ATR = {
+    6: Decimal("0.81"),
+    12: Decimal("1.04"),
+    24: Decimal("1.52"),
+    36: Decimal("1.99"),
+    48: Decimal("2.43"),
+}
+
+
+class TestStopSepakatDenganHorizon:
+    """Stop harus melebihi pengembaraan khas sepanjang horizonnya.
+
+    Dua konstanta ini hidup di modul berbeda dan selama berbulan-bulan tidak
+    ada yang membandingkannya: ``STOP_ATR = 1.5`` adalah stop untuk horizon dua
+    jam, dipasang pada sistem yang berjalan empat jam.  Derau murni menembusnya
+    pada 59% jendela - sebelum arah ikut bicara sama sekali - dan di produksi
+    enam dari tujuh sinyal mati begitu, dengan satu-satunya pemenang justru
+    satu-satunya yang MAE-nya (1,48 ATR) di bawah stop.
+
+    Test ini yang menahan keduanya tetap sepakat: mengubah salah satunya tanpa
+    meninjau yang lain akan membuatnya merah.
+    """
+
+    def test_stop_melebihi_pengembaraan_di_horizon_yang_dipakai(self) -> None:
+        from aruna.xau.resolve import HORIZON_BAR
+
+        assert HORIZON_BAR in PENGEMBARAAN_ATR, (
+            f"HORIZON_BAR = {HORIZON_BAR} belum pernah diukur pengembaraannya; "
+            f"yang terukur: {sorted(PENGEMBARAAN_ATR)}. Ukur dulu sebelum "
+            "memakainya - stop tanpa angka ini cuma tebakan."
+        )
+        wajar = PENGEMBARAAN_ATR[HORIZON_BAR]
+        assert STOP_ATR > wajar, (
+            f"stop {STOP_ATR} ATR ada DI DALAM pita derau {wajar} ATR untuk "
+            f"horizon {HORIZON_BAR} bar; ia akan kena lebih dulu oleh gerakan "
+            "biasa, berapa pun benarnya arah yang dipilih"
+        )
+
+    def test_stop_tidak_dilebarkan_tanpa_batas(self) -> None:
+        """Batas atasnya nyata dan bukan selera.
+
+        Stop yang jauh lebih lebar dari deraunya memaksa target ikut menjauh
+        demi gerbang RR, dan di akun $100 ia mengecilkan ukuran posisi sampai
+        tidak ada yang muat.
+        """
+        from aruna.xau.resolve import HORIZON_BAR
+
+        assert STOP_ATR <= PENGEMBARAAN_ATR[HORIZON_BAR] * 2, (
+            f"stop {STOP_ATR} ATR lebih dari dua kali derau khasnya; "
+            "ukuran posisinya akan menyusut tanpa alasan terukur"
+        )

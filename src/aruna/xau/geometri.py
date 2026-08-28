@@ -35,7 +35,30 @@ from aruna.core.enums import Decision
 from aruna.xau.bukti import BuktiXau
 
 #: Jarak stop dalam satuan ATR.
-STOP_ATR = Decimal("1.5")
+#:
+#: **Harus melebihi pengembaraan khas SEPANJANG HORIZONNYA, dan dulu tidak.**
+#: Angka ini pernah 1,5 tanpa satu pun pengukuran yang menghubungkannya dengan
+#: :data:`~aruna.xau.resolve.HORIZON_BAR`.  Diukur atas 1.646 jendela 48-bar
+#: dari 4.999 bar M5 sungguhan, gerakan MELAWAN terjauh di dalam horizon:
+#:
+#:     24 bar (2 jam) -> p50 1,52 ATR      48 bar (4 jam) -> p50 2,43 ATR
+#:     36 bar (3 jam) -> p50 1,99 ATR
+#:
+#: 1,5 ATR karena itu adalah stop untuk horizon DUA JAM, dipasang pada sistem
+#: yang berjalan empat jam - dan derau murni menembusnya pada 59% jendela,
+#: sebelum arah ikut bicara sama sekali.  Terlihat di produksi: dari tujuh
+#: sinyal, enam ber-MAE di atas 1,5 ATR, dan satu-satunya yang MAE-nya di bawah
+#: (1,48) adalah satu-satunya yang menang.
+#:
+#: 2,5 ATR duduk di atas pengembaraan median 2,43 ATR untuk horizon yang
+#: benar-benar dipakai.
+#:
+#: **Ini BUKAN klaim keunggulan.**  Grid stop x target atas 1.646 jendela
+#: memberi harapan ~0,00 ATR di SETIAP sel - geometri sendirian memang tidak
+#: bisa menghasilkan untung, dan menggesernya hanya menukar sering-menang
+#: dengan besar-menang.  Yang diperbaiki di sini adalah ketidaksepakatan antara
+#: stop dan horizon, bukan mengejar profit dari angka.
+STOP_ATR = Decimal("2.5")
 
 #: Lantai jarak target, dalam ATR.  Ditegakkan di gerbang, bukan di sini.
 MIN_TARGET_ATR = Decimal("2.0")
