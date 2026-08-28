@@ -29,6 +29,7 @@ from aruna.core.enums import Decision
 from aruna.xau.bukti import BuktiXau
 from aruna.xau.cooldown import Cooldown
 from aruna.xau.geometri import MIN_TARGET_ATR, Geometri, rakit_geometri
+from aruna.xau.kalender import KonteksBerita, gejolak_rilis
 from aruna.xau.suara import RekapSuara, ke_keputusan_xau, rekap
 
 #: Kontradiksi maksimum yang masih diloloskan.
@@ -60,6 +61,9 @@ class SinyalXau:
     confidence: float | None = None
     #: ``False`` berarti gerbang spread TIDAK AKTIF, bukan lulus.
     spread_diukur: bool = False
+    #: ``False`` berarti gerbang berita TIDAK AKTIF, bukan lulus.  Kalender
+    #: yang tidak terbaca tidak boleh terlaporkan sebagai "aman dari rilis".
+    berita_terukur: bool = False
 
     @property
     def ada_sinyal(self) -> bool:
@@ -91,6 +95,7 @@ def putuskan(
     saat: datetime,
     spread_bps: Decimal | None = None,
     cooldown: Cooldown | None = None,
+    berita: KonteksBerita | None = None,
 ) -> SinyalXau:
     """Terapkan gerbang XAU.  Berhenti di penolakan pertama."""
     setup = (
@@ -104,6 +109,7 @@ def putuskan(
         "geometri": geometri,
         "confidence": confidence,
         "spread_diukur": spread_bps is not None,
+        "berita_terukur": berita is not None and berita.terukur,
     }
 
     def tolak(alasan: str) -> SinyalXau:
@@ -134,6 +140,18 @@ def putuskan(
     if geometri.rr < MIN_RR:
         return tolak(f"RR {geometri.rr:.2f} di bawah {MIN_RR}")
 
+    # **Ditaruh SESUDAH seluruh gerbang mutu, dan urutan itu yang berharga.**
+    # Di sini penolakan berbunyi "setup ini sah dan akan menyala, tapi rilisnya
+    # menghalangi" - bukan sekadar "ada berita". Yang pertama bisa diukur
+    # kelak: berapa banyak sinyal sah yang dibuang gerbang ini, dan apakah
+    # mereka akan menang. Menaruhnya di kepala akan menutupi seluruh sebab lain
+    # tiap kali rilis mendekat, dan pertanyaan itu tidak akan pernah terjawab.
+    #
+    # Sebelum cooldown, supaya setup yang dibuang rilis tidak ikut tercatat dan
+    # memblokir gagasan yang sama sesudah gejolaknya reda.
+    if (alasan_berita := gejolak_rilis(berita)) is not None:
+        return tolak(alasan_berita)
+
     # Dibandingkan berdasarkan JARAK target, bukan kecocokan penanda: level
     # struktur bergeser sepersekian poin tiap bar, dan penanda yang berbeda
     # karena itu membuat satu gagasan lolos berkali-kali. Lihat
@@ -158,6 +176,7 @@ def putuskan_dari_dewan(
     spread_bps: Decimal | None = None,
     cooldown: Cooldown | None = None,
     bobot: dict[str, float] | None = None,
+    berita: KonteksBerita | None = None,
 ) -> SinyalXau:
     """Jalur produksi: hasil dewan → sinyal XAU.
 
@@ -177,6 +196,7 @@ def putuskan_dari_dewan(
         saat=deliberation.decided_at,
         spread_bps=spread_bps,
         cooldown=cooldown,
+        berita=berita,
     )
 
 

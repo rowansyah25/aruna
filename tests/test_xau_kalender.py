@@ -5,8 +5,11 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from aruna.xau.kalender import (
+    JEDA_SEBELUM_HIGH,
+    JEDA_SESUDAH_HIGH,
     Dampak,
     PeristiwaEkonomi,
+    gejolak_rilis,
     ke_utc,
     ringkas,
 )
@@ -217,3 +220,74 @@ class TestKeUtc:
     def test_tanggal_saja_bisa_diurai(self) -> None:
         """FRED memberi tanggal tanpa jam."""
         assert ke_utc("2026-08-26") == datetime(2026, 8, 26, tzinfo=UTC)
+
+
+def _ringkas(*peristiwa: PeristiwaEkonomi):
+    return ringkas(list(peristiwa), sekarang=SEKARANG)
+
+
+class TestGerbangRilis:
+    """Hanya HIGH yang menutup, dan hanya di dalam jendelanya.
+
+    Terukur 2026-08-28, rentang bar yang memuat rilis dibagi ATR saat itu,
+    terhadap 4.974 bar biasa sebagai garis dasar:
+
+        garis dasar 0,95 ATR    LOW 1,02 ATR    MEDIUM 0,91 ATR    HIGH 4,21 ATR
+
+    LOW tidak bisa dibedakan dari bar biasa, jadi menutupnya membuang peluang
+    tanpa membeli keamanan apa pun.
+    """
+
+    def test_low_tepat_di_depan_hidung_tetap_lolos(self) -> None:
+        """Permintaan operator, dan datanya mendukung: kalau news LOW, jalan."""
+        assert gejolak_rilis(_ringkas(_p(1, dampak=Dampak.LOW))) is None
+
+    def test_medium_lolos_dan_angkanya_tetap_tercatat(self) -> None:
+        assert gejolak_rilis(_ringkas(_p(1, dampak=Dampak.MEDIUM))) is None
+
+    def test_high_menjelang_ditutup(self) -> None:
+        alasan = gejolak_rilis(_ringkas(_p(10, judul="Fed Chair Speaks")))
+        assert alasan is not None
+        assert "Fed Chair Speaks" in alasan
+
+    def test_high_baru_saja_lewat_ditutup(self) -> None:
+        alasan = gejolak_rilis(_ringkas(_p(-int(JEDA_SESUDAH_HIGH) + 5)))
+        assert alasan is not None
+        assert "sesudah" in alasan
+
+    def test_high_sudah_jauh_lewat_dibuka_lagi(self) -> None:
+        """Gejolaknya pulih di 30 menit - terukur, bukan ditebak."""
+        assert gejolak_rilis(_ringkas(_p(-int(JEDA_SESUDAH_HIGH) - 5))) is None
+
+    def test_high_masih_jauh_di_depan_dibuka(self) -> None:
+        assert gejolak_rilis(_ringkas(_p(int(JEDA_SEBELUM_HIGH) + 5))) is None
+
+    def test_high_di_balik_low_tetap_menutup(self) -> None:
+        """Kasus produksi 2026-08-28 pukul 13:40.
+
+        `berikutnya` menunjuk Chicago PMI (LOW, 5 menit lagi) sementara pidato
+        Ketua Fed (HIGH) menunggu 20 menit kemudian. Gerbang yang membaca
+        `berikutnya.dampak` akan meloloskannya - dan sinyal apa pun yang lahir
+        di situ akan menahan bar rilis yang hari itu bergerak 11 ATR.
+        """
+        berita = _ringkas(
+            _p(5, dampak=Dampak.LOW, judul="Chicago PMI"),
+            _p(20, dampak=Dampak.HIGH, judul="Fed Chairman Speaks"),
+        )
+        assert berita.berikutnya.dampak is Dampak.LOW, "prasyarat kasusnya"
+        alasan = gejolak_rilis(berita)
+        assert alasan is not None
+        assert "Fed Chairman Speaks" in alasan
+
+    def test_kalender_mati_tidak_menutup(self) -> None:
+        """Uptime API gratis tidak boleh jadi sakelar mati.
+
+        ForexFactory membalas 429 pada 2026-08-28. Menutup saat sumbernya diam
+        akan membuat ARUNA bisu setiap kali pihak ketiga tersendat.
+        """
+        assert gejolak_rilis(None) is None
+        assert gejolak_rilis(ringkas([], sekarang=SEKARANG)) is None
+
+    def test_peristiwa_negara_lain_tidak_menutup(self) -> None:
+        """Rilis Selandia Baru tidak menggerakkan emas lewat dolar."""
+        assert gejolak_rilis(_ringkas(_p(10, negara="NZD"))) is None

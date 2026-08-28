@@ -27,6 +27,7 @@ from aruna.data.models import Candle, Provenance, Snapshot
 from aruna.xau.bukti import rakit_bukti
 from aruna.xau.cooldown import Cooldown
 from aruna.xau.geometri import Geometri
+from aruna.xau.kalender import Dampak, PeristiwaEkonomi, ringkas
 from aruna.xau.keputusan import (
     MAX_KONTRADIKSI,
     MIN_RR,
@@ -358,3 +359,89 @@ class TestJalurProduksi:
     def test_spread_dilaporkan_tidak_diukur(self, dewan) -> None:
         deliberation, bukti, harga = dewan
         assert putuskan_dari_dewan(deliberation, bukti, harga).spread_diukur is False
+
+    def test_berita_benar_benar_diteruskan_ke_gerbang(self, dewan) -> None:
+        """Perangkaiannya, bukan logikanya.
+
+        Gerbang beritanya sendiri diuji di ``test_xau_kalender``. Yang diuji di
+        sini adalah bahwa ``putuskan_dari_dewan`` MENERUSKANNYA - keluarga
+        cacat yang paling sering berulang di repo ini adalah kode yang ditulis,
+        diuji, diekspor, lalu tidak pernah dirangkai.
+
+        ``berita_terukur`` dipakai sebagai buktinya karena ia terisi di SETIAP
+        jalur pulang, termasuk penolakan arah yang menyala lebih dulu atas data
+        sintetis - jadi ia menjawab "parameternya sampai?" tanpa butuh dewan
+        yang berarah.
+        """
+        deliberation, bukti, harga = dewan
+        berita = ringkas(
+            [
+                PeristiwaEkonomi(
+                    judul="Fed Chairman Speaks",
+                    negara="USD",
+                    saat=SAAT + timedelta(minutes=10),
+                    dampak=Dampak.HIGH,
+                    sumber="uji",
+                )
+            ],
+            sekarang=SAAT,
+        )
+        assert berita.terukur, "prasyarat: kalender uji harus terbaca"
+
+        polos = putuskan_dari_dewan(deliberation, bukti, harga)
+        assert polos.berita_terukur is False, "tanpa kalender: TIDAK AKTIF"
+
+        dengan = putuskan_dari_dewan(deliberation, bukti, harga, berita=berita)
+        assert dengan.berita_terukur is True, (
+            "kalender tidak sampai ke `putuskan`; gerbangnya ada tapi tidak "
+            "pernah dirangkai"
+        )
+
+
+class TestGerbangBeritaDiTerapkan:
+    """Gerbangnya benar-benar menolak setup yang kalau tidak, akan menyala."""
+
+    @staticmethod
+    def _berita(menit: int, dampak: Dampak):
+        return ringkas(
+            [
+                PeristiwaEkonomi(
+                    judul="Prelim Benchmark Payrolls Revision",
+                    negara="USD",
+                    saat=SAAT + timedelta(minutes=menit),
+                    dampak=dampak,
+                    sumber="uji",
+                )
+            ],
+            sekarang=SAAT,
+        )
+
+    def test_setup_sah_ditolak_menjelang_high(self) -> None:
+        polos = _putuskan()
+        assert polos.keputusan is Decision.BUY, "prasyarat: setup ini sah"
+
+        sinyal = _putuskan(berita=self._berita(10, Dampak.HIGH))
+        assert sinyal.keputusan is Decision.NO_SIGNAL
+        assert "rilis HIGH" in sinyal.alasan
+        assert sinyal.berita_terukur is True
+
+    def test_setup_sah_tetap_menyala_menjelang_low(self) -> None:
+        """Permintaan operator: kalau news-nya LOW, teknikal yang bicara."""
+        sinyal = _putuskan(berita=self._berita(1, Dampak.LOW))
+        assert sinyal.keputusan is Decision.BUY
+        assert sinyal.alasan is None
+        assert sinyal.berita_terukur is True
+
+    def test_ditolak_rilis_tidak_mengunci_cooldown(self) -> None:
+        """Setup yang dibuang rilis tidak boleh memblokir dirinya sendiri
+        sesudah gejolaknya reda - itu akan menghukumnya dua kali."""
+        cooldown = Cooldown()
+        ditolak = _putuskan(
+            berita=self._berita(10, Dampak.HIGH), cooldown=cooldown
+        )
+        assert ditolak.keputusan is Decision.NO_SIGNAL
+
+        lagi = _putuskan(cooldown=cooldown)
+        assert lagi.keputusan is Decision.BUY, (
+            "gagasan ini tercatat di cooldown padahal tidak pernah dikabarkan"
+        )

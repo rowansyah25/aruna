@@ -599,6 +599,13 @@ async def satu_tick(
     bobot = bobot_yang_berlaku(
         await repo.koreksi_terakhir() if repo is not None else None
     )
+    # Kalender diringkas pada `as_of` - bar yang settle - bukan pada jam dinding.
+    # Meringkasnya pada `sekarang` akan membuat gerbangnya menilai jendela yang
+    # berbeda dari jendela yang melahirkan buktinya, dan selisih itu persis
+    # sebesar keterlambatan tick.
+    konteks_berita = (
+        ringkas_berita(berita, sekarang=as_of) if berita is not None else None
+    )
     sinyal = putuskan_dari_dewan(
         deliberation,
         bukti,
@@ -606,6 +613,7 @@ async def satu_tick(
         symbol=symbol,
         cooldown=cooldown,
         bobot=bobot,
+        berita=konteks_berita,
     )
     return await simpan(sinyal, bukti.as_of, bukti.bacaan(), bukti.m5.regime)
 

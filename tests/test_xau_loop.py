@@ -175,6 +175,46 @@ class TestSatuTick:
         )
         assert len(repo.disimpan) == 1
 
+    async def test_kalender_sampai_ke_gerbang_keputusan(self) -> None:
+        """Perangkaian terakhir: loop -> putuskan_dari_dewan -> gerbang.
+
+        Gerbangnya diuji di ``test_xau_kalender``, penerusannya dari
+        ``putuskan_dari_dewan`` di ``test_xau_keputusan``. Yang tersisa adalah
+        sambungan paling luar, dan justru itu yang paling sering hilang di repo
+        ini - kalendernya sudah ditarik, diringkas, disimpan, dan dicetak
+        selama berbulan-bulan tanpa sekali pun mengubah keputusan.
+
+        ``berita_terukur`` dipakai sebagai buktinya karena ia terisi di setiap
+        jalur pulang, jadi ia menjawab "sampai atau tidak" tanpa bergantung
+        pada dewan yang kebetulan berarah atas data sintetis.
+        """
+        from aruna.xau.kalender import Dampak, PeristiwaEkonomi
+
+        peristiwa = [
+            PeristiwaEkonomi(
+                judul="Fed Chairman Speaks",
+                negara="USD",
+                saat=SEKARANG + timedelta(minutes=10),
+                dampak=Dampak.HIGH,
+                sumber="uji",
+            )
+        ]
+        polos = await satu_tick(
+            ProviderPalsu(_candles()), _gate(), sekarang=SEKARANG
+        )
+        assert polos.sinyal.berita_terukur is False, "tanpa kalender: TIDAK AKTIF"
+
+        dengan = await satu_tick(
+            ProviderPalsu(_candles()),
+            _gate(),
+            sekarang=SEKARANG,
+            berita=peristiwa,
+        )
+        assert dengan.sinyal.berita_terukur is True, (
+            "kalender tidak sampai ke gerbang keputusan; ia hanya disimpan dan "
+            "dicetak"
+        )
+
     async def test_kosakata_keluaran_tidak_pernah_wait(self) -> None:
         hasil = await satu_tick(
             ProviderPalsu(_candles()), _gate(), sekarang=SEKARANG
