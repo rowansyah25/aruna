@@ -220,12 +220,16 @@ class TwelveDataForexProvider(MarketDataProvider):
         provenance = Provenance(source=SOURCE, provider_timestamp=saat)
         # Venue mengirim terbaru dulu; kontrak ABC minta terlama dulu.
         return [
-            self._ke_candle(row, symbol, provenance)
+            self._ke_candle(row, symbol, provenance, saat)
             for row in reversed(payload.get("values") or [])
         ]
 
     def _ke_candle(
-        self, row: dict[str, str], symbol: str, provenance: Provenance
+        self,
+        row: dict[str, str],
+        symbol: str,
+        provenance: Provenance,
+        sekarang: datetime,
     ) -> Candle:
         try:
             open_time = datetime.strptime(
@@ -237,12 +241,13 @@ class TwelveDataForexProvider(MarketDataProvider):
                 f"bar {SOURCE} tidak terbaca: {row!r}"
             ) from exc
 
+        close_time = open_time + Horizon.M5.duration
         return Candle(
             market=Market.FOREX,
             symbol=symbol,
             interval=Horizon.M5,
             open_time=open_time,
-            close_time=open_time + Horizon.M5.duration,
+            close_time=close_time,
             open=harga["open"],
             high=harga["high"],
             low=harga["low"],
@@ -253,7 +258,21 @@ class TwelveDataForexProvider(MarketDataProvider):
             quote_volume=None,
             trade_count=None,
             provenance=provenance,
-            is_closed=True,
+            # **Dihitung, tidak diasumsikan.**  Baris ini pernah berbunyi
+            # `is_closed=True` tanpa syarat, dan itu cacat data yang nyata:
+            # Twelve Data mengembalikan bar yang SEDANG BERJALAN sebagai nilai
+            # terbaru, jadi tiap keputusan berdiri di atas bar yang high, low,
+            # dan close-nya masih akan berubah.
+            #
+            # Terukur di produksi 2026-08-28: bar terbaru punya close_time 0,7
+            # menit DI MASA DEPAN dan tetap ditandai tutup.
+            #
+            # Seluruh mesin di hilir sudah siap menanganinya - `CandleSeries`
+            # menyaring bar terbuka dan melaporkannya lewat
+            # `excluded_open_bars`, `resample_candles` membuangnya lewat
+            # `require_closed` - jadi yang rusak bukan penanganannya melainkan
+            # kebenaran yang disuapkan ke sana.
+            is_closed=close_time <= sekarang,
         )
 
     async def fetch_quote(self, symbol: str) -> Quote:

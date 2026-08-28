@@ -196,6 +196,35 @@ class TestFetchCandles:
         assert candle.close_time - candle.open_time == timedelta(minutes=5)
         assert candle.open_time.tzinfo is not None, "timestamp harus sadar zona waktu"
 
+    async def test_bar_yang_belum_tutup_ditandai_terbuka(self) -> None:
+        """Cacat data nyata, terukur di produksi 2026-08-28.
+
+        Twelve Data mengembalikan bar yang SEDANG BERJALAN sebagai nilai
+        terbaru. Menandainya tutup membuat tiap keputusan berdiri di atas bar
+        yang high, low, dan close-nya masih akan berubah - dan seluruh mesin
+        di hilir mempercayai penanda itu.
+        """
+        from aruna.core.clock import now_utc
+
+        depan = now_utc() + timedelta(minutes=30)
+        provider, _ = buat_provider(
+            balas(
+                {
+                    "status": "ok",
+                    "values": [_bar(depan.strftime("%Y-%m-%d %H:%M:%S"), "1")],
+                }
+            )
+        )
+        candle = (await provider.fetch_candles("XAU/USD", Horizon.M5))[0]
+        assert candle.is_closed is False
+
+    async def test_bar_lama_ditandai_tutup(self) -> None:
+        provider, _ = buat_provider(
+            balas({"status": "ok", "values": [_bar("2026-08-27 10:00:00", "1")]})
+        )
+        candle = (await provider.fetch_candles("XAU/USD", Horizon.M5))[0]
+        assert candle.is_closed is True
+
     async def test_volume_nol_dan_turunannya_none(self) -> None:
         """Valas spot tak punya volume: 0 yang dinyatakan, bukan angka karangan."""
         provider, _ = buat_provider(

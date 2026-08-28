@@ -408,6 +408,48 @@ class TestPenilaianTersambung:
         assert hasil.menilai is True
 
 
+class TestBarTerbukaDibuang:
+    """Cacat data nyata 2026-08-28: venue mengembalikan bar yang SEDANG
+    BERJALAN sebagai nilai terbaru, dan adapter menandainya tutup. Harga
+    keputusan lalu datang dari bar yang belum selesai sementara buktinya dari
+    bar yang sudah - dua angka dari dua dunia."""
+
+    async def test_harga_keputusan_dari_bar_yang_sudah_tutup(self) -> None:
+        from dataclasses import replace
+
+        candles = _candles()
+        candles[-1] = replace(candles[-1], is_closed=False)
+        repo = RepoPalsu()
+        await satu_tick(
+            ProviderPalsu(candles), _gate(), sekarang=SEKARANG, repo=repo
+        )
+        sinyal = repo.disimpan[0]["sinyal"]
+        if sinyal.geometri is not None:
+            assert sinyal.geometri.entry == candles[-2].close, (
+                "harga keputusan diambil dari bar yang belum tutup"
+            )
+
+    async def test_as_of_tidak_pernah_bar_terbuka(self) -> None:
+        from dataclasses import replace
+
+        candles = _candles()
+        candles[-1] = replace(candles[-1], is_closed=False)
+        hasil = await satu_tick(
+            ProviderPalsu(candles), _gate(), sekarang=SEKARANG
+        )
+        assert hasil.as_of == candles[-2].close_time
+
+    async def test_semua_bar_terbuka_dilewati_bukan_dinilai(self) -> None:
+        from dataclasses import replace
+
+        candles = [replace(c, is_closed=False) for c in _candles(10)]
+        hasil = await satu_tick(
+            ProviderPalsu(candles), _gate(), sekarang=SEKARANG
+        )
+        assert hasil.menilai is False
+        assert "masih terbuka" in hasil.alasan_lewat
+
+
 class TestBuktiIkutTersimpan:
     """Diukur di produksi 2026-08-27: `xau_evidence` NOL baris sesudah dua
     keputusan. Tabelnya ada dan loop tidak pernah mengoper isinya - persis

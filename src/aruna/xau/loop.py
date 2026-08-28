@@ -393,6 +393,24 @@ async def satu_tick(
     if not m5:
         return HasilTick(alasan_lewat="venue menjawab tanpa satu bar pun")
 
+    # **Bar yang belum tutup dibuang di sini, satu kali, untuk SELURUH siklus.**
+    #
+    # Venue mengembalikan bar yang sedang berjalan sebagai nilai terbaru, dan
+    # high/low/close-nya masih akan berubah.  Membiarkannya masuk membuat harga
+    # keputusan datang dari bar yang belum selesai sementara buktinya datang
+    # dari bar yang sudah - dua angka dari dua dunia, dan selisihnya muncul
+    # belakangan sebagai hasil yang tak bisa dijelaskan.
+    #
+    # `CandleSeries` dan `resample_candles` sudah menyaringnya masing-masing,
+    # tapi penyaringan yang tersebar berarti tiap pemakai baru harus
+    # mengingatnya. Disaring sekali di sini, tidak ada yang perlu ingat.
+    terbuka = sum(1 for c in m5 if not c.is_closed)
+    m5 = [c for c in m5 if c.is_closed]
+    if not m5:
+        return HasilTick(
+            alasan_lewat=f"seluruh {terbuka} bar masih terbuka; belum ada yang settle"
+        )
+
     tumpukan = rakit_tumpukan(m5)
 
     # **Urusan lama diselesaikan SEBELUM gerbang keputusan apa pun.**
