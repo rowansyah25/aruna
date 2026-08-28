@@ -19,7 +19,12 @@ from aruna.core.enums import Decision, Horizon, Market
 from aruna.core.errors import DataSourceUnavailableError
 from aruna.data.models import Candle, Provenance
 from aruna.data.quality import QualityGate
-from aruna.xau.loop import BAR_DIBUTUHKAN, satu_tick
+from aruna.xau.loop import (
+    BAR_DIBUTUHKAN,
+    JEDA_TERBIT,
+    detik_ke_tick_berikutnya,
+    satu_tick,
+)
 
 AWAL = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)
 PROV = Provenance(source="twelvedata")
@@ -577,3 +582,58 @@ class TestSupervisor:
         assert "--equity" not in anak["xau-loop"]
         assert "--risk" not in anak["xau-loop"]
         assert "--equity" in anak["futures-loop"], "argumen futures harus utuh"
+
+
+class TestJadwalTerkunciKeBar:
+    """Bangun tepat sesudah bar tutup, dan tidak pernah melar.
+
+    Operator melaporkan sinyal selalu sampai sesudah harganya lewat. Terukur
+    atas 246 keputusan produksi: jeda bar-tutup ke keputusan tersebar dari -219
+    sampai +301 detik, dengan proses yang menyala 09:18:56 menilai bar 09:20:00
+    baru pada 09:24:16.
+    """
+
+    def test_bangun_persis_di_jeda_sesudah_batas(self) -> None:
+        saat = datetime(2026, 8, 31, 12, 0, 0, tzinfo=UTC)
+        assert detik_ke_tick_berikutnya(saat, 300, 30) == 30
+
+    def test_sedetik_sesudah_bangun_menunggu_bar_penuh(self) -> None:
+        saat = datetime(2026, 8, 31, 12, 0, 31, tzinfo=UTC)
+        assert detik_ke_tick_berikutnya(saat, 300, 30) == 299
+
+    def test_tepat_di_titik_bangun_tidak_memicu_dua_kali(self) -> None:
+        """Nol detik akan membuat siklus berikutnya langsung jalan lagi di atas
+        bar yang sama - dan tabrakan kunci uniknya pernah mematikan loop."""
+        saat = datetime(2026, 8, 31, 12, 0, 30, tzinfo=UTC)
+        assert detik_ke_tick_berikutnya(saat, 300, 30) == 300
+
+    def test_fase_tidak_melar_walau_kerjanya_lama(self) -> None:
+        """Penjaga yang sebenarnya.
+
+        Tidur tetap ``interval`` detik sesudah kerja selesai menggeser fasenya
+        sebanyak durasi kerja SETIAP siklus - dan itu justru yang membuat
+        sinyal basi. Di sini kerjanya sengaja tidak rata.
+        """
+        durasi_kerja = [9, 41, 12, 7, 63, 15, 8, 30, 11, 22]
+        saat = datetime(2026, 8, 31, 12, 3, 17, tzinfo=UTC)
+        bangun: list[datetime] = []
+
+        for kerja in durasi_kerja:
+            saat = saat + timedelta(seconds=kerja)
+            saat = saat + timedelta(
+                seconds=detik_ke_tick_berikutnya(saat, 300, JEDA_TERBIT)
+            )
+            bangun.append(saat)
+
+        meleset = [
+            b for b in bangun if int(b.timestamp()) % 300 != JEDA_TERBIT % 300
+        ]
+        assert not meleset, (
+            f"{len(meleset)} dari {len(bangun)} titik bangun lepas dari grid: "
+            f"{[f'{b:%H:%M:%S}' for b in meleset]}"
+        )
+
+    def test_interval_nol_ditolak(self) -> None:
+        """Pembagian modulo nol akan meledak jauh dari sebabnya."""
+        with pytest.raises(ValueError, match="positif"):
+            detik_ke_tick_berikutnya(AWAL, 0)

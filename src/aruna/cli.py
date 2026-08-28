@@ -1702,7 +1702,13 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
     from aruna.db.repositories.xau import XauRepository
     from aruna.xau.cooldown import Cooldown
     from aruna.xau.dolar import hitung_bukti_dolar, tarik_proksi
-    from aruna.xau.loop import BAR_DIBUTUHKAN, SIMBOL, satu_tick
+    from aruna.xau.loop import (
+        BAR_DIBUTUHKAN,
+        JEDA_TERBIT,
+        SIMBOL,
+        detik_ke_tick_berikutnya,
+        satu_tick,
+    )
     from aruna.xau.sumber_kalender import (
         FF_BASE,
         FRED_BASE,
@@ -1831,7 +1837,13 @@ async def _xau_loop(settings: Settings, args: argparse.Namespace) -> int:
                 as_of_terakhir = hasil.as_of
             else:
                 dilewati += 1
-            await _asyncio.sleep(args.interval)
+            # DIKUNCI ke grid bar, bukan tidur tetap sesudah kerja selesai.
+            # Yang kedua membuat fasenya ditentukan kapan proses menyala lalu
+            # melar tiap siklus - dan itu yang membuat sinyal sampai ke
+            # operator sesudah harganya lewat. Lihat `detik_ke_tick_berikutnya`.
+            await _asyncio.sleep(
+                detik_ke_tick_berikutnya(now_utc(), args.interval, JEDA_TERBIT)
+            )
     except (KeyboardInterrupt, _asyncio.CancelledError):
         pass
     finally:

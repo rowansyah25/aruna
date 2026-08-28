@@ -98,6 +98,43 @@ BAR_DIBUTUHKAN = 3000
 
 SIMBOL = "XAU/USD"
 
+#: Detik menunggu sesudah bar M5 tutup sebelum menariknya.
+#:
+#: Diukur terhadap Twelve Data 2026-08-28, memantau satu bar tiap sepuluh detik
+#: melewati batasnya: barnya muncul SEKETIKA di +0 detik, tapi ``close``-nya
+#: masih direvisi pada +21 detik (4590,72783 -> 4590,93983) lalu diam sampai
+#: +148 detik.  Menarik di +0 berarti memutuskan di atas harga yang belum
+#: final; 30 detik memberi margin di atas revisi terakhir yang teramati.
+JEDA_TERBIT = 30
+
+
+def detik_ke_tick_berikutnya(
+    sekarang: datetime, interval: int, jeda: int = JEDA_TERBIT
+) -> float:
+    """Detik tidur supaya bangun TEPAT sesudah bar berikutnya tutup.
+
+    **Loop ini dulu tidur ``interval`` detik apa adanya, dan itu penyebab
+    sinyal basi.**  Tidur tetap sesudah kerja selesai membuat fasenya
+    ditentukan oleh kapan proses kebetulan menyala, lalu MELAR tiap siklus
+    karena durasi kerja ikut tertambah.  Terukur di produksi 2026-08-28: proses
+    menyala 09:18:56, bar tutup 09:20:00, keputusannya baru ditulis 09:24:16 -
+    empat menit enam belas detik basi.  Atas 246 keputusan jedanya tersebar
+    dari -219 sampai +301 detik, dan operator menerimanya sesudah harga lewat.
+
+    Dikunci ke grid: bangun pada tiap kelipatan ``interval`` sejak epoch,
+    ditambah ``jeda``.  Fasenya tidak bisa melar karena tidak dihitung dari
+    kapan siklus sebelumnya selesai.
+
+    Siklus yang molor melewati satu titik bangun akan mendarat di titik
+    berikutnya - satu bar terlewat, tapi barisannya tetap lurus.  Itu pilihan
+    yang disengaja: mengejar bar yang tertinggal berarti memutuskan di atas
+    bukti basi, persis keluhan yang fungsi ini ada untuk menghapus.
+    """
+    if interval <= 0:
+        raise ValueError(f"interval harus positif, bukan {interval}")
+    lewat = (sekarang.timestamp() - jeda) % interval
+    return interval - lewat
+
 
 @dataclass(frozen=True, slots=True)
 class HasilTick:
@@ -575,8 +612,10 @@ async def satu_tick(
 
 __all__ = [
     "BAR_DIBUTUHKAN",
+    "JEDA_TERBIT",
     "SIMBOL",
     "HasilTick",
+    "detik_ke_tick_berikutnya",
     "nilai_yang_tertunda",
     "satu_tick",
 ]
