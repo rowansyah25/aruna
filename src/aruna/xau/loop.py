@@ -70,11 +70,31 @@ log = get_logger(__name__)
 
 #: Bar M5 yang ditarik tiap tick.
 #:
-#: 250 bar = 20 jam 50 menit, cukup untuk lima ember H4 penuh plus sisa - jadi
-#: H4 benar-benar terbentuk, dan `as_of` M5 tetap lebih maju daripada H4.
-#: Satu permintaan tetap satu kredit berapa pun isinya, jadi menarik lebih
-#: sedikit tidak menghemat apa pun.
-BAR_DIBUTUHKAN = 250
+#: **Ember yang terbentuk tidak sama dengan ember yang terisi.**  Angka ini
+#: pernah 250 dengan alasan tertulis "cukup untuk lima ember H4 penuh" - dan
+#: kalimat itu benar sekaligus tidak relevan.  Lima bar H4 memang terbentuk,
+#: tapi EMA-50 butuh 50 bar, SMA-50 butuh 50, MACD butuh 35.  Hasilnya diukur
+#: di produksi 2026-08-28 atas 205 keputusan: SELURUH indikator H4 ``NULL``
+#: pada 205 dari 205 baris, dan setengah H1 ikut kosong.  ARUNA memutuskan
+#: emas lewat lubang 5 dan 15 menit saja - tanpa satu pun konteks besar yang
+#: justru dipakai operator manusia untuk membaca arah.
+#:
+#: Terukur terhadap sumber sungguhan, jumlah bacaan H4 yang andal dari 16:
+#:
+#:     250 bar ->  4 bar H4 ->  1/16     2000 bar ->  41 bar H4 -> 11/16
+#:    1000 bar -> 20 bar H4 ->  7/16     3000 bar ->  62 bar H4 -> 13/16
+#:                                       5000 bar -> 103 bar H4 -> 13/16
+#:
+#: 3000 adalah titik cukup: 5000 tidak menambah satu bacaan pun.  Tiga yang
+#: tetap kosong (``vwap``, ``volume_trend``, ``volume_anomaly``) memang tidak
+#: bisa diukur - XAU spot tidak menerbitkan volume - dan itulah sebabnya agen
+#: VOLUME abstain 100%, yang benar dan bukan kerusakan.
+#:
+#: Ongkosnya diukur, bukan ditebak: jaringan 9,0 detik (dari 1,3) dan CPU 0,10
+#: detik (dari 0,01) di dalam siklus 300 detik.  Satu permintaan tetap satu
+#: kredit berapa pun isinya, jadi menarik lebih sedikit tidak menghemat apa
+#: pun - kalimat yang sudah benar sejak dulu dan seharusnya sudah menjawab ini.
+BAR_DIBUTUHKAN = 3000
 
 SIMBOL = "XAU/USD"
 

@@ -14,6 +14,7 @@ from decimal import Decimal
 from aruna.core.enums import Horizon, Market
 from aruna.data.models import Candle, Provenance
 from aruna.xau.bukti import rakit_bukti
+from aruna.xau.loop import BAR_DIBUTUHKAN
 from aruna.xau.timeframes import rakit_tumpukan
 
 AWAL = datetime(2026, 8, 31, 0, 0, tzinfo=UTC)
@@ -102,3 +103,60 @@ class TestRakitBukti:
         atr = bukti.m5.reading("atr")
         assert atr is not None
         assert atr.available, "ATR wajib terukur; geometri bergantung padanya"
+
+
+#: Bacaan yang butuh riwayat PANJANG, dan karena itu yang pertama mati saat
+#: bahannya kurang.  Dipilih justru karena semuanya ``NULL`` pada 205 dari 205
+#: keputusan produksi sebelum :data:`BAR_DIBUTUHKAN` dinaikkan.
+BUTUH_RIWAYAT = ("ema_50", "sma_50", "macd", "ema_21", "realised_volatility")
+
+
+class TestKonteksBesarTerisi:
+    """Timeframe besar harus BERISI, bukan sekadar terbentuk.
+
+    Test-test di atas memeriksa keempat timeframe HADIR - dan seluruhnya tetap
+    hijau selama berbulan-bulan sementara setiap bacaan H4 di produksi bernilai
+    ``NULL``.  Ember yang terbentuk lolos pemeriksaan keberadaan; yang tidak
+    diperiksa siapa pun adalah apakah ada isinya.
+
+    Akibatnya nyata: dewan tidak mengusulkan arah pada 121 dari 199 keputusan,
+    dan agen yang tersisa condong SELL 3:1 karena hanya membaca 5 dan 15 menit.
+    """
+
+    def test_h4_punya_bacaan_yang_butuh_riwayat(self) -> None:
+        bukti = rakit_bukti(rakit_tumpukan(_m5(BAR_DIBUTUHKAN)))
+        assert bukti.h4 is not None
+
+        mati = [
+            nama
+            for nama in BUTUH_RIWAYAT
+            if (r := bukti.h4.reading(nama)) is None or not r.available
+        ]
+        assert not mati, (
+            f"H4 kekurangan bahan untuk {mati}; {BAR_DIBUTUHKAN} bar M5 hanya "
+            f"menghasilkan {bukti.h4.bars} bar H4"
+        )
+
+    def test_h1_punya_bacaan_yang_butuh_riwayat(self) -> None:
+        bukti = rakit_bukti(rakit_tumpukan(_m5(BAR_DIBUTUHKAN)))
+        assert bukti.h1 is not None
+
+        mati = [
+            nama
+            for nama in BUTUH_RIWAYAT
+            if (r := bukti.h1.reading(nama)) is None or not r.available
+        ]
+        assert not mati, f"H1 kekurangan bahan untuk {mati}"
+
+    def test_bar_h4_cukup_untuk_rata_rata_lima_puluh(self) -> None:
+        """Angkanya, bukan gejalanya.
+
+        Ambang ini yang membuat kegagalan bisa dibaca tanpa menebak: sebuah
+        rata-rata 50 periode mustahil dari 49 bar, berapa pun rapinya kode di
+        atasnya.
+        """
+        tumpukan = rakit_tumpukan(_m5(BAR_DIBUTUHKAN))
+        assert len(tumpukan.h4) >= 50, (
+            f"{BAR_DIBUTUHKAN} bar M5 -> {len(tumpukan.h4)} bar H4; "
+            "EMA-50 dan SMA-50 tidak akan pernah terisi"
+        )
